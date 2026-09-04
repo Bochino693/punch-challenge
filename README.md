@@ -2,19 +2,56 @@
 
 Jogo arcade de soco desenvolvido em Godot 4, preparado para máquina física com Arduino e sensor óptico de encoder.
 
+## Como a máquina se comporta
+
+```
+ABERTURA → (START) → ENTRADA → 3, 2, 1 → SENSOR ARMADO → RESULTADO
+```
+
+**Abertura.** É a tela que fica ligada o dia inteiro no salão, e é ela que
+faz alguém atravessar o corredor para jogar: a logo da Lazer & Sport em
+tamanho grande, com brilho, raios girando e uma luz varrendo a marca a
+cada quatro segundos; o nome do jogo em néon; e o convite piscando. Sem
+crédito no modo ficha, o convite troca de texto em vez de sumir — quem
+chegou perto precisa saber o que fazer.
+
+**START entra no jogo.** A marca vem para a frente, estoura num clarão e
+a contagem começa. Em modo ficha, o crédito é debitado aqui; em modo
+livre, START entra direto.
+
+**O resultado tem três finais**, e é isso que faz o cliente jogar de novo:
+
+| Faixa | O que a tela faz |
+| --- | --- |
+| **Forte** (padrão: 700+) | `NOCAUTE!` — confete, fogos, raios dourados girando, tremor e clarão. Animação de vitória. |
+| **Médio** (padrão: 330 a 699) | `BOM GOLPE` — âmbar, faíscas e anéis pulsando. Nem festa, nem derrota. |
+| **Fraco** (padrão: até 329) | `FRACO!` — moldura vermelha pulsando, estilhaços caindo e o carimbo escorregando para baixo. Animação de derrota. |
+
+As duas faixas são ajustáveis na Central Técnica: a mecânica de cada
+máquina responde diferente, e uma faixa errada faz todo mundo ganhar (ou
+todo mundo perder), que é o jeito mais rápido de esvaziar a fila.
+
+**A contagem é o suspense.** O número sobe de zero até a pontuação em
+cerca de dois segundos, com tique a cada passo e o ponteiro colorindo o
+arco conforme cruza as faixas. O veredito só entra quando a contagem
+termina — é o momento pelo qual o cliente pagou.
+
 ## O que já está pronto
 
-- Interface moderna em 1920 × 1080, adaptável para outras resoluções.
+- Interface em 1920 × 1080, adaptável para outras resoluções.
+- Abertura com a marca da casa, efeito de luz, partículas e convite piscando.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
 - Pontuação de potência de 0 a 999 baseada na velocidade medida.
+- Três animações de resultado: vitória, intermediária e derrota.
 - Recorde, número total de partidas e saldo de créditos persistentes.
 - Modo Livre ou 1 Ficha selecionável na Central Técnica.
-- `START`: inicia a partida.
+- `START`: entra no jogo e joga de novo depois do resultado.
 - `SELECT`: adiciona um crédito.
 - `F9`: abre e fecha a Central Técnica.
 - `ESC`: fecha a configuração ou cancela uma rodada sem travar a interface.
 - Seleção de COM1 a COM99, teste visual do sensor e calibração mínima/máxima.
-- Ícone, tela de abertura e identificação próprios — sem símbolo padrão do Godot.
+- Aprendizado dos botões da placa zero delay, sem mexer em código.
+- Ícone, abertura e identificação próprios — sem símbolo padrão do Godot.
 
 ## Hardware recomendado
 
@@ -67,7 +104,11 @@ As ações já aceitam estas entradas:
 | SELECT / crédito | `5` ou `C` | botão 6 |
 | Configuração | `F9` | teclado técnico |
 
-Caso sua Zero Delay apareça com números de botões diferentes, altere os números `6` e `7` no método `_input()` de `scripts/main.gd`. O teste de controle do Godot informa qual número cada botão está enviando.
+Cada placa zero delay numera os botões de um jeito, e o número que
+funciona numa não funciona na outra. Em vez de mexer em código, use a
+Central Técnica (`F9`): aperte **APRENDER START**, depois o botão físico
+da máquina; repita em **APRENDER SELECT**. O número aprendido fica salvo
+e aparece na linha de diagnóstico. Uma vez por máquina, e acabou.
 
 ## Calibração da pontuação
 
@@ -79,9 +120,19 @@ Caso sua Zero Delay apareça com números de botões diferentes, altere os núme
 
 Valores abaixo do mínimo ficam próximos de 0; valores no máximo ou acima chegam a 999.
 
+Depois disso, ajuste as faixas na mesma tela: **ATÉ AQUI É FRACO** e
+**DAQUI É FORTE**. Uma referência que costuma funcionar em máquina nova é
+deixar a criança tirando "médio" e o adulto empenhado tirando "forte" —
+se todo mundo estiver tirando nocaute, suba o limite; se ninguém
+conseguir, desça.
+
 ## Teste sem Arduino
 
 Abra o jogo, pressione `F9` e depois a tecla `T` para simular pulsos. Durante uma rodada, `T` também simula um golpe. Esse recurso existe apenas para montagem e teste da interface.
+
+Com o Arduino ligado, o comando `TEST` pela serial devolve um golpe
+sintético: se ele aparece na tela e o soco real não, o problema é o
+sensor, e não o software.
 
 ## Exportação Windows
 
