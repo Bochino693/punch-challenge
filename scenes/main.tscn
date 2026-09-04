@@ -1,0 +1,32 @@
+[gd_scene format=3 uid="uid://j1iigsl0puq5"]
+
+[ext_resource type="Script" uid="uid://5ua44uvnia2p" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="AudioStream" uid="uid://dgq42hbxov80y" path="res://assets/audio/count.wav" id="2_count"]
+[ext_resource type="AudioStream" uid="uid://xystgd2j187k" path="res://assets/audio/go.wav" id="3_go"]
+[ext_resource type="AudioStream" uid="uid://l7hbgktdi86t" path="res://assets/audio/hit.wav" id="4_hit"]
+[ext_resource type="AudioStream" uid="uid://dmq3bwfy8btik" path="res://assets/audio/credit.wav" id="5_credit"]
+
+[node name="PunchChallenge" type="Control" unique_id=1118720703]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="SoundCount" type="AudioStreamPlayer" parent="." unique_id=692737523]
+stream = ExtResource("2_count")
+volume_db = -2.0
+
+[node name="SoundGo" type="AudioStreamPlayer" parent="." unique_id=474496017]
+stream = ExtResource("3_go")
+volume_db = -1.0
+
+[node name="SoundHit" type="AudioStreamPlayer" parent="." unique_id=538260213]
+stream = ExtResource("4_hit")
+volume_db = 1.5
+
+[node name="SoundCredit" type="AudioStreamPlayer" parent="." unique_id=702434573]
+stream = ExtResource("5_credit")
+volume_db = -3.0
