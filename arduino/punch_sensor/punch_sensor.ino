@@ -3,6 +3,11 @@
   Placas: Arduino Uno ou Nano
   Sensor: módulo encoder óptico LM393 (VCC, GND, D0 e A0)
 
+  COMANDOS ACEITOS PELA SERIAL (115200):
+  - PING  -> responde PONG (a ponte usa para saber que a placa vive)
+  - RESET -> zera a medição em andamento
+  - TEST  -> devolve um HIT sintético, para testar sem socar a máquina
+
   IMPORTANTE:
   - Este firmware mede velocidade. A pontuação é calculada no Godot.
   - Ajuste PULSOS_POR_VOLTA e RAIO_METROS para sua roda/disco.
@@ -61,7 +66,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PINO_SENSOR), contarPulso, FALLING);
 
   delay(300);
-  Serial.println("READY,PUNCH_SENSOR_V1");
+  Serial.println("READY,PUNCH_SENSOR_V2");
+  Serial.println("STATUS,SENSOR PRONTO");
 }
 
 void loop() {
@@ -142,6 +148,12 @@ void processarComandos() {
       } else if (bufferSerial == "RESET") {
         limparMedicao();
         Serial.println("OK,RESET");
+      } else if (bufferSerial == "TEST") {
+        /* Golpe sintético, para conferir a corrente inteira -- Arduino,
+           ponte serial e jogo -- sem precisar de alguém socando o saco.
+           Vale ouro na instalação da máquina: se o TEST aparece na tela
+           e o soco real não, o problema é o sensor, e não o software. */
+        Serial.println("HIT,7.500,240.00,18");
       }
       bufferSerial = "";
     } else if (bufferSerial.length() < 40) {

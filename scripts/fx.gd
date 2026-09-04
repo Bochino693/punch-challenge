@@ -1,0 +1,201 @@
+class_name PunchFX
+extends RefCounted
+
+## Partículas e ondas da tela — confete, faíscas, estilhaços e anéis.
+##
+## POR QUE FICA FORA DE `main.gd`. A tela desenha tudo à mão, num `_draw`
+## só, e o resultado de um soco acende três coisas ao mesmo tempo: o que
+## voa, o que treme e o que escreve. Misturar as três num arquivo faz
+## qualquer ajuste de festa mexer no código que conta ponto — e ponto de
+## arcade é dinheiro. Aqui mora só o que voa.
+##
+## Tudo é desenhado por `draw()` no mesmo `CanvasItem` do jogo: sem nó,
+## sem cena e sem `GPUParticles`. Numa máquina de fliperama o computador
+## costuma ser modesto, e um teto duro de partículas (`LIMITE`) vale mais
+## do que um sistema bonito que engasga bem na hora do soco.
+
+## Teto de partículas vivas. Passando disso, as mais antigas saem.
+const LIMITE := 900
+
+var _particulas: Array = []
+var _ondas: Array = []
+
+
+func limpar() -> void:
+	_particulas.clear()
+	_ondas.clear()
+
+
+func vivo() -> bool:
+	return not _particulas.is_empty() or not _ondas.is_empty()
+
+
+func atualizar(delta: float) -> void:
+	var restantes: Array = []
+	for p in _particulas:
+		p.vida -= delta
+		if p.vida <= 0.0:
+			continue
+		p.velocidade.y += p.gravidade * delta
+		p.velocidade *= 1.0 - p.arrasto * delta
+		p.posicao += p.velocidade * delta
+		p.giro += p.giro_velocidade * delta
+		restantes.append(p)
+	_particulas = restantes
+
+	var ondas_vivas: Array = []
+	for o in _ondas:
+		o.tempo += delta
+		if o.tempo < o.duracao:
+			ondas_vivas.append(o)
+	_ondas = ondas_vivas
+
+
+func desenhar(tela: CanvasItem) -> void:
+	for o in _ondas:
+		var t: float = o.tempo / o.duracao
+		var raio: float = lerpf(o.raio_inicial, o.raio_final, ease(t, 0.35))
+		var cor: Color = o.cor
+		cor.a *= 1.0 - t
+		tela.draw_arc(o.centro, raio, 0.0, TAU, 96, cor, o.espessura * (1.0 - t * 0.7), true)
+
+	for p in _particulas:
+		var cor: Color = p.cor
+		cor.a *= clampf(p.vida / p.vida_total, 0.0, 1.0)
+		match p.tipo:
+			"confete":
+				# Retângulo girando: o confete de verdade mostra ora a
+				# face, ora o canto -- é a largura oscilando que dá isso.
+				var largura: float = p.tamanho * absf(cos(p.giro))
+				var pontos := PackedVector2Array([
+					p.posicao + Vector2(-largura, -p.tamanho * 1.6).rotated(p.giro * 0.35),
+					p.posicao + Vector2(largura, -p.tamanho * 1.6).rotated(p.giro * 0.35),
+					p.posicao + Vector2(largura, p.tamanho * 1.6).rotated(p.giro * 0.35),
+					p.posicao + Vector2(-largura, p.tamanho * 1.6).rotated(p.giro * 0.35),
+				])
+				tela.draw_colored_polygon(pontos, cor)
+			"faisca":
+				var rastro: Vector2 = p.velocidade.normalized() * p.tamanho * 3.5
+				tela.draw_line(p.posicao - rastro, p.posicao, cor, maxf(1.5, p.tamanho * 0.6), true)
+			"estilhaco":
+				var pontos_e := PackedVector2Array([
+					p.posicao + Vector2(0, -p.tamanho).rotated(p.giro),
+					p.posicao + Vector2(p.tamanho, p.tamanho * 0.6).rotated(p.giro),
+					p.posicao + Vector2(-p.tamanho * 0.8, p.tamanho).rotated(p.giro),
+				])
+				tela.draw_colored_polygon(pontos_e, cor)
+			_:
+				tela.draw_circle(p.posicao, p.tamanho, cor)
+
+
+func _nascer(dados: Dictionary) -> void:
+	if _particulas.size() >= LIMITE:
+		_particulas.remove_at(0)
+	dados["vida_total"] = dados.vida
+	_particulas.append(dados)
+
+
+func onda(centro: Vector2, raio_inicial: float, raio_final: float, cor: Color, espessura: float = 8.0, duracao: float = 0.7) -> void:
+	_ondas.append({
+		"centro": centro,
+		"raio_inicial": raio_inicial,
+		"raio_final": raio_final,
+		"cor": cor,
+		"espessura": espessura,
+		"duracao": maxf(0.05, duracao),
+		"tempo": 0.0,
+	})
+
+
+func confete(centro: Vector2, quantidade: int, cores: Array, forca: float = 900.0) -> void:
+	for i in range(quantidade):
+		var angulo := randf_range(-PI, 0.0)
+		var velocidade := Vector2(cos(angulo), sin(angulo)) * randf_range(forca * 0.35, forca)
+		_nascer({
+			"tipo": "confete",
+			"posicao": centro + Vector2(randf_range(-40.0, 40.0), randf_range(-20.0, 20.0)),
+			"velocidade": velocidade,
+			"gravidade": randf_range(760.0, 1150.0),
+			"arrasto": 0.9,
+			"tamanho": randf_range(5.0, 11.0),
+			"giro": randf_range(0.0, TAU),
+			"giro_velocidade": randf_range(-9.0, 9.0),
+			"cor": cores[randi() % cores.size()],
+			"vida": randf_range(1.6, 3.1),
+		})
+
+
+func chuva_de_confete(largura: float, quantidade: int, cores: Array) -> void:
+	for i in range(quantidade):
+		_nascer({
+			"tipo": "confete",
+			"posicao": Vector2(randf_range(0.0, largura), randf_range(-260.0, -20.0)),
+			"velocidade": Vector2(randf_range(-70.0, 70.0), randf_range(160.0, 420.0)),
+			"gravidade": randf_range(180.0, 340.0),
+			"arrasto": 0.5,
+			"tamanho": randf_range(5.0, 10.0),
+			"giro": randf_range(0.0, TAU),
+			"giro_velocidade": randf_range(-7.0, 7.0),
+			"cor": cores[randi() % cores.size()],
+			"vida": randf_range(2.6, 4.4),
+		})
+
+
+func faiscas(centro: Vector2, quantidade: int, cor: Color, forca: float = 1000.0) -> void:
+	for i in range(quantidade):
+		var angulo := randf_range(0.0, TAU)
+		var tom := cor
+		tom.a = randf_range(0.65, 1.0)
+		_nascer({
+			"tipo": "faisca",
+			"posicao": centro,
+			"velocidade": Vector2(cos(angulo), sin(angulo)) * randf_range(forca * 0.25, forca),
+			"gravidade": randf_range(240.0, 620.0),
+			"arrasto": 2.2,
+			"tamanho": randf_range(2.0, 4.5),
+			"giro": 0.0,
+			"giro_velocidade": 0.0,
+			"cor": tom,
+			"vida": randf_range(0.45, 1.05),
+		})
+
+
+func estilhacos(centro: Vector2, quantidade: int, cor: Color) -> void:
+	## O que cai quando o soco foi fraco: pedaço escuro, pesado, sem brilho.
+	for i in range(quantidade):
+		var angulo := randf_range(-PI * 0.85, -PI * 0.15)
+		_nascer({
+			"tipo": "estilhaco",
+			"posicao": centro + Vector2(randf_range(-120.0, 120.0), randf_range(-40.0, 40.0)),
+			"velocidade": Vector2(cos(angulo), sin(angulo)) * randf_range(140.0, 420.0),
+			"gravidade": randf_range(900.0, 1400.0),
+			"arrasto": 0.4,
+			"tamanho": randf_range(6.0, 15.0),
+			"giro": randf_range(0.0, TAU),
+			"giro_velocidade": randf_range(-5.0, 5.0),
+			"cor": cor,
+			"vida": randf_range(1.1, 2.0),
+		})
+
+
+func poeira(centro: Vector2, quantidade: int, cor: Color, alcance: float = 420.0) -> void:
+	for i in range(quantidade):
+		var angulo := randf_range(0.0, TAU)
+		_nascer({
+			"tipo": "poeira",
+			"posicao": centro + Vector2(cos(angulo), sin(angulo)) * randf_range(0.0, 60.0),
+			"velocidade": Vector2(cos(angulo), sin(angulo)) * randf_range(alcance * 0.2, alcance),
+			"gravidade": -randf_range(20.0, 90.0),
+			"arrasto": 1.6,
+			"tamanho": randf_range(2.0, 6.0),
+			"giro": 0.0,
+			"giro_velocidade": 0.0,
+			"cor": cor,
+			"vida": randf_range(0.8, 1.8),
+		})
+
+
+func fogos(centro: Vector2, cores: Array) -> void:
+	var cor: Color = cores[randi() % cores.size()]
+	onda(centro, 6.0, randf_range(120.0, 210.0), Color(cor.r, cor.g, cor.b, 0.55), 5.0, 0.55)
+	faiscas(centro, 46, cor, 780.0)
