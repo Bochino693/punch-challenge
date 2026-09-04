@@ -2,6 +2,28 @@
 
 Jogo arcade de soco desenvolvido em Godot 4, preparado para máquina física com Arduino e sensor óptico de encoder.
 
+## Tela em pé
+
+O jogo é desenhado para **1080 × 1920 (vertical)**. A máquina é um armário
+alto com o saco na frente: quem joga olha para cima, não para os lados.
+Numa tela deitada, metade da largura seria moldura vazia e o número da
+pontuação ficaria pequeno justamente para quem está a três metros de
+distância. Em pé, a leitura desce em coluna — marca, número, veredito —
+que é a ordem em que a pessoa procura.
+
+Para montar:
+
+1. Gire o monitor fisicamente (suporte VESA em retrato).
+2. No Windows: **Configurações → Sistema → Vídeo → Orientação da tela →
+   Retrato**. Confira qual dos dois retratos deixa a imagem na posição
+   certa para o seu suporte.
+3. O jogo abre em tela cheia; nada mais a ajustar.
+
+Para testar no PC do escritório, sem girar o monitor, a janela abre em
+540 × 960 (`window_width_override` no `project.godot`) — a proporção é a
+mesma, só menor. O `aspect="keep"` mantém as margens pretas em monitores
+que não sejam 9:16 exatos, em vez de esticar a marca.
+
 ## Como a máquina se comporta
 
 ```
@@ -38,7 +60,7 @@ termina — é o momento pelo qual o cliente pagou.
 
 ## O que já está pronto
 
-- Interface em 1920 × 1080, adaptável para outras resoluções.
+- Interface vertical em 1080 × 1920, adaptável para outras resoluções.
 - Abertura com a marca da casa, efeito de luz, partículas e convite piscando.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
 - Pontuação de potência de 0 a 999 baseada na velocidade medida.

@@ -26,12 +26,18 @@ config/icon="res://assets/icon.png"
 
 [display]
 
-window/size/viewport_width=1920
-window/size/viewport_height=1080
+; TELA EM PÉ. A máquina é um armário alto com o saco na frente: quem joga
+; olha para cima, não para os lados. Deitada, metade da largura seria
+; moldura vazia e o número da pontuação ficaria pequeno justamente para
+; quem está a três metros. O override é a janela de teste no PC do
+; escritório -- em cima da máquina, `mode=3` abre em tela cheia.
+window/size/viewport_width=1080
+window/size/viewport_height=1920
 window/size/mode=3
-window/size/window_width_override=1280
-window/size/window_height_override=720
+window/size/window_width_override=540
+window/size/window_height_override=960
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 window/handheld/orientation=1
 
 [input]
