@@ -21,6 +21,10 @@ var _bridge_digest := 0
 var _last_frame_ms := 0
 var _bridge_started_ms := 0
 var _next_bridge_poll_ms := 0
+## Vigia do caminho nativo: quando o feed foi ativado e se ele já provou
+## que entrega quadro.
+var _native_started_ms := 0
+var _native_ok := false
 var status := "PROCURANDO CÂMERA"
 ## Publica um padrão sintético em vez da webcam. Serve para separar
 ## "a ponte está quebrada" de "a câmera está quebrada" sem webcam
@@ -40,6 +44,9 @@ func _ready() -> void:
 	call_deferred("refresh")
 
 func _process(_delta: float) -> void:
+	if _feed != null:
+		_vigiar_nativa()
+		return
 	if _bridge_pid <= 0:
 		return
 	var now := Time.get_ticks_msec()
@@ -70,8 +77,31 @@ func _process(_delta: float) -> void:
 		# sabia se era OpenCV, cabo ou câmera ocupada.
 		status = _bridge_status_file()
 
+## O FEED NATIVO PRECISA PROVAR QUE FUNCIONA.
+##
+## `is_active()` só diz que o Godot MANDOU ligar a câmera, não que ela
+## respondeu. No Windows é comum a câmera ser enumerada e nunca entregar
+## quadro: aí o jogo mostrava "CÂMERA CONECTADA" com a tela preta e
+## jamais caía para a ponte, porque a ponte só entrava quando NENHUMA
+## câmera era enumerada. Dois segundos e meio sem imagem e trocamos.
+func _vigiar_nativa() -> void:
+	if _native_ok:
+		return
+	var imagem := _texture.get_image() if _texture != null else null
+	if imagem != null and not imagem.is_empty():
+		_native_ok = true
+		_last_image = imagem
+		_last_frame_ms = Time.get_ticks_msec()
+		status = "CÂMERA CONECTADA (NATIVA)"
+		return
+	if Time.get_ticks_msec() - _native_started_ms > 2500:
+		_stop_feed()
+		status = "CÂMERA NATIVA MUDA — TENTANDO A PONTE"
+		_start_bridge()
+
 func refresh() -> void:
 	_stop_feed()
+	_native_ok = false
 	if not enabled:
 		status = "CÂMERA DESATIVADA"
 		return
@@ -98,7 +128,8 @@ func refresh() -> void:
 	_texture = CameraTexture.new()
 	_texture.camera_feed_id = _feed.get_id()
 	_texture.which_feed = CameraServer.FEED_RGBA_IMAGE
-	status = "CÂMERA CONECTADA"
+	_native_started_ms = Time.get_ticks_msec()
+	status = "ABRINDO CÂMERA…"
 
 func _on_camera_feeds_updated(_id: int = 0) -> void:
 	if enabled and _feed == null and _bridge_pid <= 0:
@@ -123,8 +154,13 @@ func preview_texture() -> Texture2D:
 	return _texture if _texture != null else _bridge_texture
 
 func available() -> bool:
-	var native_ok := _texture != null and _feed != null and _feed.is_active()
-	return enabled and (native_ok or (_bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500))
+	if not enabled:
+		return false
+	# "Disponível" é ter QUADRO, e não ter feed aberto: era por confiar em
+	# `is_active()` que a máquina anunciava câmera e fotografava preto.
+	if _feed != null:
+		return _native_ok
+	return _bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500
 
 func camera_count() -> int:
 	return CameraServer.get_feed_count()
@@ -132,7 +168,7 @@ func camera_count() -> int:
 func capture_photo() -> String:
 	if not available():
 		return ""
-	var image: Image = _texture.get_image() if _texture != null else _last_image.duplicate()
+	var image: Image = _texture.get_image() if _texture != null else (_last_image.duplicate() if _last_image != null else null)
 	if image == null or image.is_empty():
 		status = "CÂMERA SEM IMAGEM"
 		return ""
@@ -167,6 +203,7 @@ func _stop_feed() -> void:
 	_last_image = null
 	_bridge_digest = 0
 	_last_frame_ms = 0
+	_native_ok = false
 
 func _start_bridge() -> void:
 	if _bridge_pid > 0:

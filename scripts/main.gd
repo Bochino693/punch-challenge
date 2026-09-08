@@ -72,33 +72,42 @@ const RANKING_TAMANHO := 20
 ## só, o texto não tem como invadir a área de clique.
 const LADO_BOTAO := 64.0
 ## Passos: chave -> retângulo total (botões nas pontas, valor no meio).
+## NENHUM RETÂNGULO PODE ENCOSTAR NO OUTRO.
+##
+## `curva` foi acrescentada em cima de `vmin` e `vmax` (x 340–740 contra
+## 110–510 e 570–970, todos na mesma altura). Como `_click_central`
+## percorre esta tabela em ordem, o clique no γ caía primeiro em `vmin`
+## ou `vmax`: mexer na dificuldade mudava a velocidade, e a tela inteira
+## parecia não responder. Cada passo tem agora a sua própria linha.
 const PASSOS := {
-	"limiar_fraco": Rect2(110, 546, 400, LADO_BOTAO),
-	"limiar_forte": Rect2(570, 546, 400, LADO_BOTAO),
-	"vmin": Rect2(110, 780, 400, LADO_BOTAO),
-	"vmax": Rect2(570, 780, 400, LADO_BOTAO),
-	"curva": Rect2(340, 826, 400, 54),
-	"porta": Rect2(110, 1020, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1140, 400, LADO_BOTAO),
-	"amin": Rect2(570, 1140, 400, LADO_BOTAO),
+	"limiar_fraco": Rect2(110, 522, 400, LADO_BOTAO),
+	"limiar_forte": Rect2(570, 522, 400, LADO_BOTAO),
+	"vmin": Rect2(110, 740, 400, LADO_BOTAO),
+	"vmax": Rect2(570, 740, 400, LADO_BOTAO),
+	"curva": Rect2(340, 856, 400, 58),
+	"porta": Rect2(110, 1036, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1150, 400, LADO_BOTAO),
+	"amin": Rect2(570, 1150, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 const BOTOES_SIMPLES := {
 	"fechar": Rect2(920, 140, 68, 64),
-	"modo_livre": Rect2(110, 320, 400, 72),
-	"modo_ficha": Rect2(570, 320, 400, 72),
-	"eixo": Rect2(620, 1020, 280, LADO_BOTAO),
-	"enviar_config": Rect2(110, 1392, 400, 48),
-	"testar": Rect2(570, 1392, 400, 48),
-	"camera": Rect2(110, 1334, 260, 46),
-	"trocar_camera": Rect2(390, 1334, 260, 46),
-	"foto_teste": Rect2(670, 1334, 300, 46),
-	"zerar": Rect2(110, 1636, 196, 66),
-	"zerar_stats": Rect2(322, 1636, 196, 66),
-	"zerar_ranking": Rect2(534, 1636, 208, 66),
-	"reconectar": Rect2(758, 1636, 212, 66),
-	"padroes": Rect2(110, 1752, 400, 76),
-	"salvar": Rect2(570, 1752, 400, 76),
+	"modo_livre": Rect2(110, 318, 400, 68),
+	"modo_ficha": Rect2(570, 318, 400, 68),
+	"eixo": Rect2(620, 1036, 280, LADO_BOTAO),
+	# A câmera ganhou seção própria: estava dentro de "AÇÕES NO
+	# FIRMWARE", que é do sensor de soco e não tem nada com webcam.
+	"camera": Rect2(110, 1322, 260, 60),
+	"trocar_camera": Rect2(390, 1322, 260, 60),
+	"foto_teste": Rect2(670, 1322, 300, 60),
+	"enviar_config": Rect2(110, 1484, 400, 60),
+	"testar": Rect2(570, 1484, 400, 60),
+	"zerar": Rect2(110, 1716, 207, 60),
+	"zerar_stats": Rect2(327, 1716, 207, 60),
+	"zerar_ranking": Rect2(544, 1716, 207, 60),
+	"reconectar": Rect2(761, 1716, 209, 60),
+	"padroes": Rect2(110, 1782, 400, 68),
+	"salvar": Rect2(570, 1782, 400, 68),
 }
 
 var state: GameDef.State = GameDef.State.IDLE
@@ -1361,8 +1370,22 @@ func _pontos_do_capitulo(capitulo: int) -> void:
 func _draw_score_hero() -> void:
 	var center := Vector2(540, 930)
 	var measuring := state == GameDef.State.MEASURING
-	var progress := 0.0 if measuring else clampf(result_time / GameDef.CONTAGEM_DURACAO, 0.0, 1.0)
-	var color := Paleta.CIANO if verdict_time < 0.0 else Paleta.AMBAR
+	# O ANEL MEDE A FORÇA, NÃO O RELÓGIO.
+	#
+	# Ele enchia com `result_time / CONTAGEM_DURACAO`, ou seja, com o
+	# tempo da animação: um soco de 120 pontos fechava o anel inteiro
+	# igualzinho a um de 961, porque os dois levavam os mesmos dois
+	# segundos para contar. A pessoa batia fraco e via a barra encostar
+	# no fim — e aí nada na tela combinava com o que ela tinha feito.
+	# Ligado à pontuação, o anel vira o retrato do golpe: fraco fecha um
+	# pedaço, nocaute fecha quase tudo. E continua animando, porque
+	# `displayed_score` é o número subindo.
+	var progress := 0.0 if measuring else clampf(displayed_score / float(GameDef.SCORE_MAX), 0.0, 1.0)
+	# A cor também é a da faixa conquistada, e não uma só para todo mundo:
+	# o anel de um golpe fraco não pode ser igual ao de um nocaute.
+	var color := Paleta.CIANO
+	if verdict_time >= 0.0:
+		color = GameDef.classificar(result_score, limiar_fraco, limiar_forte)["cor_faixa"] as Color
 	for i in range(12):
 		draw_arc(center, 335.0 + float(i) * 3.0, 0, TAU, 192, Color(color, 0.02), 9.0, true)
 	draw_circle(center, 326.0, Color("250911"))
@@ -1678,32 +1701,35 @@ func _draw_rodape(alpha: float) -> void:
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
-	# Véu claro sobre o jogo: a Central cobre a tela, mas o técnico
-	# continua vendo que a máquina está ligada por trás.
-	draw_rect(Rect2(Vector2.ZERO, TELA), Color(Paleta.CEU_TOPO, 0.95))
+	# Véu sobre o jogo: a Central cobre a tela, mas o técnico continua
+	# vendo que a máquina está ligada por trás.
+	draw_rect(Rect2(Vector2.ZERO, TELA), Color("120409", 0.94))
 	var caixa := Rect2(40, 96, 1000, 1790)
 	_placa(Rect2(caixa.position + Vector2(0.0, 8.0), caixa.size), 22.0, Paleta.SOMBRA)
-	_placa(caixa, 22.0, Paleta.MARINHO)
-	_placa(caixa.grow(-7.0), 18.0, Paleta.CARTAO)
-	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.MARINHO)
+	# Borda DOURADA e miolo mais claro que o fundo. Com a moldura em
+	# marinho, que neste tema é quase o preto da tela, o painel não se
+	# separava do jogo atrás e a Central parecia colada por cima.
+	_placa(caixa, 22.0, Paleta.AMBAR)
+	_placa(caixa.grow(-5.0), 19.0, Color("2b0a13"))
+	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
 	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
 	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
 
 	# ---- modo de operação
-	_secao(Rect2(80, 262, 920, 150), "MODO DE OPERAÇÃO", Paleta.ROSA)
+	_secao(Rect2(80, 262, 920, 138), "MODO DE OPERAÇÃO", Paleta.ROSA)
 	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
 	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
 
 	# ---- faixas do placar
-	_secao(Rect2(80, 432, 920, 250), "FAIXAS DO PLACAR (0 – 999)", Paleta.AMBAR)
-	_regua_das_faixas(Rect2(110, 482, 860, 32))
+	_secao(Rect2(80, 416, 920, 244), "FAIXAS DO PLACAR (0 – 999)", Paleta.AMBAR)
+	_regua_das_faixas(Rect2(110, 470, 860, 28))
 	_stepper("limiar_fraco", "%03d" % limiar_fraco, "ATÉ AQUI É FRACO", GameDef.COR_FRACA)
 	_stepper("limiar_forte", "%03d" % limiar_forte, "DAQUI É FORTE", GameDef.COR_FORTE)
 
-	# ---- faixa de velocidade
-	_secao(Rect2(80, 702, 920, 210), "VELOCIDADE QUE VIRA PONTO (m/s)", Paleta.CIANO)
-	_stepper("vmin", "%.1f" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
-	_stepper("vmax", "%.1f" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
+	# ---- velocidade e dificuldade, cada uma na sua linha
+	_secao(Rect2(80, 676, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
+	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
+	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
 	_stepper(
 		"curva", "γ %.2f" % score_exponent,
 		"CURVA %s  •  ZONA MORTA %.0f%%" % [ScoreCurve.difficulty_name(score_exponent), score_dead_zone * 100.0],
@@ -1711,44 +1737,51 @@ func _draw_central() -> void:
 	)
 
 	# ---- sensor e firmware
-	_secao(Rect2(80, 932, 920, 330), "SENSOR E FIRMWARE (MPU-6050)", Paleta.ROXO)
+	_secao(Rect2(80, 976, 920, 274), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 968.0), 7.0, dot)
-	_texto(serial_status, 974.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	draw_circle(Vector2(560, 1010.0), 7.0, dot)
+	_texto(serial_status, 1016.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
 	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
 	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
-	_texto("EIXO DO GOLPE", 1112.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_texto("EIXO DO GOLPE", 1128.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
 	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
 	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
 
+	# ---- câmera, em seção própria
+	_secao(Rect2(80, 1266, 920, 154), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
+	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
+	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
+	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
+	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
+	_texto(cam_status, 1404.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+
 	# ---- ações no firmware
-	_secao(Rect2(80, 1282, 920, 170), "AÇÕES NO FIRMWARE", Paleta.VERDE)
-	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 14)
-	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 14)
-	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 14)
+	_secao(Rect2(80, 1436, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
 	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
 	# ---- ranking e diagnóstico
-	_secao(Rect2(80, 1472, 920, 250), "MELHORES DA CASA E DIAGNÓSTICO", Paleta.VERMELHO)
-	_lista_do_ranking(Rect2(110, 1508, 860, 52))
+	_secao(Rect2(80, 1572, 920, 214), "MELHORES DA CASA E DIAGNÓSTICO", Paleta.VERMELHO)
+	# A faixa começa ABAIXO da linha de base do título. Antes ela subia
+	# até 1508 com o título em 1512, e as células cobriam o nome da seção.
+	_lista_do_ranking(Rect2(110, 1618, 860, 42))
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
-		1590.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1684.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	var resumo := StatisticsStore.summary(statistics)
 	_texto(
 		"Hoje %d  •  7 dias %d  •  média %03d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
-		1616.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1706.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 13)
-	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 13)
-	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 12)
-	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 13)
+	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
+	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
+	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
+	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
-	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1858.0, 15, Paleta.TINTA_LEVE)
+	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1878.0, 15, Paleta.TINTA_LEVE)
 
 ## As cinco marcas em uma linha só: o técnico precisa VER o que vai
 ## apagar antes de apertar ZERAR RANKING.
