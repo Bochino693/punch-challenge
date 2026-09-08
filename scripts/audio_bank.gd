@@ -5,24 +5,30 @@ extends Node
 ## se o arquivo não existir (projeto recém-clonado antes da importação),
 ## o player fica mudo em vez de derrubar o jogo.
 
-const SONS := {
-	"credit": "res://assets/audio/credit.wav",
-	"start": "res://assets/audio/start.wav",
-	"count": "res://assets/audio/count.wav",
-	"go": "res://assets/audio/go.wav",
-	"hit": "res://assets/audio/hit.wav",
-	"tick": "res://assets/audio/tick.wav",
-	"charge": "res://assets/audio/charge.wav",
-	"win": "res://assets/audio/win.wav",
-	"medium": "res://assets/audio/medium.wav",
-	"lose": "res://assets/audio/lose.wav",
-	"error": "res://assets/audio/error.wav",
-	"menu": "res://assets/audio/menu.wav",
-	"record": "res://assets/audio/record.wav",
-	"legendary": "res://assets/audio/legendary.wav",
-}
+const Catalog = preload("res://scripts/audio/audio_catalog.gd")
+const SONS = Catalog.FALLBACK
 
 var _players: Dictionary = {}
+var music_target := -80.0
+
+func _process(delta: float) -> void:
+	var player: AudioStreamPlayer = _players.get("music")
+	if player != null:
+		player.volume_db = move_toward(player.volume_db, music_target, delta * 45.0)
+		if music_target <= -79.0 and player.volume_db <= -79.0:
+			player.stop()
+
+func music(level: float) -> void:
+	music_target = level
+	var player: AudioStreamPlayer = _players.get("music")
+	if player != null and level > -79.0 and not player.playing:
+		player.volume_db = -45.0
+		player.play()
+
+func silence() -> void:
+	music_target = -80.0
+	for player in _players.values():
+		player.stop()
 
 func start_score_loop() -> void:
 	if not _players.has("score_loop"):
@@ -59,6 +65,24 @@ func _ready() -> void:
 			player.stream = load(caminho)
 		add_child(player)
 		_players[nome] = player
+	# WAVs originais; leitura direta também funciona na primeira importação.
+	for nome in SONS.keys() + Catalog.EXTRA:
+		var path := Catalog.path_for(nome)
+		if not ResourceLoader.exists(path) and not FileAccess.file_exists(path):
+			continue
+		var stream: AudioStreamWAV = load(path).duplicate() if ResourceLoader.exists(path) else AudioStreamWAV.load_from_buffer(FileAccess.get_file_as_bytes(path))
+		if stream == null:
+			continue
+		if nome in Catalog.LOOPS:
+			stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			stream.loop_begin = 0
+			stream.loop_end = stream.data.size() / 2
+		var player: AudioStreamPlayer = _players.get(nome)
+		if player == null:
+			player = AudioStreamPlayer.new()
+			add_child(player)
+			_players[nome] = player
+		player.stream = stream
 
 func play(nome: String, volume_db: float = 0.0) -> void:
 	var player: AudioStreamPlayer = _players.get(nome)

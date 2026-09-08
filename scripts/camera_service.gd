@@ -17,6 +17,8 @@ var _last_image: Image = null
 var _bridge_pid := -1
 var _bridge_path := ""
 var _bridge_modified := 0
+var _bridge_digest := 0
+var _last_frame_ms := 0
 var _bridge_started_ms := 0
 var _next_bridge_poll_ms := 0
 var status := "PROCURANDO CÂMERA"
@@ -34,11 +36,18 @@ func _process(_delta: float) -> void:
 	if now < _next_bridge_poll_ms:
 		return
 	_next_bridge_poll_ms = now + 100
-	var modified := FileAccess.get_modified_time(_bridge_path)
-	if modified > 0 and modified != _bridge_modified:
+	if not OS.is_process_running(_bridge_pid):
+		_bridge_texture = null
+		_last_image = null
+		status = "CÂMERA DESCONECTADA"
+		return
+	var bytes := FileAccess.get_file_as_bytes(_bridge_path) if FileAccess.file_exists(_bridge_path) else PackedByteArray()
+	var digest := hash(bytes)
+	if not bytes.is_empty() and digest != _bridge_digest:
 		var image := Image.new()
-		if image.load(_bridge_path) == OK and not image.is_empty():
-			_bridge_modified = modified
+		if image.load_jpg_from_buffer(bytes) == OK and not image.is_empty():
+			_bridge_digest = digest
+			_last_frame_ms = now
 			_last_image = image
 			if _bridge_texture == null:
 				_bridge_texture = ImageTexture.create_from_image(image)
@@ -94,7 +103,7 @@ func preview_texture() -> Texture2D:
 
 func available() -> bool:
 	var native_ok := _texture != null and _feed != null and _feed.is_active()
-	return enabled and (native_ok or _bridge_texture != null)
+	return enabled and (native_ok or (_bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500))
 
 func camera_count() -> int:
 	CameraServer.set_monitoring_feeds(true)
@@ -137,6 +146,8 @@ func _stop_feed() -> void:
 	_bridge_pid = -1
 	_bridge_texture = null
 	_last_image = null
+	_bridge_digest = 0
+	_last_frame_ms = 0
 
 func _start_windows_bridge() -> void:
 	if _bridge_pid > 0:
@@ -144,6 +155,8 @@ func _start_windows_bridge() -> void:
 	var data_dir := "user://camera_bridge"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	_bridge_path = ProjectSettings.globalize_path(data_dir + "/live.jpg")
+	if FileAccess.file_exists(_bridge_path):
+		DirAccess.remove_absolute(_bridge_path)
 	var script := _materialize_bridge_script(data_dir)
 	if script.is_empty():
 		status = "PONTE DE CÂMERA NÃO ENCONTRADA"
