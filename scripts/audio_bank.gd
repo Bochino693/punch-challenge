@@ -30,6 +30,17 @@ func silence() -> void:
 	for player in _players.values():
 		player.stop()
 
+## Corta os efeitos e MANTÉM a música tocando.
+##
+## A tela de abertura chamava `silence`, que para tudo — e por isso a
+## máquina ficava muda justamente na tela que passa o dia inteiro ligada
+## tentando chamar alguém. Uma máquina calada no salão parece desligada.
+func attract(level: float) -> void:
+	for nome in _players:
+		if nome != "music":
+			(_players[nome] as AudioStreamPlayer).stop()
+	music(level)
+
 func start_score_loop() -> void:
 	if not _players.has("score_loop"):
 		var player := AudioStreamPlayer.new()
@@ -76,7 +87,19 @@ func _ready() -> void:
 		if nome in Catalog.LOOPS:
 			stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
 			stream.loop_begin = 0
-			stream.loop_end = stream.data.size() / 2
+			# O FIM DO LOOP SAI DA DURAÇÃO, E NÃO DO TAMANHO EM BYTES.
+			#
+			# `data` é o buffer JÁ CODIFICADO, e o Godot importa WAV em
+			# QOA por padrão — comprimido. Dividir os bytes por dois
+			# (supondo PCM de 16 bits mono) dava um ponto de loop cinco
+			# vezes menor que o arquivo: a música de doze segundos
+			# reiniciava a cada dois e meio, o que fazia a trilha soar
+			# curta e repetitiva sem que nada parecesse quebrado.
+			#
+			# `get_length()` já vem em segundos, qualquer que seja o
+			# formato, então esta conta continua certa se um dia o
+			# projeto trocar de compressão.
+			stream.loop_end = int(round(stream.get_length() * stream.mix_rate))
 		var player: AudioStreamPlayer = _players.get(nome)
 		if player == null:
 			player = AudioStreamPlayer.new()

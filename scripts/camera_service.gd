@@ -22,6 +22,10 @@ var _last_frame_ms := 0
 var _bridge_started_ms := 0
 var _next_bridge_poll_ms := 0
 var status := "PROCURANDO CÂMERA"
+## Publica um padrão sintético em vez da webcam. Serve para separar
+## "a ponte está quebrada" de "a câmera está quebrada" sem webcam
+## nenhuma — mesma ideia do comando TEST do firmware do sensor.
+var pattern_mode := false
 
 func _ready() -> void:
 	# O CameraServer avisa por DOIS sinais (feed entrou / feed saiu), e não
@@ -59,9 +63,12 @@ func _process(_delta: float) -> void:
 				_bridge_texture = ImageTexture.create_from_image(image)
 			else:
 				_bridge_texture.update(image)
-			status = "CÂMERA CONECTADA (WINDOWS)"
+			status = "CÂMERA CONECTADA (PONTE)"
 	elif now - _bridge_started_ms > 5000 and _bridge_texture == null:
-		status = "CÂMERA WINDOWS: INSTALE OPENCV"
+		# A ponte escreve o motivo ao lado do JPEG; sem ler esse arquivo,
+		# todo problema virava a mesma mensagem genérica e o técnico não
+		# sabia se era OpenCV, cabo ou câmera ocupada.
+		status = _bridge_status_file()
 
 func refresh() -> void:
 	_stop_feed()
@@ -70,10 +77,12 @@ func refresh() -> void:
 		return
 	var feeds := CameraServer.feeds()
 	if feeds.is_empty():
-		if OS.get_name() == "Windows":
-			_start_windows_bridge()
-		else:
-			status = "CÂMERA INDISPONÍVEL"
+		# A PONTE NÃO É MAIS SÓ DO WINDOWS. Ela é a reserva para QUALQUER
+		# caso em que o Godot não enxerga a webcam — e são vários: falta
+		# de driver na plataforma, permissão negada, câmera ocupada por
+		# outro programa. Amarrada ao Windows, todo o resto ficava sem
+		# saída, e ninguém conseguia nem testar o caminho.
+		_start_bridge()
 		return
 	selected_index = clampi(selected_index, 0, feeds.size() - 1)
 	_feed = feeds[selected_index]
@@ -102,10 +111,9 @@ func set_enabled(value: bool) -> void:
 func cycle_camera() -> void:
 	var feeds := CameraServer.feeds()
 	if feeds.is_empty():
-		if OS.get_name() == "Windows":
-			# DirectShow normalmente enumera câmeras como 0..3. As que não
-			# existem simplesmente acionam o fallback, sem travar o jogo.
-			selected_index = (selected_index + 1) % 4
+		# Sem feed nativo, quem troca de câmera é a ponte: os índices
+		# 0..3 cobrem as webcams que o sistema costuma enumerar.
+		selected_index = (selected_index + 1) % 4
 		refresh()
 		return
 	selected_index = (selected_index + 1) % feeds.size()
@@ -160,7 +168,7 @@ func _stop_feed() -> void:
 	_bridge_digest = 0
 	_last_frame_ms = 0
 
-func _start_windows_bridge() -> void:
+func _start_bridge() -> void:
 	if _bridge_pid > 0:
 		return
 	var data_dir := "user://camera_bridge"
@@ -173,15 +181,28 @@ func _start_windows_bridge() -> void:
 		status = "PONTE DE CÂMERA NÃO ENCONTRADA"
 		return
 	var args := PackedStringArray([script, "--output", _bridge_path, "--camera", str(selected_index)])
-	_bridge_pid = OS.create_process("python", args, false)
+	if pattern_mode:
+		args.append("--pattern")
+	# Três nomes de interpretador, porque cada instalação de Windows
+	# expõe um: `python` (loja/PATH), `py` (o lançador oficial) e
+	# `python3` (Linux e macOS).
+	for interpretador in ["python", "python3", "py"]:
+		_bridge_pid = OS.create_process(interpretador, args, false)
+		if _bridge_pid > 0:
+			break
 	if _bridge_pid <= 0:
-		args.insert(0, "-3")
-		_bridge_pid = OS.create_process("py", args, false)
-	if _bridge_pid <= 0:
-		status = "PYTHON/OPENCV NÃO ENCONTRADO"
+		status = "PYTHON NÃO ENCONTRADO — VEJA docs/CAMERA.md"
 		return
 	_bridge_started_ms = Time.get_ticks_msec()
-	status = "INICIANDO CÂMERA WINDOWS…"
+	status = "INICIANDO PONTE DE CÂMERA…"
+
+## Lê a linha de estado que a ponte grava ao lado do JPEG.
+func _bridge_status_file() -> String:
+	var caminho := _bridge_path.get_base_dir() + "/estado.txt"
+	if not FileAccess.file_exists(caminho):
+		return "PONTE SEM RESPOSTA — INSTALE OPENCV"
+	var texto := FileAccess.get_file_as_string(caminho).strip_edges()
+	return texto if not texto.is_empty() else "PONTE SEM RESPOSTA"
 
 func _materialize_bridge_script(data_dir: String) -> String:
 	# Em exportação com PCK embutido o .py não é um arquivo físico. Copiá-lo

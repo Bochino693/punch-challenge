@@ -530,7 +530,10 @@ func _iniciar_rodada() -> void:
 
 func _entrar_em_abertura() -> void:
 	_discard_round_photo()
-	sons.silence()
+	# Corta os efeitos da rodada e deixa a música da abertura no ar. Antes
+	# aqui era `silence()`, que também matava a música: a tela que fica
+	# ligada o dia inteiro chamando gente era a única muda do jogo.
+	sons.attract(-16.0)
 	state = GameDef.State.IDLE
 	state_time = 0.0
 	verdict_time = -1.0
