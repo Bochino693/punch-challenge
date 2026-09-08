@@ -58,6 +58,9 @@ const LARGURA_UTIL := TELA.x - MARGEM * 2.0
 ## fundo preto era o mais vistoso, é justamente o que some num fundo claro.
 const CORES_FESTA := Paleta.FESTA
 
+## Quantas marcas a máquina guarda.
+const RANKING_TAMANHO := 5
+
 # ======================================================================
 # A CENTRAL TÉCNICA, DESCRITA UMA VEZ SÓ
 # ======================================================================
@@ -85,10 +88,11 @@ const BOTOES_SIMPLES := {
 	"eixo": Rect2(620, 1020, 280, LADO_BOTAO),
 	"enviar_config": Rect2(110, 1350, 400, 72),
 	"testar": Rect2(570, 1350, 400, 72),
-	"zerar": Rect2(110, 1620, 400, 72),
-	"reconectar": Rect2(570, 1620, 400, 72),
-	"padroes": Rect2(110, 1750, 400, 76),
-	"salvar": Rect2(570, 1750, 400, 76),
+	"zerar": Rect2(110, 1636, 288, 66),
+	"zerar_ranking": Rect2(416, 1636, 288, 66),
+	"reconectar": Rect2(722, 1636, 248, 66),
+	"padroes": Rect2(110, 1752, 400, 76),
+	"salvar": Rect2(570, 1752, 400, 76),
 }
 
 var state: GameDef.State = GameDef.State.IDLE
@@ -96,7 +100,14 @@ var central_aberta := false
 var game_mode := "credit"
 var credits := 0
 var plays := 0
-var best_score := 0
+## AS CINCO MELHORES MARCAS, em ordem decrescente.
+##
+## Guardar cinco em vez de uma só não é enfeite: com um recorde único,
+## quem não bate o recorde não ganha nada, e o recorde de uma máquina
+## movimentada fica inalcançável em uma semana. Com uma lista, entrar em
+## quinto ainda é entrar — e é essa pequena vitória que faz a pessoa
+## pagar a segunda ficha.
+var ranking: Array[int] = []
 ## Faixa de velocidade (m/s) que vira pontos no placar.
 var hit_min_speed := 0.8
 var hit_max_speed := 12.0
@@ -117,7 +128,8 @@ var armed_left := GameDef.JANELA_DO_SOCO
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
-var novo_recorde := false
+## Posição conquistada no ranking (1 a 5), ou 0 se o golpe não entrou.
+var posicao_no_ranking := 0
 var displayed_score := 0.0
 var animation_time := 0.0
 var state_time := 0.0
@@ -187,7 +199,25 @@ func _aplicar_faixas() -> void:
 	limiar_fraco = lim.x
 	limiar_forte = lim.y
 	medidor.set_faixas(limiar_fraco, limiar_forte)
-	medidor.recorde = best_score
+	medidor.recorde = _melhor()
+
+## A melhor marca da casa. Sai do topo do ranking, e não de uma variável
+## paralela — duas fontes para o mesmo número é como elas divergem.
+func _melhor() -> int:
+	return ranking[0] if not ranking.is_empty() else 0
+
+## Insere uma pontuação e devolve a posição conquistada (1 a 5), ou 0 se
+## ela não foi boa o bastante para entrar na lista.
+func _entrar_no_ranking(pontos: int) -> int:
+	var lista := ranking.duplicate()
+	lista.append(pontos)
+	lista.sort()
+	lista.reverse()
+	if lista.size() > RANKING_TAMANHO:
+		lista.resize(RANKING_TAMANHO)
+	ranking.assign(lista)
+	var pos := ranking.find(pontos)
+	return pos + 1 if pos >= 0 else 0
 
 ## Onde o soco aterrissa. Pergunta ao saco em vez de repetir a conta: o
 ## saco pode mudar de tamanho ou de posição sem levar junto a onda de
@@ -420,7 +450,7 @@ func _iniciar_rodada() -> void:
 			return
 		credits -= 1
 	state = GameDef.State.COUNTDOWN
-	novo_recorde = false
+	posicao_no_ranking = 0
 	saco.visible = true
 	medidor.visible = true
 	state_time = 0.0
@@ -430,7 +460,7 @@ func _iniciar_rodada() -> void:
 	displayed_score = 0.0
 	fx.limpar()
 	medidor.reset()
-	medidor.recorde = best_score
+	medidor.recorde = _melhor()
 	clarao = 1.0
 	tremor = 14.0
 	sons.play("start")
@@ -444,7 +474,7 @@ func _entrar_em_abertura() -> void:
 	state_time = 0.0
 	verdict_time = -1.0
 	result_time = 0.0
-	novo_recorde = false
+	posicao_no_ranking = 0
 	fx.limpar()
 	medidor.reset()
 	saco.visible = false
@@ -484,9 +514,8 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
 	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
 	plays += 1
-	novo_recorde = result_score > best_score
-	if novo_recorde:
-		best_score = result_score
+	posicao_no_ranking = _entrar_no_ranking(result_score)
+	medidor.recorde = _melhor()
 	_salvar()
 
 func _disparar_veredito() -> void:
@@ -523,9 +552,8 @@ func _disparar_veredito() -> void:
 			fx.estilhacos(alvo, 34, Color("6b7b98"))
 			fx.poeira(alvo + Vector2(0, 240.0), 26, Color(0.45, 0.50, 0.62, 0.45), 260.0)
 
-	if novo_recorde:
+	if posicao_no_ranking == 1:
 		sons.play("record", 2.0)
-		medidor.recorde = best_score
 
 # ======================================================================
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
@@ -734,9 +762,11 @@ func _click_central(p: Vector2) -> void:
 	elif BOTOES_SIMPLES["zerar"].has_point(p):
 		credits = 0
 		plays = 0
-		best_score = 0
-		medidor.recorde = 0
 		_show_notice("CONTADORES ZERADOS")
+	elif BOTOES_SIMPLES["zerar_ranking"].has_point(p):
+		ranking.clear()
+		medidor.recorde = 0
+		_show_notice("RANKING ZERADO")
 	elif BOTOES_SIMPLES["reconectar"].has_point(p):
 		if link != null:
 			link.close_port()
@@ -801,7 +831,15 @@ func _carregar() -> void:
 	game_mode = str(data.get("mode", game_mode))
 	credits = int(data.get("credits", credits))
 	plays = int(data.get("plays", plays))
-	best_score = int(data.get("best_score", best_score))
+	# MIGRAÇÃO: instalações antigas guardavam um recorde só. Ele vira a
+	# primeira linha do ranking, para o dono não perder a marca da casa
+	# ao atualizar o software.
+	ranking.clear()
+	for valor in data.get("ranking", []):
+		ranking.append(int(valor))
+	var antigo := int(data.get("best_score", 0))
+	if ranking.is_empty() and antigo > 0:
+		ranking.append(antigo)
 	porta_configurada = str(data.get("port", porta_configurada))
 	hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
 	hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
@@ -817,7 +855,9 @@ func _salvar() -> void:
 		"mode": game_mode,
 		"credits": credits,
 		"plays": plays,
-		"best_score": best_score,
+		"ranking": ranking,
+		# Mantido para uma eventual volta a uma versão anterior do jogo.
+		"best_score": _melhor(),
 		"port": porta_configurada,
 		"hit_min_speed": hit_min_speed,
 		"hit_max_speed": hit_max_speed,
@@ -870,20 +910,53 @@ func _draw_clarao() -> void:
 	draw_rect(Rect2(TELA.x - borda, 0.0, borda, TELA.y), escuro)
 
 # ---------------------------------------------------------------- abertura
-func _draw_abertura() -> void:
-	var entrada := clampf(state_time / 1.05, 0.0, 1.0)
-	var suave := ease(entrada, 0.35)
-	var centro := Vector2(540, 432)
+## A ABERTURA NÃO É UMA TELA SÓ.
+##
+## Uma máquina de fliperama parada não fica repetindo o mesmo cartaz: ela
+## conta o jogo em capítulos, e é o rodízio que segura quem está passando
+## no corredor por tempo suficiente para a pessoa decidir jogar. Três
+## páginas alternando sozinhas — a marca, os melhores da casa e como
+## jogar — e, fixos em todas, o convite e os números da máquina, porque
+## esses dois não podem depender de a pessoa ter chegado na página certa.
+const ABERTURA_PAGINAS := 3
+const ABERTURA_SEGUNDOS := 7.0
 
-	# Raios girando atrás da marca: movimento sem competir com ela. Num
-	# fundo claro os raios são MAIS ESCUROS que o céu, não mais claros —
-	# a leitura é a mesma, a conta é a inversa.
+func _pagina_da_abertura() -> int:
+	return int(state_time / ABERTURA_SEGUNDOS) % ABERTURA_PAGINAS
+
+func _draw_abertura() -> void:
+	# Cada página entra com o seu próprio esmaecer, e não o da rodada:
+	# senão só a primeira apareceria com entrada e as outras dariam um
+	# salto seco.
+	var no_ar := fmod(state_time, ABERTURA_SEGUNDOS)
+	var suave := ease(clampf(no_ar / 0.55, 0.0, 1.0), 0.35)
+	var pagina := _pagina_da_abertura()
+
+	_fundo_da_abertura(suave)
+	match pagina:
+		0:
+			_pagina_marca(suave)
+		1:
+			_pagina_recordes(suave)
+		_:
+			_pagina_como_jogar(suave)
+
+	_draw_convite(suave)
+	_pontinhos_da_pagina(pagina, suave)
+	_draw_placar_abertura(suave)
+	_draw_rodape(suave)
+
+## Raios e anéis girando atrás de qualquer página. Num fundo claro eles
+## são MAIS ESCUROS que o céu, não mais claros — a leitura é a mesma, a
+## conta é a inversa.
+func _fundo_da_abertura(alpha: float) -> void:
+	var centro := Vector2(540, 620)
 	for i in range(16):
 		var angulo := animation_time * 0.22 + i * TAU / 16.0
-		var comprimento := 900.0 + sin(animation_time * 1.4 + i) * 50.0
-		var cor := Color(Paleta.CIANO, 0.055 * suave)
+		var comprimento := 1000.0 + sin(animation_time * 1.4 + i) * 50.0
+		var cor := Color(Paleta.CIANO, 0.055 * alpha)
 		if i % 2 == 0:
-			cor = Color(Paleta.VERMELHO, 0.045 * suave)
+			cor = Color(Paleta.VERMELHO, 0.045 * alpha)
 		draw_colored_polygon(
 			PackedVector2Array([
 				centro,
@@ -893,46 +966,103 @@ func _draw_abertura() -> void:
 			cor
 		)
 	for i in range(3):
-		var raio := 300.0 + i * 78.0 + sin(animation_time * 1.1 + i * 0.7) * 14.0
-		draw_arc(centro, raio * suave, 0.0, TAU, 120, Color(Paleta.MARINHO, 0.09 * suave), 2.0)
+		var raio := 320.0 + i * 84.0 + sin(animation_time * 1.1 + i * 0.7) * 14.0
+		draw_arc(centro, raio * alpha, 0.0, TAU, 120, Color(Paleta.MARINHO, 0.08 * alpha), 2.0)
 
+## Página 1 — a marca da casa e o recorde a bater.
+func _pagina_marca(alpha: float) -> void:
 	var flutuar := sin(animation_time * 1.6) * 12.0
-	_draw_marca(centro + Vector2(0, flutuar), 690.0 * lerpf(0.86, 1.0, suave), suave)
+	_draw_marca(Vector2(540, 470) + Vector2(0, flutuar), 690.0 * lerpf(0.9, 1.0, alpha), alpha)
+	_texto_arcade("PUNCH CHALLENGE", 872.0, 86, Color(Paleta.VERMELHO, alpha), LARGURA_UTIL)
+	_texto("QUAL É A FORÇA DO SEU SOCO?", 918.0, 27, Color(Paleta.MARINHO, alpha))
+	_draw_medalhao("%03d" % _melhor(), Paleta.AMBAR, 1.0, alpha, Vector2(540, 1160), 122.0)
+	_texto("RECORDE DA CASA  •  BATA ESSA MARCA", 1332.0, 22, Color(Paleta.TINTA_FRACA, alpha))
 
-	# O nome do jogo é o letreiro da máquina: contorno grosso e brilho.
-	_texto_arcade("PUNCH CHALLENGE", 862.0, 86, Color(Paleta.VERMELHO, suave), LARGURA_UTIL)
-	# A segunda linha não repete a marca (a logo acima já a diz): ela faz
-	# a pergunta que traz alguém do outro lado do salão até aqui.
-	_texto("QUAL É A FORÇA DO SEU SOCO?", 908.0, 27, Color(Paleta.MARINHO, suave))
-	_texto("MEDIDOR DE POTÊNCIA  •  0 A 999 PONTOS", 942.0, 18, Color(Paleta.TINTA_FRACA, suave))
+## Página 2 — as cinco melhores marcas.
+func _pagina_recordes(alpha: float) -> void:
+	_texto_arcade("MELHORES DA CASA", 392.0, 62, Color(Paleta.MARINHO, alpha), LARGURA_UTIL)
+	if ranking.is_empty():
+		_texto("AINDA NINGUÉM SOCOU ESTA MÁQUINA", 780.0, 32, Color(Paleta.TINTA_FRACA, alpha))
+		_texto("O PRIMEIRO NOME DA LISTA PODE SER O SEU", 832.0, 24, Color(Paleta.TINTA_LEVE, alpha))
+		return
+	for i in range(RANKING_TAMANHO):
+		var y := 466.0 + i * 116.0
+		var cor := _cor_da_posicao(i + 1)
+		var linha := Rect2(MARGEM + 40.0, y, LARGURA_UTIL - 80.0, 98.0)
+		var vazia := i >= ranking.size()
+		_cartao(linha, Paleta.CARTAO if not vazia else Paleta.VAZIO, Paleta.CARTAO_BORDA, alpha, 2.0)
+		# Tarja lateral colorida: identifica a posição sem pintar a linha.
+		draw_rect(Rect2(linha.position, Vector2(9.0, linha.size.y)), Color(cor, alpha))
+		var meio := linha.position.y + 64.0
+		_texto("%dº" % (i + 1), meio, 34, Color(cor, alpha), HORIZONTAL_ALIGNMENT_CENTER, linha.position.x + 30.0, 90.0)
+		if i < 3:
+			Icones.trofeu(self, Vector2(linha.position.x + 168.0, meio - 11.0), 19.0, Color(cor, alpha))
+		if vazia:
+			_texto("—", meio, 34, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
+		else:
+			_texto("%03d" % ranking[i], meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
+			_texto("PONTOS", meio, 18, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 190.0)
+	_texto("O SEU SOCO PODE ENTRAR NESSA LISTA", 1152.0, 26, Color(Paleta.VERMELHO, alpha))
 
-	# O convite pisca; sem crédito, troca de texto em vez de sumir. Quem
-	# atravessou o salão precisa saber o que fazer, não ver a frase sumir.
+## Página 3 — os três passos, do tamanho de quem lê de longe.
+func _pagina_como_jogar(alpha: float) -> void:
+	_texto_arcade("COMO JOGAR", 320.0, 62, Color(Paleta.MARINHO, alpha), LARGURA_UTIL)
+	var passos := [
+		["ficha", "INSIRA A FICHA" if game_mode == "credit" else "MÁQUINA LIBERADA", Paleta.ROSA],
+		["botao", "APERTE START", Paleta.VERDE],
+		["alvo", "SOQUE O ALVO COM FORÇA", Paleta.VERMELHO],
+	]
+	for i in range(passos.size()):
+		var y := 428.0 + i * 236.0
+		var cor: Color = passos[i][2]
+		var centro := Vector2(MARGEM + 110.0, y + 60.0)
+		draw_circle(centro, 62.0, Paleta.tinta_clara(cor, 0.20))
+		draw_arc(centro, 62.0, 0.0, TAU, 60, Color(cor, 0.55 * alpha), 4.0)
+		_icone(str(passos[i][0]), centro, 38.0, Color(Paleta.para_texto(cor), alpha))
+		_texto(
+			"%d." % (i + 1), centro.y - 4.0, 26, Color(cor, alpha),
+			HORIZONTAL_ALIGNMENT_LEFT, MARGEM + 210.0, 80.0
+		)
+		# Alinhados à ESQUERDA e não centrados: três frases de comprimentos
+		# diferentes, centradas cada uma na sua caixa, não formam uma
+		# coluna — e é a coluna que faz a lista ser lida como três passos.
+		var texto := str(passos[i][1])
+		_texto(
+			texto, centro.y + 14.0, _tamanho_que_cabe(texto, 44, LARGURA_UTIL - 340.0),
+			Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_LEFT,
+			MARGEM + 270.0, LARGURA_UTIL - 340.0
+		)
+
+## O convite fica no MESMO lugar em todas as páginas. É o único elemento
+## que a pessoa precisa achar sem procurar, e um botão que muda de lugar
+## a cada sete segundos é um botão que ninguém acha.
+func _draw_convite(alpha: float) -> void:
 	var piscada := 0.6 + 0.4 * sin(animation_time * 4.2)
 	var convite := "PRESSIONE  START"
-	var cor_convite := Paleta.VERDE
+	var cor := Paleta.VERDE
 	if game_mode == "credit" and credits <= 0:
 		convite = "INSIRA 1 FICHA"
-		cor_convite = Paleta.CIANO
-	# BOTÃO CHEIO, e não caixa clarinha com texto colorido: num fundo
-	# claro é o bloco de cor que se vê do outro lado do salão, e este é o
-	# único chamado da tela que precisa ser visto de lá.
-	var caixa := Rect2(MARGEM + 80.0, 976, LARGURA_UTIL - 160.0, 114.0)
-	_placa(Rect2(caixa.position + Vector2(0.0, 7.0), caixa.size), 22.0, Color(Paleta.SOMBRA, suave))
-	_placa(caixa, 22.0, Color(cor_convite.darkened(0.22), suave))
-	_placa(Rect2(caixa.position, caixa.size - Vector2(0.0, 7.0)), 22.0, Color(cor_convite, suave))
-	_texto_arcade(convite, 1048.0, 46, Color(Paleta.CREME, suave * piscada), caixa.size.x - 60.0, caixa.position.x + 30.0)
+		cor = Paleta.CIANO
+	var caixa := Rect2(MARGEM + 80.0, 1400.0, LARGURA_UTIL - 160.0, 118.0)
+	_placa(Rect2(caixa.position + Vector2(0.0, 7.0), caixa.size), 22.0, Color(Paleta.SOMBRA, alpha))
+	_placa(caixa, 22.0, Color(cor.darkened(0.22), alpha))
+	_placa(Rect2(caixa.position, caixa.size - Vector2(0.0, 7.0)), 22.0, Color(cor, alpha))
+	_texto_arcade(convite, 1476.0, 46, Color(Paleta.CREME, alpha * piscada), caixa.size.x - 60.0, caixa.position.x + 30.0)
 
-	_draw_placar_abertura(suave)
-	_draw_como_jogar(suave)
-	_draw_rodape(suave)
+## Quantas páginas existem e em qual delas estamos. Sem isso o rodízio
+## parece a tela trocando sozinha por defeito.
+func _pontinhos_da_pagina(pagina: int, alpha: float) -> void:
+	var largura := float(ABERTURA_PAGINAS) * 26.0
+	var x := 540.0 - largura * 0.5 + 13.0
+	for i in range(ABERTURA_PAGINAS):
+		var atual := i == pagina
+		draw_circle(Vector2(x + i * 26.0, 1560.0), 7.0 if atual else 5.0,
+			Color(Paleta.MARINHO if atual else Paleta.TINTA_LEVE, alpha))
 
-## Os quatro números da casa, numa fileira só: recorde, partidas,
-## créditos e modo. Em fileira e não em bloco 2×2 porque o olho de quem
-## está longe varre a tela em linha.
+## Os quatro números da casa, numa fileira só, presentes em toda página.
 func _draw_placar_abertura(alpha: float) -> void:
 	var itens := [
-		["RECORDE", "%03d" % best_score, Paleta.AMBAR, "trofeu"],
+		["RECORDE", "%03d" % _melhor(), Paleta.AMBAR, "trofeu"],
 		["PARTIDAS", str(plays), Paleta.ROXO, "luva"],
 		["CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Paleta.ROSA, "ficha"],
 		["MODO", "LIVRE" if game_mode == "free" else "FICHA", Paleta.VERDE, "raio"],
@@ -940,29 +1070,8 @@ func _draw_placar_abertura(alpha: float) -> void:
 	var largura := (LARGURA_UTIL - 3.0 * 16.0) / 4.0
 	for i in range(itens.size()):
 		_stat_card(
-			Rect2(MARGEM + i * (largura + 16.0), 1150.0, largura, 130.0),
+			Rect2(MARGEM + i * (largura + 16.0), CARTOES_Y, largura, CARTOES_ALTURA),
 			str(itens[i][0]), str(itens[i][1]), itens[i][2] as Color, str(itens[i][3]), alpha
-		)
-
-## Três passos, com ícone, do tamanho de quem lê de longe. É o que
-## transforma alguém parado na frente da máquina em alguém jogando.
-func _draw_como_jogar(alpha: float) -> void:
-	_texto("COMO JOGAR", 1370.0, 22, Color(Paleta.TINTA_FRACA, alpha))
-	var passos := [
-		["ficha", "INSIRA A FICHA" if game_mode == "credit" else "MÁQUINA LIBERADA", Paleta.ROSA],
-		["botao", "APERTE START", Paleta.VERDE],
-		["alvo", "SOQUE O ALVO COM FORÇA", Paleta.VERMELHO],
-	]
-	for i in range(passos.size()):
-		var y := 1408.0 + i * 104.0
-		var cor: Color = passos[i][2]
-		var centro := Vector2(MARGEM + 48.0, y + 32.0)
-		draw_circle(centro, 30.0, Paleta.tinta_clara(cor, 0.20))
-		draw_arc(centro, 30.0, 0.0, TAU, 44, Color(cor, 0.55 * alpha), 2.5)
-		_icone(str(passos[i][0]), centro, 19.0, Color(Paleta.para_texto(cor), alpha))
-		_texto(
-			"%d.  %s" % [i + 1, str(passos[i][1])], centro.y + 11.0, 30,
-			Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_LEFT, MARGEM + 110.0, LARGURA_UTIL - 110.0
 		)
 
 # ---------------------------------------------------------------- partida
@@ -1028,23 +1137,40 @@ func _draw_resultado() -> void:
 
 	_draw_carimbo(str(classe["label"]), Paleta.para_texto(classe["color"] as Color))
 
-	# O recorde entra ABAIXO do veredito, e não por cima dele — foi assim
-	# que a palavra ficava ilegível justamente quando havia mais motivo
-	# para lê-la.
+	# A CONQUISTA entra ABAIXO do veredito, e não por cima dele — foi
+	# assim que a palavra ficava ilegível justamente quando havia mais
+	# motivo para lê-la. E ela fala do RANKING, não de um recorde só:
+	# entrar em quinto também é uma vitória, e é a que faz a maioria das
+	# pessoas pagar a segunda ficha.
 	var origem := "SIMULAÇÃO" if result_simulado else "SENSOR"
 	var detalhe := "%s  •  %.2f m/s" % [origem, result_speed]
-	if novo_recorde:
+	if posicao_no_ranking > 0:
 		var brilho := 0.65 + 0.35 * sin(animation_time * 6.0)
-		var faixa := Rect2(MARGEM + 210.0, 1536.0, LARGURA_UTIL - 420.0, 44.0)
-		_cartao(faixa, Paleta.tinta_clara(Paleta.AMBAR, 0.22), Color(Paleta.AMBAR, brilho), 1.0, 3.0)
-		Icones.estrela(self, Vector2(faixa.position.x + 28.0, faixa.position.y + 22.0), 12.0, Paleta.AMBAR)
-		Icones.estrela(self, Vector2(faixa.end.x - 28.0, faixa.position.y + 22.0), 12.0, Paleta.AMBAR)
-		_texto_cabendo("NOVO RECORDE DA CASA", 1565.0, 23, Paleta.para_texto(Paleta.AMBAR), faixa.size.x - 86.0, faixa.position.x + 43.0)
+		var cor_pos := _cor_da_posicao(posicao_no_ranking)
+		var faixa := Rect2(MARGEM + 190.0, 1536.0, LARGURA_UTIL - 380.0, 44.0)
+		_cartao(faixa, Paleta.tinta_clara(cor_pos, 0.24), Color(cor_pos, brilho), 1.0, 3.0)
+		Icones.trofeu(self, Vector2(faixa.position.x + 28.0, faixa.position.y + 22.0), 13.0, cor_pos)
+		Icones.trofeu(self, Vector2(faixa.end.x - 28.0, faixa.position.y + 22.0), 13.0, cor_pos)
+		var frase := "NOVO RECORDE DA CASA" if posicao_no_ranking == 1 \
+			else "ENTROU NO TOP %d  •  %dº LUGAR" % [RANKING_TAMANHO, posicao_no_ranking]
+		_texto_cabendo(frase, 1565.0, 23, Paleta.para_texto(cor_pos), faixa.size.x - 86.0, faixa.position.x + 43.0)
 	else:
 		_texto_cabendo(detalhe, 1556.0, 21, Paleta.TINTA_LEVE, LARGURA_UTIL)
 		if verdict_time > 1.0:
 			var piscada := 0.55 + 0.45 * sin(animation_time * 3.6)
 			_texto("START PARA JOGAR NOVAMENTE", 1596.0, 20, Color(Paleta.TINTA_FRACA, piscada))
+
+## Ouro, prata e bronze nos três primeiros; azul da casa nos demais. É a
+## convenção que todo mundo já lê sem legenda.
+func _cor_da_posicao(posicao: int) -> Color:
+	match posicao:
+		1:
+			return Paleta.AMBAR
+		2:
+			return Color("8fa3bd")
+		3:
+			return Color("c1783a")
+	return Paleta.CIANO
 
 # ---------------------------------------------------------------- medalhão
 ## O VISOR DA MÁQUINA, do jeito que uma máquina de fliperama o monta:
@@ -1060,9 +1186,12 @@ func _draw_resultado() -> void:
 ## `energia` (0..1) é quanto do anel está aceso; `intensidade` escurece
 ## tudo de uma vez, para o visor poder "apagar" sem cada peça precisar
 ## saber disso.
-func _draw_medalhao(texto: String, cor: Color, energia: float, intensidade: float) -> void:
-	var c := MEDALHAO_CENTRO
-	var r := MEDALHAO_RAIO
+func _draw_medalhao(
+	texto: String, cor: Color, energia: float, intensidade: float,
+	centro := MEDALHAO_CENTRO, raio := MEDALHAO_RAIO
+) -> void:
+	var c := centro
+	var r := raio
 	var a := intensidade
 
 	# AS QUATRO FAIXAS, de fora para dentro, sem uma invadir a outra:
@@ -1093,8 +1222,10 @@ func _draw_medalhao(texto: String, cor: Color, energia: float, intensidade: floa
 
 	# Rótulo curvo na faixa: é o que faz a peça parecer serigrafada no
 	# painel da máquina, e não um anel de progresso de aplicativo.
-	_texto_curvo("PONTOS DE POTÊNCIA", c, r_anel, -PI * 0.5, 17, Color(Paleta.CONTORNO, 0.75 * a))
-	_texto_curvo("LAZER & SPORT", c, r_anel, PI * 0.5, 16, Color(Paleta.CONTORNO, 0.6 * a), true)
+	# O corpo do rótulo acompanha o tamanho da peça: o mesmo medalhão
+	# aparece grande na partida e pequeno na abertura.
+	_texto_curvo("PONTOS DE POTÊNCIA", c, r_anel, -PI * 0.5, int(r * 0.091), Color(Paleta.CONTORNO, 0.75 * a))
+	_texto_curvo("LAZER & SPORT", c, r_anel, PI * 0.5, int(r * 0.086), Color(Paleta.CONTORNO, 0.6 * a), true)
 
 	# Bisel e vidro do visor.
 	draw_circle(c, r_bisel, Color(Paleta.MARINHO, a))
@@ -1185,7 +1316,7 @@ func _draw_header() -> void:
 
 func _draw_cartoes() -> void:
 	var largura := (LARGURA_UTIL - 2.0 * 16.0) / 3.0
-	_stat_card(Rect2(MARGEM, CARTOES_Y, largura, CARTOES_ALTURA), "RECORDE", "%03d" % best_score, Paleta.AMBAR, "trofeu", 1.0)
+	_stat_card(Rect2(MARGEM, CARTOES_Y, largura, CARTOES_ALTURA), "RECORDE", "%03d" % _melhor(), Paleta.AMBAR, "trofeu", 1.0)
 	_stat_card(Rect2(MARGEM + largura + 16.0, CARTOES_Y, largura, CARTOES_ALTURA), "PARTIDAS", str(plays), Paleta.ROXO, "luva", 1.0)
 	_stat_card(
 		Rect2(MARGEM + (largura + 16.0) * 2.0, CARTOES_Y, largura, CARTOES_ALTURA),
@@ -1210,29 +1341,32 @@ func _draw_central() -> void:
 	# Véu claro sobre o jogo: a Central cobre a tela, mas o técnico
 	# continua vendo que a máquina está ligada por trás.
 	draw_rect(Rect2(Vector2.ZERO, TELA), Color(Paleta.CEU_TOPO, 0.95))
-	_cartao(Rect2(40, 96, 1000, 1790), Paleta.CARTAO, Paleta.CARTAO_BORDA, 1.0, 2.0)
-	_texto("CENTRAL TÉCNICA", 196.0, 38, Paleta.TINTA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	_texto("Configuração, diagnóstico e calibração", 234.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
+	var caixa := Rect2(40, 96, 1000, 1790)
+	_placa(Rect2(caixa.position + Vector2(0.0, 8.0), caixa.size), 22.0, Paleta.SOMBRA)
+	_placa(caixa, 22.0, Paleta.MARINHO)
+	_placa(caixa.grow(-7.0), 18.0, Paleta.CARTAO)
+	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.MARINHO)
+	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
 	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
 
 	# ---- modo de operação
-	_secao(Rect2(80, 262, 920, 150), "MODO DE OPERAÇÃO")
+	_secao(Rect2(80, 262, 920, 150), "MODO DE OPERAÇÃO", Paleta.ROSA)
 	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
 	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
 
 	# ---- faixas do placar
-	_secao(Rect2(80, 432, 920, 250), "FAIXAS DO PLACAR (0 – 999)")
+	_secao(Rect2(80, 432, 920, 250), "FAIXAS DO PLACAR (0 – 999)", Paleta.AMBAR)
 	_regua_das_faixas(Rect2(110, 482, 860, 32))
 	_stepper("limiar_fraco", "%03d" % limiar_fraco, "ATÉ AQUI É FRACO", GameDef.COR_FRACA)
 	_stepper("limiar_forte", "%03d" % limiar_forte, "DAQUI É FORTE", GameDef.COR_FORTE)
 
 	# ---- faixa de velocidade
-	_secao(Rect2(80, 702, 920, 210), "VELOCIDADE QUE VIRA PONTO (m/s)")
+	_secao(Rect2(80, 702, 920, 210), "VELOCIDADE QUE VIRA PONTO (m/s)", Paleta.CIANO)
 	_stepper("vmin", "%.1f" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
 	_stepper("vmax", "%.1f" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
 
 	# ---- sensor e firmware
-	_secao(Rect2(80, 932, 920, 330), "SENSOR E FIRMWARE (MPU-6050)")
+	_secao(Rect2(80, 932, 920, 330), "SENSOR E FIRMWARE (MPU-6050)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
 	draw_circle(Vector2(560, 968.0), 7.0, dot)
 	_texto(serial_status, 974.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
@@ -1243,32 +1377,53 @@ func _draw_central() -> void:
 	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
 
 	# ---- ações no firmware
-	_secao(Rect2(80, 1282, 920, 190), "AÇÕES NO FIRMWARE")
+	_secao(Rect2(80, 1282, 920, 170), "AÇÕES NO FIRMWARE", Paleta.VERDE)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
 	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
-	# ---- diagnóstico
-	_secao(Rect2(80, 1492, 920, 230), "DIAGNÓSTICO")
+	# ---- ranking e diagnóstico
+	_secao(Rect2(80, 1472, 920, 250), "MELHORES DA CASA E DIAGNÓSTICO", Paleta.VERMELHO)
+	_lista_do_ranking(Rect2(110, 1508, 860, 52))
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
-		1566.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1590.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
-		"recorde %03d  •  %d partidas  •  %02d créditos" % [best_score, plays, credits],
-		1594.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		"%d partidas  •  %02d créditos" % [plays, credits],
+		1616.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	_botao(BOTOES_SIMPLES["zerar"], "ZERAR CONTADORES", false, Paleta.VERMELHO, 17)
-	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 17)
+	_botao(BOTOES_SIMPLES["zerar"], "ZERAR CONTADORES", false, Paleta.VERMELHO, 15)
+	_botao(BOTOES_SIMPLES["zerar_ranking"], "ZERAR RANKING", false, Paleta.VERMELHO, 15)
+	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 15)
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
-	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1856.0, 15, Paleta.TINTA_LEVE)
+	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1858.0, 15, Paleta.TINTA_LEVE)
+
+## As cinco marcas em uma linha só: o técnico precisa VER o que vai
+## apagar antes de apertar ZERAR RANKING.
+func _lista_do_ranking(rect: Rect2) -> void:
+	var largura := (rect.size.x - 4.0 * 10.0) / float(RANKING_TAMANHO)
+	for i in range(RANKING_TAMANHO):
+		var celula := Rect2(rect.position + Vector2(i * (largura + 10.0), 0.0), Vector2(largura, rect.size.y))
+		var cor := _cor_da_posicao(i + 1)
+		var tem := i < ranking.size()
+		_cartao(celula, Paleta.tinta_clara(cor, 0.14) if tem else Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
+		_texto("%dº" % (i + 1), celula.position.y + 20.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
+		_texto(
+			"%03d" % ranking[i] if tem else "—", celula.position.y + 44.0, 22,
+			Paleta.TINTA if tem else Paleta.TINTA_LEVE,
+			HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x
+		)
 
 ## Uma seção da Central: moldura e título, sempre no mesmo lugar em
 ## relação à caixa. Nenhuma seção precisa saber onde fica o seu rótulo.
-func _secao(rect: Rect2, titulo: String) -> void:
+func _secao(rect: Rect2, titulo: String, cor := Paleta.MARINHO) -> void:
 	_cartao(rect, Paleta.tinta_clara(Paleta.MARINHO, 0.045), Paleta.CARTAO_BORDA, 1.0, 0.0)
-	_texto(titulo, rect.position.y + 40.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, rect.position.x + 40.0, rect.size.x - 80.0)
+	# Tarja colorida na lateral: com sete seções empilhadas, é o que deixa
+	# o técnico achar a que procura sem ler todos os títulos.
+	draw_rect(Rect2(rect.position, Vector2(8.0, rect.size.y)), cor)
+	_texto(titulo, rect.position.y + 40.0, 16, Paleta.para_texto(cor), HORIZONTAL_ALIGNMENT_LEFT, rect.position.x + 40.0, rect.size.x - 80.0)
 
 ## Um par − / + com o valor no meio e a legenda embaixo. Os retângulos
 ## saem de `PASSOS`, os mesmos que o clique consulta — texto e área de

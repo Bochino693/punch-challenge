@@ -111,12 +111,20 @@ o outro ficar pequeno.
 ABERTURA → (START) → ENTRADA → 3, 2, 1 → SENSOR ARMADO → IMPACTO → RESULTADO
 ```
 
-**Abertura.** É a tela que fica ligada o dia inteiro no salão, e é ela
-que faz alguém atravessar o corredor para jogar: a logo da Lazer & Sport
-em tamanho grande, raios girando, o nome do jogo em néon, o convite
-piscando, os números da casa e os **três passos de como jogar**. Sem
-crédito no modo ficha, o convite troca de texto em vez de sumir — quem
-chegou perto precisa saber o que fazer.
+**Abertura: três telas, alternando sozinhas.** Uma máquina parada não
+fica repetindo o mesmo cartaz — ela conta o jogo em capítulos, e é o
+rodízio que segura quem passa no corredor por tempo suficiente para
+decidir jogar. A cada sete segundos troca entre:
+
+1. **A marca** — a logo da casa montada como letreiro, o nome do jogo e
+   o recorde a bater, no mesmo medalhão que o jogo usa.
+2. **Melhores da casa** — as cinco marcas, com ouro, prata e bronze.
+3. **Como jogar** — os três passos, do tamanho de quem lê de longe.
+
+O convite e os números da máquina ficam FIXOS nas três, porque não podem
+depender de a pessoa ter chegado na página certa. Sem crédito no modo
+ficha, o convite troca de texto em vez de sumir — quem chegou perto
+precisa saber o que fazer.
 
 **START entra no jogo.** Em modo ficha, o crédito é debitado aqui; em
 modo livre, START entra direto.
@@ -174,7 +182,13 @@ momento pelo qual o cliente pagou.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
 - Pontuação de potência de 0 a 999 baseada na velocidade medida.
 - Sete vereditos, distribuídos pelas três faixas ajustáveis.
-- Recorde, número total de partidas e saldo de créditos persistentes.
+- Ranking das cinco melhores marcas, persistente, com a posição
+  conquistada anunciada no fim da rodada. Cinco e não uma: com recorde
+  único, quem não bate o recorde não ganha nada, e o recorde de uma
+  máquina movimentada fica inalcançável em uma semana — entrar em quinto
+  ainda é entrar, e é essa vitória pequena que vende a segunda ficha.
+  Quem já tinha um recorde salvo não o perde: ele vira a primeira linha.
+- Número total de partidas e saldo de créditos persistentes.
 - Modo Livre ou 1 Ficha selecionável na Central Técnica.
 - `START`: entra no jogo e joga de novo depois do resultado.
 - `SELECT`: adiciona um crédito.
