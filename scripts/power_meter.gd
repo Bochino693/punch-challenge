@@ -82,14 +82,18 @@ func _draw() -> void:
 ## a coluna colorida que salta, e não a caixa em volta dela.
 func _moldura(trilho: Rect2, w: float, rotulo_altura: float, h: float) -> void:
 	var caixa := Rect2(0.0, 0.0, w, h)
-	draw_rect(caixa.grow(2.0).abs(), Paleta.SOMBRA)
+	draw_rect(Rect2(caixa.position + Vector2(0.0, 6.0), caixa.size), Paleta.SOMBRA)
 	draw_rect(caixa, Paleta.CARTAO)
-	draw_rect(caixa, Paleta.CARTAO_BORDA, false, 2.0)
+	# BISEL MARINHO, igual ao do visor do medalhão: as duas peças de
+	# instrumento da tela têm de parecer o mesmo equipamento.
+	draw_rect(caixa, Paleta.MARINHO, false, 5.0)
+	# Verniz: um reflexo claro na parte de cima da chapa.
+	draw_rect(Rect2(5.0, 5.0, w - 10.0, h * 0.14), Color(1, 1, 1, 0.55))
 	draw_line(
 		Vector2(10.0, h - rotulo_altura), Vector2(w - 10.0, h - rotulo_altura),
 		Paleta.CARTAO_BORDA, 1.5
 	)
-	draw_rect(trilho.grow(5.0), Paleta.CARTAO_BORDA)
+	draw_rect(trilho.grow(6.0), Paleta.MARINHO)
 	draw_rect(trilho, Paleta.VAZIO)
 
 ## As três zonas, pintadas atrás do trilho: a régua da máquina. Num tema

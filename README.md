@@ -49,6 +49,42 @@ Dois detalhes que só existem porque o tema é claro:
   não funciona sobre quase-branco. O golpe acende em âmbar e escurece as
   bordas ao mesmo tempo: o que o olho lê como flash é o contraste.
 
+### Acabamento de fliperama
+
+A referência é máquina de salão de verdade (PUNCH & KICK, KUNG FU): o que
+faz aquilo parecer equipamento caro, e não desenho, são três coisas — e
+as três estão aqui.
+
+**O medalhão.** Uma máquina de fliperama tem UM visor, e é ele que a
+pessoa olha o jogo inteiro. Aqui é a mesma peça em todos os momentos, e
+só muda o que está escrito dentro: `3, 2, 1` na contagem, os pontos da
+carga enquanto se segura a barra, traços piscando no impacto e a
+pontuação subindo no fim. Quatro faixas concêntricas, sem uma invadir a
+outra: raios girando por fora, o anel de faixa (que é o relógio — enche
+na contagem do placar e esvazia nos oito segundos do soco), o bisel e o
+vidro. O rótulo é serigrafado em curva na faixa, como no painel real.
+
+**O visor de sete segmentos** (`scripts/visor_led.gd`). Não é fonte: é
+segmento a segmento. O que faz o olho reconhecer um painel de LED não é
+o formato do algarismo, é o **segmento apagado** — num visor de verdade
+os sete traços estão sempre lá, e os que não fazem parte do número ficam
+visíveis, escuros. Nenhuma fonte dá isso. Cada traço aceso ainda leva um
+miolo quase branco, porque um LED aceso estoura no centro e guarda a cor
+só na borda.
+
+**A letra de fliperama** (`_letreiro`). Três passadas sobre a mesma
+palavra: um contorno grosso quase preto, que segura a letra sobre
+qualquer fundo; a palavra alguns pixels acima num tom claro, cujo
+resquício virando por cima da borda faz o brilho do topo (o Godot
+desenha texto de uma cor só, então o degradê é simulado assim); e o
+preenchimento. Com halo, entra antes um contorno largo e transparente na
+cor de destaque.
+
+Fora isso: o vinil do saco ganhou uma faixa de verniz estreita e quase
+branca — é o risco de luz que separa vinil de feltro — e o medidor ganhou
+o mesmo bisel marinho do visor, para as duas peças de instrumento da
+tela parecerem o mesmo equipamento.
+
 ### Como a tela se organiza
 
 A tela é dividida em **bandas horizontais fixas**, declaradas no topo de
@@ -126,6 +162,9 @@ momento pelo qual o cliente pagou.
 - Medidor de potência com escala numerada, as três zonas coloridas da
   máquina e o traço do recorde da casa.
 - Tema claro inteiro num arquivo só (`scripts/paleta.gd`).
+- Medalhão com visor de sete segmentos, anel-relógio e rótulo curvo,
+  compartilhado por todos os momentos da partida.
+- Letras de fliperama com contorno grosso, brilho de topo e halo.
 - Ícones desenhados em código (`scripts/icones.gd`): troféu, luva, ficha,
   raio, alvo, botão e estrela. Sem arquivo de imagem — não somem se
   faltar um PNG, não serrilham em outra resolução e mudam de cor junto

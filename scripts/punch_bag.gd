@@ -238,6 +238,13 @@ func _perfil(u: float) -> float:
 ## realce lava o preto e a tampa vira uma peça de madeira clara.
 func _tom(base: Color, u: float, contraluz := true, amplitude := 1.0) -> Color:
 	var cor: Color = base.darkened(0.34 * amplitude).lerp(base.lightened(0.46 * amplitude), _luz(u))
+	# VERNIZ: uma faixa de brilho ESTREITA e quase branca, separada da
+	# luz difusa. É a diferença entre vinil e feltro — o vinil devolve a
+	# lâmpada do teto num risco fino, e é esse risco que dá o aspecto de
+	# equipamento novo em vez de desenho chapado.
+	if contraluz:
+		var verniz := pow(clampf(1.0 - absf(u + 0.46) / 0.26, 0.0, 1.0), 1.8)
+		cor = cor.lerp(Color("ffe9ee"), verniz * 0.55)
 	if contraluz and u > 0.72:
 		cor = cor.lerp(Color("ff8fa8"), (u - 0.72) / 0.28 * 0.30)
 	if _impacto > 0.01:
@@ -296,15 +303,23 @@ func _desenhar_mira(topo: float, altura: float, largura: float) -> void:
 	var centro := Vector2(0.0, topo + altura * 0.42)
 	var pulso := 0.5 + 0.5 * sin(tempo * 5.0)
 	var r := largura * 0.42 + pulso * 12.0
-	var cor := Color(1.0, 0.30, 0.42, 0.55 + 0.45 * pulso)
+	var cor := Color(Paleta.CREME, 0.6 + 0.4 * pulso)
 	var braco := r * 0.42
+	# Cada cantoneira leva um traço escuro por baixo: mira vermelha sobre
+	# vinil vermelho não se enxerga, e o contorno resolve sem trocar a
+	# cor do saco.
 	for sx in [-1.0, 1.0]:
 		for sy in [-1.0, 1.0]:
 			var canto := centro + Vector2(sx * r, sy * r * 1.06)
-			draw_line(canto, canto - Vector2(sx * braco, 0.0), cor, 5.0, true)
-			draw_line(canto, canto - Vector2(0.0, sy * braco), cor, 5.0, true)
-	draw_polyline(_elipse(centro, r * 0.30, r * 0.33, 28), Color(1, 1, 1, 0.75), 3.0, true)
-	draw_circle(centro, 7.0, cor)
+			for passada in [[Color(Paleta.SACO_CONTORNO, 0.7), 9.0], [cor, 5.0]]:
+				var c: Color = passada[0]
+				var l: float = passada[1]
+				draw_line(canto, canto - Vector2(sx * braco, 0.0), c, l, true)
+				draw_line(canto, canto - Vector2(0.0, sy * braco), c, l, true)
+	draw_polyline(_elipse(centro, r * 0.30, r * 0.33, 28), Color(Paleta.SACO_CONTORNO, 0.7), 6.0, true)
+	draw_polyline(_elipse(centro, r * 0.30, r * 0.33, 28), cor, 3.0, true)
+	draw_circle(centro, 8.0, Color(Paleta.SACO_CONTORNO, 0.7))
+	draw_circle(centro, 6.0, cor)
 
 ## A silhueta exata da cápsula, como linha fechada.
 func _capsula(topo: float, base: float, meia: float, raio: float) -> PackedVector2Array:

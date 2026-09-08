@@ -51,6 +51,13 @@ const ROXO := Color("7040e8")
 const ROSA := Color("e0338a")
 ## Azul profundo do bezel do letreiro e das bordas fortes.
 const MARINHO := Color("1c3566")
+## Contorno das letras de fliperama. Quase preto, e não o marinho: o
+## contorno grosso só funciona se for MUITO mais escuro que o
+## preenchimento — é ele que segura a letra sobre qualquer fundo.
+const CONTORNO := Color("11172b")
+## O vidro escuro do visor de LED, e o brilho do reflexo em cima dele.
+const VISOR_FUNDO := Color("111b30")
+const VISOR_VIDRO := Color("3f5480")
 
 ## Cores de festa — confete e fogos. Escurecidas o suficiente para
 ## aparecerem sobre um fundo claro; branco puro sumiria.

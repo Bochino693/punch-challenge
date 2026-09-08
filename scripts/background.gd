@@ -19,9 +19,9 @@ extends Control
 
 ## Onde o refletor aponta, em fração da tela. Combina com o centro do
 ## saco definido em `scenes/main.tscn`.
-const FOCO := Vector2(0.481, 0.34)
+const FOCO := Vector2(0.481, 0.29)
 ## Altura do piso, em fração da tela.
-const HORIZONTE := 0.625
+const HORIZONTE := 0.58
 ## Em quantas faixas o céu é pintado. Bastante para o degradê não
 ## mostrar bandas, pouco o suficiente para não pesar num PC de salão.
 const FAIXAS_DO_CEU := 64
