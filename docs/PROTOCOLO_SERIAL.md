@@ -62,7 +62,7 @@ aparece só na linha de diagnóstico da Central Técnica.
 
 ### `CONFIG` em detalhe
 
-`CONFIG,X,0.450,0.50,2.50`
+`CONFIG,X,0.450,0.80,3.50`
 
 | Campo | Unidade | Faixa | O que é |
 | --- | --- | --- | --- |
@@ -99,6 +99,11 @@ fechar a Central Técnica. O botão **ENVIAR CONFIG** existe para reenviar
 O sensor mede **velocidade**, não força em newtons nem em quilogramas-força.
 A pontuação de 0 a 999 é uma escala de arcade calibrada, não uma medição
 de física.
+
+No jogo a velocidade é normalizada entre `vmin` e `vmax`, passa por
+`smoothstep` e depois por uma potência configurável. O padrão difícil usa
+expoente `2,00`; isso distribui melhor as notas e reserva 900–999 para os
+golpes realmente próximos da velocidade máxima.
 
 ---
 

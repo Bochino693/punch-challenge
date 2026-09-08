@@ -26,14 +26,12 @@ Para testar no PC do escritório, sem girar o monitor, a janela abre em
 540 × 960 (`window_width_override` no `project.godot`) — a proporção é a
 mesma, só menor.
 
-### Tema claro
+### Tema arena neon
 
-A máquina trabalha num salão de festas iluminado, no meio de infláveis e
-mesas de aniversário. **Tela escura ali parece monitor desligado**, e o
-preto engole justamente o vermelho da marca da casa, que é o que precisa
-aparecer do outro lado do corredor. Então o jogo é claro: céu em degradê,
-piso em perspectiva, refletor quente sobre o saco, e as peças são cartões
-brancos com sombra e tinta escura em cima.
+O jogo combina o azul e vermelho da Lazer & Sport com uma arena
+marinho/preta, painéis tecnológicos e luzes ciano, magenta, verde e âmbar.
+O contraste mantém o placar legível a distância e aproxima a apresentação
+das máquinas modernas de boxe com câmera e ranking visual.
 
 Todas as cores moram em `scripts/paleta.gd`. Fundo, saco, medidor,
 moldura e textos leem de lá, então o tema é uma coisa só — mudar a cara
@@ -111,7 +109,7 @@ o outro ficar pequeno.
 ABERTURA → (START) → ENTRADA → 3, 2, 1 → SENSOR ARMADO → IMPACTO → RESULTADO
 ```
 
-**Abertura: três telas, alternando sozinhas.** Uma máquina parada não
+**Abertura: quatro telas, alternando sozinhas.** Uma máquina parada não
 fica repetindo o mesmo cartaz — ela conta o jogo em capítulos, e é o
 rodízio que segura quem passa no corredor por tempo suficiente para
 decidir jogar. A cada sete segundos troca entre:
@@ -120,6 +118,7 @@ decidir jogar. A cada sete segundos troca entre:
    o recorde a bater, no mesmo medalhão que o jogo usa.
 2. **Melhores da casa** — as cinco marcas, com ouro, prata e bronze.
 3. **Como jogar** — os três passos, do tamanho de quem lê de longe.
+4. **Você no ranking** — prévia da câmera e explicação das fotos locais.
 
 O convite e os números da máquina ficam FIXOS nas três, porque não podem
 depender de a pessoa ter chegado na página certa. Sem crédito no modo
@@ -137,7 +136,7 @@ está pressionada, o número grande na tela e a coluna do medidor mostram
 quantos pontos o golpe vale *se soltar agora* — não a fração do tempo
 segurado. A conversão de tempo em pontos é uma curva, então uma barra
 proporcional ao tempo mostraria 60 % quando o golpe valeria 640. É a
-mesma chamada de `GameDef.pontos_da_carga` que o placar usa depois, e
+mesma chamada de `ScoreCurve.points_from_charge` que o placar usa depois, e
 por isso o número prometido e o número pago não têm como divergir.
 
 **O resultado tem três faixas**, e é isso que faz o cliente jogar de novo:
@@ -169,7 +168,7 @@ momento pelo qual o cliente pagou.
   a 20° — o saco reage ao soco sem sair do enquadramento.
 - Medidor de potência com escala numerada, as três zonas coloridas da
   máquina e o traço do recorde da casa.
-- Tema claro inteiro num arquivo só (`scripts/paleta.gd`).
+- Tema de arena neon inteiro num arquivo só (`scripts/paleta.gd`).
 - Medalhão com visor de sete segmentos, anel-relógio e rótulo curvo,
   compartilhado por todos os momentos da partida.
 - Letras de fliperama com contorno grosso, brilho de topo e halo.
@@ -180,15 +179,20 @@ momento pelo qual o cliente pagou.
 - A marca da casa montada como letreiro de parque: placa creme, moldura
   marinho e lâmpadas correndo em volta.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
-- Pontuação de potência de 0 a 999 baseada na velocidade medida.
+- Pontuação de 0 a 999 baseada em curva gradual `smoothstep + gamma`.
+  O padrão difícil usa expoente `2,00`; o cálculo antigo com `0,8`, que
+  favorecia demais golpes médios, não é mais utilizado.
 - Sete vereditos, distribuídos pelas três faixas ajustáveis.
-- Ranking das cinco melhores marcas, persistente, com a posição
+- Ranking das cinco melhores marcas, persistente, com foto local do
+  jogador quando a câmera está disponível e com a posição
   conquistada anunciada no fim da rodada. Cinco e não uma: com recorde
   único, quem não bate o recorde não ganha nada, e o recorde de uma
   máquina movimentada fica inalcançável em uma semana — entrar em quinto
   ainda é entrar, e é essa vitória pequena que vende a segunda ficha.
   Quem já tinha um recorde salvo não o perde: ele vira a primeira linha.
 - Número total de partidas e saldo de créditos persistentes.
+- Estatísticas diárias locais: partidas, média, melhor marca, faixas de
+  força e entradas no Top 5.
 - Modo Livre ou 1 Ficha selecionável na Central Técnica.
 - `START`: entra no jogo e joga de novo depois do resultado.
 - `SELECT`: adiciona um crédito.
@@ -240,16 +244,30 @@ estabilizada, aterramento correto e cabo de sinal blindado.
 Sem a extensão serial, ou sem Arduino, o jogo continua funcionando em
 **modo simulação** — nada trava por falta de hardware.
 
+### Câmera no Windows
+
+O `CameraServer` do Godot não fornece webcam no Windows. Por isso o projeto
+inclui `tools/camera_bridge.py`, uma ponte local por OpenCV. Instale uma vez:
+
+```powershell
+py -m pip install -r tools/requirements-camera.txt
+```
+
+O jogo inicia e encerra a ponte automaticamente. As imagens ficam somente
+em `user://ranking_photos`; não há envio para internet nem reconhecimento
+facial. Sem Python, OpenCV, permissão ou webcam, aparece um avatar e todo o
+restante do jogo continua funcionando.
+
 ## Central Técnica (F9)
 
 | Seção | Para quê |
 | --- | --- |
 | **Modo de operação** | Livre ou 1 ficha por partida. |
 | **Faixas do placar** | Os dois limites que separam fraco, médio e forte. A régua colorida acima muda na hora — o técnico regula olhando o resultado. |
-| **Velocidade que vira ponto** | Que velocidade vale 0 e que velocidade vale 999. |
+| **Velocidade que vira ponto** | Velocidades mínima/máxima e expoente da curva gradual. |
 | **Sensor e firmware** | Porta serial, eixo do golpe, raio do braço e sensibilidade. |
-| **Ações no firmware** | Enviar a configuração e pedir um golpe de teste. |
-| **Diagnóstico** | Telemetria ao vivo, contadores e reconexão. |
+| **Ações no firmware** | Enviar configuração, testar sensor, câmera e fotografia. |
+| **Diagnóstico** | Telemetria, estatísticas, ranking, fotos e reconexão. |
 
 Cada par `−` / `+` sai da tabela `PASSOS` no topo de `scripts/main.gd`: o
 mesmo retângulo desenha o botão e confere o clique, e o valor é
@@ -258,7 +276,8 @@ cobrir uma área de toque.
 
 ## Calibração da pontuação
 
-1. Na Central Técnica, deixe a mínima em `0,8 m/s` e a máxima em `12,0 m/s`.
+1. Na Central Técnica, deixe a mínima em `0,8 m/s`, a máxima em `12,0 m/s`
+   e a curva difícil em `γ 2,00`.
 2. Faça dez golpes leves e anote aproximadamente as velocidades
    (aparecem na linha de diagnóstico).
 3. Faça dez golpes fortes com segurança e anote o maior valor repetível.
@@ -276,7 +295,8 @@ desça.
 Durante a janela do soco, **segure a barra de espaço para carregar e
 solte para socar**: quanto mais tempo segura, mais forte o golpe. O
 número grande na tela mostra, a cada instante, exatamente quantos pontos
-sairão se você soltar naquele momento. Fora da janela, a barra de espaço
+sairão se você soltar naquele momento. A carga máxima exige cerca de
+`2,8 s`; sensor e teclado passam pela mesma curva. Fora da janela, a barra de espaço
 faz o papel do START. `C` adiciona crédito e `F9` abre a Central Técnica.
 
 Essas instruções só aparecem no rodapé **quando o sensor não está

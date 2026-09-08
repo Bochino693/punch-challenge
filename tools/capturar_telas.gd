@@ -27,6 +27,7 @@ func _initialize() -> void:
 		{"nome": "01_abertura", "fn": _abertura},
 		{"nome": "01b_recordes", "fn": _abertura_recordes},
 		{"nome": "01c_como_jogar", "fn": _abertura_como_jogar},
+		{"nome": "01d_camera", "fn": _abertura_camera},
 		{"nome": "02_contagem", "fn": _contagem},
 		{"nome": "03_armado", "fn": _armado},
 		{"nome": "04_carga", "fn": _carga},
@@ -64,7 +65,7 @@ func _preparar(estado: int) -> void:
 	jogo.medidor.visible = estado != GameDef.State.IDLE
 
 func _abertura() -> void:
-	jogo.ranking.assign([872, 705, 640, 512, 388])
+	jogo.ranking = RankingStore.migrate([872, 705, 640, 512, 388])
 	jogo.plays = 431
 	jogo.credits = 3
 	jogo.medidor.recorde = 872
@@ -80,6 +81,10 @@ func _abertura_recordes() -> void:
 func _abertura_como_jogar() -> void:
 	_abertura()
 	jogo.state_time = jogo.ABERTURA_SEGUNDOS * 2.0 + 2.0
+
+func _abertura_camera() -> void:
+	_abertura()
+	jogo.state_time = jogo.ABERTURA_SEGUNDOS * 3.0 + 2.0
 
 func _contagem() -> void:
 	_preparar(GameDef.State.COUNTDOWN)
