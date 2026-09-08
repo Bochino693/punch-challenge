@@ -26,6 +26,7 @@ extends Control
 ## mais tempo segura, mais forte o soco (ScoreCurve.points_from_charge).
 
 const TELA := Vector2(1080.0, 1920.0)
+const ArcadeStage = preload("res://scripts/presentation/arcade_stage.gd")
 
 # ======================================================================
 # AS BANDAS DA TELA
@@ -178,6 +179,12 @@ var camera_enabled := true
 var camera_mirrored := true
 var statistics: Dictionary = {}
 var result_photo_path := ""
+var pose_finished := false
+var photo_retained := false
+var ranking_announced := false
+var intro_active := true
+var intro_time := 0.0
+var intro_hit_played := false
 var _photo_cache: Dictionary = {}
 
 var fx := PunchFX.new()
@@ -209,6 +216,7 @@ func _ready() -> void:
 	_aplicar_faixas()
 	_iniciar_serial()
 	_entrar_em_abertura()
+	sons.play("start", -9.0)
 	set_process(true)
 
 func _exit_tree() -> void:
@@ -279,6 +287,15 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _processar_abertura(delta: float) -> void:
+	if intro_active:
+		intro_time += delta
+		if intro_time >= 0.8 and not intro_hit_played:
+			intro_hit_played = true
+			sons.play("hit", -8.0)
+		if intro_time >= ArcadeStage.INTRO_SECONDS:
+			intro_active = false
+			state_time = 0.0
+		return
 	if randf() < delta * 4.0:
 		fx.poeira(
 			Vector2(randf_range(120.0, 960.0), TELA.y + 40.0),
@@ -287,21 +304,27 @@ func _processar_abertura(delta: float) -> void:
 
 func _processar_contagem(delta: float) -> void:
 	countdown_left -= delta
+	if not pose_finished and countdown_left <= 0.0:
+		pose_finished = true
+		result_photo_path = camera_service.capture_photo() if camera_service != null else ""
+		if not result_photo_path.is_empty():
+			_photo_texture(result_photo_path)
+		clarao = 0.65
+		sons.play("shutter", -5.0)
+		return
 	var atual := maxi(0, int(ceil(countdown_left)))
 	if atual > 0 and atual < last_count:
 		last_count = atual
 		sons.play("count")
-		fx.onda(_alvo(), 60.0, 340.0, Color(Paleta.CIANO, 0.5), 6.0, 0.6)
-	if countdown_left <= 0.0:
+	if countdown_left <= -1.2:
 		state = GameDef.State.ARMED
 		state_time = 0.0
 		armed_left = GameDef.JANELA_DO_SOCO
 		carga_tempo = -1.0
 		sons.play("go")
+		sons.music(-19.0)
 		moldura.set_estado(LedFrame.ARMADA)
 		saco.set_alvo(true)
-		fx.onda(_alvo(), 40.0, 560.0, Color(Paleta.VERMELHO, 0.55), 10.0, 0.8)
-		_show_notice("SENSOR ARMADO")
 
 func _processar_armado(delta: float) -> void:
 	armed_left -= delta
@@ -348,6 +371,10 @@ func _processar_resultado(delta: float) -> void:
 	elif verdict_time >= 0.0:
 		verdict_time += delta
 		_manter_festa(delta)
+		if verdict_time >= 2.5 and not ranking_announced:
+			ranking_announced = true
+			sons.play("ranking", -5.0)
+			sons.music(-24.0)
 
 	if result_time > GameDef.RESULTADO_TIMEOUT:
 		_entrar_em_abertura()
@@ -470,15 +497,21 @@ func _iniciar_rodada() -> void:
 			sons.play("error", -6.0)
 			return
 		credits -= 1
+	_discard_round_photo()
+	intro_active = false
+	sons.stop("score_loop")
 	state = GameDef.State.COUNTDOWN
 	posicao_no_ranking = 0
-	saco.visible = true
-	medidor.visible = true
+	saco.visible = false
+	medidor.visible = false
 	state_time = 0.0
 	countdown_left = 3.0
 	last_count = 3
 	result_score = 0
 	result_photo_path = ""
+	pose_finished = false
+	photo_retained = false
+	ranking_announced = false
 	displayed_score = 0.0
 	fx.limpar()
 	medidor.reset()
@@ -486,13 +519,14 @@ func _iniciar_rodada() -> void:
 	clarao = 1.0
 	tremor = 14.0
 	sons.play("start")
+	sons.music(-24.0)
 	moldura.set_estado(LedFrame.CONTAGEM)
 	fundo.matiz = Color(0, 0, 0, 0)
-	fx.onda(TELA * 0.5, 40.0, 1100.0, Color(Paleta.CIANO, 0.55), 14.0, 0.85)
 	_salvar()
 
 func _entrar_em_abertura() -> void:
-	sons.stop("score_loop")
+	_discard_round_photo()
+	sons.silence()
 	state = GameDef.State.IDLE
 	state_time = 0.0
 	verdict_time = -1.0
@@ -508,6 +542,12 @@ func _entrar_em_abertura() -> void:
 	saco.set_carga(-1.0)
 	moldura.set_estado(LedFrame.PARADA)
 	fundo.matiz = Color(0, 0, 0, 0)
+
+func _discard_round_photo() -> void:
+	if not photo_retained and not result_photo_path.is_empty():
+		RankingStore.delete_photo(result_photo_path)
+	result_photo_path = ""
+	photo_retained = false
 
 func _add_credit() -> void:
 	credits = mini(credits + 1, GameDef.CREDITOS_MAX)
@@ -534,16 +574,16 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	saco.golpear(forca)
 	moldura.impacto(0.4 + forca * 0.6)
 	sons.play("hit", 1.5)
+	sons.stop("charge")
+	sons.music(-32.0)
 	tremor = 10.0 + forca * 22.0
 	clarao = 0.25 + forca * 0.45
 	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
 	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
 	plays += 1
-	result_photo_path = camera_service.capture_photo() if camera_service != null else ""
-	if not result_photo_path.is_empty():
-		_photo_texture(result_photo_path)
 	var origem := "SIMULAÇÃO" if simulado else "MPU-6050"
 	posicao_no_ranking = _entrar_no_ranking(result_score, result_photo_path, origem)
+	photo_retained = posicao_no_ranking > 0
 	statistics = StatisticsStore.record(
 		statistics, result_score,
 		GameDef.faixa_de(result_score, limiar_fraco, limiar_forte),
@@ -554,6 +594,7 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 
 func _disparar_veredito() -> void:
 	sons.stop("score_loop")
+	sons.music(-28.0)
 	## O momento em que a máquina diz quanto valeu o soco. Um por golpe.
 	verdict_time = 0.0
 	proximo_fogo = 0.0
@@ -588,7 +629,9 @@ func _disparar_veredito() -> void:
 			fx.poeira(alvo + Vector2(0, 240.0), 26, Color(0.45, 0.50, 0.62, 0.45), 260.0)
 
 	if posicao_no_ranking == 1:
-		sons.play("record", 2.0)
+		for sound in ["win", "medium", "lose", "legendary"]:
+			sons.stop(sound)
+		sons.play("record", -2.0)
 
 # ======================================================================
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
@@ -744,12 +787,17 @@ func _toggle_central() -> void:
 		if state != GameDef.State.IDLE and state != GameDef.State.RESULT:
 			_entrar_em_abertura()
 		central_aberta = true
+		sons.silence()
 		if link != null and link.available():
 			portas_visiveis = link.list_ports()
 		sons.play("menu", -4.0)
 
 func _fechar_central() -> void:
 	central_aberta = false
+	if state == GameDef.State.RESULT:
+		sons.music(-28.0)
+		if verdict_time < 0.0:
+			sons.start_score_loop()
 	_aplicar_faixas()
 	_salvar()
 	_enviar_config()
@@ -958,6 +1006,11 @@ func _salvar() -> void:
 # DESENHO
 # ======================================================================
 func _draw() -> void:
+	fundo.visible = false
+	moldura.visible = false
+	saco.visible = false
+	medidor.visible = false
+	_draw_show_background()
 	# O TREMOR SACODE A TELA INTEIRA: um deslocamento só, antes de tudo.
 	_deslocamento = Vector2.ZERO
 	if tremor > 0.1:
@@ -965,7 +1018,10 @@ func _draw() -> void:
 		draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
 
 	if state == GameDef.State.IDLE:
-		_draw_abertura()
+		if intro_active:
+			ArcadeStage.intro(self, intro_time)
+		else:
+			_draw_show_idle()
 	elif state == GameDef.State.RESULT and verdict_time >= 2.5:
 		_draw_ranking_reveal()
 	else:
@@ -1081,7 +1137,7 @@ func _pagina_recordes(alpha: float) -> void:
 		_texto("AINDA NINGUÉM SOCOU ESTA MÁQUINA", 780.0, 32, Color(Paleta.TINTA_FRACA, alpha))
 		_texto("O PRIMEIRO NOME DA LISTA PODE SER O SEU", 832.0, 24, Color(Paleta.TINTA_LEVE, alpha))
 		return
-	var page := int(state_time / (ABERTURA_SEGUNDOS * ABERTURA_PAGINAS)) % 4
+	var page := int(state_time / 16.0) % 4
 	for row in range(5):
 		var i := page * 5 + row
 		var y := 466.0 + row * 116.0
@@ -1186,28 +1242,82 @@ func _draw_placar_abertura(alpha: float) -> void:
 ## Todos os momentos da partida compartilham o mesmo visor. O que muda é
 ## o que está escrito nele, a cor do anel e quanto do anel está aceso.
 func _draw_partida() -> void:
-	_draw_header()
-	_draw_arena_lights()
-	if state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED]:
-		_draw_camera_card(Rect2(62.0, 264.0, 214.0, 292.0), 1.0, "JOGADOR")
-
+	_texto("PUNCH CHALLENGE", 145.0, 34, Color("ffffff"))
 	match state:
 		GameDef.State.COUNTDOWN:
-			var count := clampi(int(ceil(countdown_left)), 1, 3)
-			_draw_medalhao(str(count), Paleta.CIANO, fmod(countdown_left, 1.0), 1.0)
-			_texto_arcade("PREPARE-SE", 1516.0, 46, Paleta.CIANO, LARGURA_UTIL)
+			_texto_arcade("FAÇA SUA POSE", 340.0, 72, Paleta.CIANO, LARGURA_UTIL)
+			var rect := Rect2(180, 470, 720, 720)
+			_cartao(Rect2(170, 460, 740, 740), Color("330c16"), Paleta.CIANO, 1.0, 4.0)
+			if pose_finished:
+				_draw_player_photo(rect, result_photo_path, 1.0)
+			elif camera_service != null and camera_service.available():
+				_draw_texture_cover(camera_service.preview_texture(), rect, 1.0, camera_mirrored)
+			else:
+				_draw_avatar(rect, 1.0)
+			if not pose_finished:
+				_texto(str(clampi(int(ceil(countdown_left)), 1, 3)), 1400.0, 150, Color.WHITE)
+				_texto("OLHE PARA A CÂMERA", 1510.0, 30, Paleta.CIANO)
+			else:
+				_texto("FOTO PRONTA" if not result_photo_path.is_empty() else "SEM CÂMERA • VAMOS JOGAR", 1390.0, 32, Paleta.CIANO)
+				_texto("PREPARE O SOCO", 1500.0, 46, Color.WHITE)
 		GameDef.State.ARMED:
-			_draw_armado()
-		GameDef.State.MEASURING:
-			# Visor piscando entre traços e o nada: a máquina "pensando".
-			var pisca := fmod(state_time * 9.0, 2.0) < 1.0
-			_draw_medalhao("---" if pisca else "   ", Paleta.AMBAR, 1.0, 1.0)
-			_texto_arcade("IMPACTO!", 1520.0, 74, Paleta.VERMELHO, LARGURA_UTIL)
-		GameDef.State.RESULT:
-			_draw_resultado()
+			_texto_arcade("SOQUE", 730.0, 170, Color.WHITE, LARGURA_UTIL)
+			_texto_arcade("AGORA!", 930.0, 170, Paleta.CIANO, LARGURA_UTIL)
+			var energy := clampf(carga_tempo / ScoreCurve.CHARGE_MAX_SECONDS, 0.0, 1.0)
+			for i in range(12):
+				var lit := float(i) / 12.0 <= energy
+				var y := 1220.0 - float(i) * 24.0
+				draw_line(Vector2(95, y), Vector2(145, y - 22), Color(Paleta.CIANO, 0.9 if lit else 0.13), 8.0, true)
+				draw_line(Vector2(935, y - 22), Vector2(985, y), Color(Paleta.ROSA, 0.9 if lit else 0.13), 8.0, true)
+			if carga_tempo >= 0.0:
+				_texto("SOLTE!", 1400.0, 58, Paleta.AMBAR)
+			elif not _sensor_ligado():
+				_texto("SEGURE E SOLTE ESPAÇO", 1400.0, 28, Paleta.CIANO)
+			var remaining := clampf(armed_left / GameDef.JANELA_DO_SOCO, 0.0, 1.0)
+			draw_rect(Rect2(220, 1580, 640, 6), Color("5c2530"))
+			draw_rect(Rect2(220, 1580, 640 * remaining, 6), Paleta.CIANO)
+		GameDef.State.MEASURING, GameDef.State.RESULT:
+			_draw_score_hero()
 
-	_draw_cartoes()
-	_draw_rodape(1.0)
+func _draw_show_background() -> void:
+	ArcadeStage.background(self, animation_time)
+
+func _draw_show_idle() -> void:
+	_texto("LAZER & SPORT", 220.0, 28, Paleta.CIANO)
+	if int(state_time / 8.0) % 2 == 1 and not ranking.is_empty():
+		_pagina_recordes(1.0)
+	else:
+		ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0)
+		_texto_arcade("PUNCH", 910.0, 144, Color.WHITE, LARGURA_UTIL)
+		_texto_arcade("CHALLENGE", 1010.0, 80, Paleta.AMBAR, LARGURA_UTIL)
+		_texto("QUAL É A SUA FORÇA?", 1120.0, 32, Color.WHITE)
+		_texto("RECORDE DA CASA", 1270.0, 24, Color("d8b6a6"))
+		_texto("%03d" % _melhor(), 1400.0, 98, Paleta.AMBAR)
+	var pulse := 0.8 + 0.2 * sin(animation_time * 2.6)
+	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), 1.0, 3.0)
+	_texto("PRESSIONE START", 1635.0, 46, Color.WHITE)
+	_texto("JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits, 1740.0, 26, Paleta.CIANO)
+
+func _draw_score_hero() -> void:
+	var center := Vector2(540, 930)
+	var measuring := state == GameDef.State.MEASURING
+	var progress := 0.0 if measuring else clampf(result_time / GameDef.CONTAGEM_DURACAO, 0.0, 1.0)
+	var color := Paleta.CIANO if verdict_time < 0.0 else Paleta.AMBAR
+	for i in range(12):
+		draw_arc(center, 335.0 + float(i) * 3.0, 0, TAU, 192, Color(color, 0.02), 9.0, true)
+	draw_circle(center, 326.0, Color("250911"))
+	draw_arc(center, 327, 0, TAU, 192, Color("6d2835"), 4.0, true)
+	for i in range(60):
+		var angle := float(i) / 60.0 * TAU - PI * 0.5
+		var lit := float(i) / 60.0 <= progress
+		draw_arc(center, 347, angle, angle + 0.065, 5, color if lit else Color("57212c"), 14.0, true)
+	draw_arc(center, 302, animation_time * 0.5, animation_time * 0.5 + 1.2, 64, Color(color, 0.55), 2.0, true)
+	_texto("IMPACTO" if measuring else ("SUA PONTUAÇÃO" if verdict_time >= 0.0 else "CALCULANDO"), 785.0, 25, color)
+	_texto("—" if measuring else "%03d" % int(round(displayed_score)), 1010.0, 178, Color.WHITE)
+	if verdict_time >= 0.0:
+		_texto("PONTOS", 1110.0, 26, color)
+		var title := "%dº LUGAR" % posicao_no_ranking if posicao_no_ranking > 0 else "BOM SOCO!"
+		_texto_arcade(title, 1430.0, 64, color, LARGURA_UTIL)
 
 ## A JANELA DO SOCO, E O VALOR EXATO DA CARGA.
 ##
@@ -1313,7 +1423,6 @@ func _cor_da_posicao(posicao: int) -> Color:
 func _draw_ranking_reveal() -> void:
 	saco.visible = false
 	medidor.visible = false
-	draw_rect(Rect2(Vector2.ZERO, TELA), Color("070c20"))
 	var progress := clampf((verdict_time - 2.5) / 1.6, 0.0, 1.0)
 	var eased := progress * progress * (3.0 - 2.0 * progress)
 	var position_index := maxi(posicao_no_ranking - 1, 0)
@@ -1330,7 +1439,7 @@ func _draw_ranking_reveal() -> void:
 		var color := Paleta.AMBAR if selected else _cor_da_posicao(i + 1)
 		var shift := (1.0 - eased) * (80.0 + float(i % 5) * 30.0)
 		var card := Rect2(90.0 + shift, y, 900.0, 144.0)
-		_cartao(card, Color("172540") if selected else Color("0d1730"), color, 1.0, 4.0 if selected else 1.5)
+		_cartao(card, Color("b21029") if selected else Color("300b16"), color, 1.0, 4.0 if selected else 1.5)
 		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
 		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
 		_texto("VOCÊ" if selected else "JOGADOR", y + 64.0, 26, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)

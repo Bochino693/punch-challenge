@@ -14,53 +14,53 @@ extends RefCounted
 
 # ---------------------------------------------------------------- fundo
 ## Céu do salão: claro em cima, quente perto do chão.
-const CEU_TOPO := Color("050816")
-const CEU_BASE := Color("111c3f")
+const CEU_TOPO := Color("19060d")
+const CEU_BASE := Color("4a0918")
 ## Piso do palco e as linhas de perspectiva.
-const PISO := Color("080e22")
-const PISO_LINHA := Color("174a70")
+const PISO := Color("220710")
+const PISO_LINHA := Color("8f2330")
 ## A luz do refletor, quente, caindo sobre o saco.
-const LUZ := Color("65eaff")
+const LUZ := Color("ffe044")
 ## Creme do miolo do letreiro: o fundo sobre o qual a marca é montada.
 const CREME := Color("f6fbff")
 
 # ---------------------------------------------------------------- peças
-const CARTAO := Color("101a36")
-const CARTAO_BORDA := Color("285784")
+const CARTAO := Color("330c16")
+const CARTAO_BORDA := Color("933042")
 ## Sombra padrão das peças. Azulada, não cinza: sombra cinza sobre fundo
 ## azul-claro parece sujeira.
 const SOMBRA := Color(0.0, 0.0, 0.0, 0.52)
 ## Fundo de campos e trilhos vazios.
-const VAZIO := Color("0a1128")
+const VAZIO := Color("230912")
 
 # ---------------------------------------------------------------- tinta
 const TINTA := Color("f4f8ff")        ## títulos e números
-const TINTA_FRACA := Color("adc1e3")  ## rótulos e apoio
-const TINTA_LEVE := Color("7489ad")   ## legendas discretas
+const TINTA_FRACA := Color("ead1ca")  ## rótulos e apoio
+const TINTA_LEVE := Color("bd9691")   ## legendas discretas
 
 # ---------------------------------------------------------------- marca
 ## Tiradas da logo da casa: o vermelho do alvo e o azul do dardo.
-const VERMELHO := Color("ef3b54")
-const CIANO := Color("35e6ff")
-const AMBAR := Color("ffbc32")
+const VERMELHO := Color("ff1934")
+const CIANO := Color("ffdc27")
+const AMBAR := Color("ffdc27")
 const VERDE := Color("32f2a0")
 const ROXO := Color("9965ff")
-const ROSA := Color("ff3ca6")
+const ROSA := Color("ff3047")
 ## Azul profundo do bezel do letreiro e das bordas fortes.
-const MARINHO := Color("09142f")
+const MARINHO := Color("260710")
 ## Contorno das letras de fliperama. Quase preto, e não o marinho: o
 ## contorno grosso só funciona se for MUITO mais escuro que o
 ## preenchimento — é ele que segura a letra sobre qualquer fundo.
-const CONTORNO := Color("11172b")
+const CONTORNO := Color("260710")
 ## O vidro escuro do visor de LED, e o brilho do reflexo em cima dele.
-const VISOR_FUNDO := Color("111b30")
-const VISOR_VIDRO := Color("3f5480")
+const VISOR_FUNDO := Color("220911")
+const VISOR_VIDRO := Color("aa434c")
 
 ## Cores de festa — confete e fogos. Escurecidas o suficiente para
 ## aparecerem sobre um fundo claro; branco puro sumiria.
 const FESTA := [
-	Color("ef3b54"), Color("f2a007"), Color("0f9ed6"),
-	Color("7040e8"), Color("13a877"), Color("e0338a"),
+	Color("ff1934"), Color("ffda27"), Color("fff9ef"),
+	Color("ff6230"), Color("ffb713"), Color("e91230"),
 ]
 
 # ---------------------------------------------------------------- saco
