@@ -9,7 +9,12 @@ extends SceneTree
 ## de ver se o ritmo da cut scene, das animações e das trocas de tela
 ## está bom.
 ##
-## Uso: godot --path . --script tools/gravar_sequencia.gd
+## SEMPRE COM --fixed-fps 60. Sem isso o headless roda a poucos quadros
+## por segundo e cada quadro avança quase meio segundo de jogo: a cut
+## scene inteira cabe em uma dúzia de fotos e o ritmo que se quer medir
+## não aparece. Com o passo travado, a foto N é o instante N/60.
+##
+## Uso: godot --path . --fixed-fps 60 --script tools/gravar_sequencia.gd
 ##   PUNCH_SHOTS  pasta de saída
 ##   PUNCH_ROTEIRO  "abertura" (padrão) ou "rodada"
 

@@ -27,7 +27,6 @@ func _initialize() -> void:
 		{"nome": "01_abertura", "fn": _abertura},
 		{"nome": "01b_recordes", "fn": _abertura_recordes},
 		{"nome": "01c_como_jogar", "fn": _abertura_como_jogar},
-		{"nome": "01d_camera", "fn": _abertura_camera},
 		{"nome": "02_contagem", "fn": _contagem},
 		{"nome": "03_armado", "fn": _armado},
 		{"nome": "04_carga", "fn": _carga},
@@ -57,6 +56,10 @@ func _process(_delta: float) -> bool:
 
 # --------------------------------------------------------------- momentos
 func _preparar(estado: int) -> void:
+	# A cutscene de entrada roda uma vez ao ligar a máquina e engole a
+	# abertura enquanto está no ar. Sem desligá-la aqui, TODA captura de
+	# IDLE fotografava a entrada e não a tela que se quer conferir.
+	jogo.intro_active = false
 	jogo.central_aberta = false
 	jogo.state = estado
 	jogo.state_time = 1.4
@@ -76,15 +79,11 @@ func _abertura() -> void:
 ## colocando o relógio dentro da janela dela.
 func _abertura_recordes() -> void:
 	_abertura()
-	jogo.state_time = jogo.ABERTURA_SEGUNDOS + 2.0
+	jogo.state_time = jogo.ABERTURA_DURACAO + 2.0
 
 func _abertura_como_jogar() -> void:
 	_abertura()
-	jogo.state_time = jogo.ABERTURA_SEGUNDOS * 2.0 + 2.0
-
-func _abertura_camera() -> void:
-	_abertura()
-	jogo.state_time = jogo.ABERTURA_SEGUNDOS * 3.0 + 2.0
+	jogo.state_time = jogo.ABERTURA_DURACAO * 2.0 + 2.0
 
 func _contagem() -> void:
 	_preparar(GameDef.State.COUNTDOWN)
