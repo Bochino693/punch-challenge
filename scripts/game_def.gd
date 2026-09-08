@@ -30,27 +30,29 @@ const LIMIAR_FORTE_PADRAO := 700
 const LIMIAR_FOLGA := 60
 
 ## Cor de cada faixa, usada pela moldura de LEDs, pelo medidor e pelo
-## veredito ao mesmo tempo — a tela inteira fala a mesma cor.
-const COR_FRACA := Color("7c88a8")
-const COR_MEDIA := Color("ffd23f")
-const COR_FORTE := Color("ff2d55")
+## veredito ao mesmo tempo — a tela inteira fala a mesma cor. Sai da
+## paleta, e não de um hexadecimal solto aqui, para o tema mudar de uma
+## vez em vez de mudar por partes.
+const COR_FRACA := Color("8697b4")
+const COR_MEDIA := Paleta.AMBAR
+const COR_FORTE := Paleta.VERMELHO
 
 ## Dentro de cada faixa o rótulo ainda sobe de degrau: dois socos fortes
 ## diferentes não podem ler igual, senão o placar perde a graça. `ate` é
 ## a posição relativa DENTRO da faixa (0 no piso, 1 no teto).
 const DEGRAUS := {
 	Faixa.FRACA: [
-		{"ate": 0.5, "label": "FRACO!", "color": Color("7c88a8")},
-		{"ate": 1.1, "label": "GOLPE LEVE", "color": Color("8fa8c8")},
+		{"ate": 0.5, "label": "FRACO!", "color": Color("5c6a8a")},
+		{"ate": 1.1, "label": "GOLPE LEVE", "color": Color("41699b")},
 	],
 	Faixa.MEDIA: [
-		{"ate": 0.5, "label": "BOM GOLPE", "color": Color("4beaff")},
-		{"ate": 1.1, "label": "GOLPE FORTE", "color": Color("ffd23f")},
+		{"ate": 0.5, "label": "BOM GOLPE", "color": Paleta.CIANO},
+		{"ate": 1.1, "label": "GOLPE FORTE", "color": Color("e08a00")},
 	],
 	Faixa.FORTE: [
-		{"ate": 0.40, "label": "NOCAUTE!", "color": Color("ff7a1a")},
-		{"ate": 0.80, "label": "PESO-PESADO", "color": Color("ff2d55")},
-		{"ate": 1.1, "label": "LENDÁRIO", "color": Color("b45cff")},
+		{"ate": 0.40, "label": "NOCAUTE!", "color": Color("f2691b")},
+		{"ate": 0.80, "label": "PESO-PESADO", "color": Paleta.VERMELHO},
+		{"ate": 1.1, "label": "LENDÁRIO", "color": Paleta.ROXO},
 	],
 }
 

@@ -38,8 +38,8 @@ const LIMITE_ANGULO := 0.35
 ## de trabalho.
 const TIRAS := 60
 
-const COR_BASE := Color("9c2244")
-const COR_COURO := Color("2b1420")
+const COR_BASE := Paleta.SACO_VINIL
+const COR_COURO := Paleta.SACO_COURO
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -115,24 +115,26 @@ func _draw() -> void:
 func _desenhar_sombra(w: float, h: float, saco_largura: float, inclinacao: float, corrente: float) -> void:
 	var cx := w * 0.5 - sin(inclinacao) * corrente * 1.4
 	var cy := h * 0.955
-	var rx := saco_largura * (0.62 - 0.14 * absf(sin(inclinacao)))
-	for i in range(3):
-		var k := 1.0 - float(i) * 0.30
+	var rx := saco_largura * (0.70 - 0.14 * absf(sin(inclinacao)))
+	# Cinco camadas cada vez menores: a borda da sombra some aos poucos,
+	# em vez de terminar num contorno duro no meio do piso claro.
+	for i in range(5):
+		var k := 1.0 - float(i) * 0.17
 		draw_colored_polygon(
-			_elipse(Vector2(cx, cy), rx * k, rx * 0.15 * k, 40),
-			Color(0.0, 0.0, 0.0, 0.20)
+			_elipse(Vector2(cx, cy), rx * k, rx * 0.17 * k, 44),
+			Color(0.22, 0.34, 0.55, 0.055)
 		)
 
 ## O ponto onde a corrente encontra o teto do gabinete: chapa, parafusos
 ## e manilha. Não gira com o saco — é ele que está preso, não o teto.
 func _desenhar_suporte(pivot: Vector2, w: float) -> void:
 	var chapa := Rect2(w * 0.5 - 62.0, pivot.y - 22.0, 124.0, 22.0)
-	draw_rect(chapa, Color("28324c"))
-	draw_rect(Rect2(chapa.position.x, chapa.position.y, chapa.size.x, 5.0), Color("3d4a68"))
+	draw_rect(chapa, Color("55688a"))
+	draw_rect(Rect2(chapa.position.x, chapa.position.y, chapa.size.x, 5.0), Color("8a9bb8"))
 	for i in range(4):
-		draw_circle(Vector2(chapa.position.x + 16.0 + i * 30.0, chapa.position.y + 11.0), 3.5, Color("161d2f"))
+		draw_circle(Vector2(chapa.position.x + 16.0 + i * 30.0, chapa.position.y + 11.0), 3.5, Color("2f3f5c"))
 	# Manilha em U segurando o primeiro elo.
-	draw_arc(Vector2(w * 0.5, pivot.y + 2.0), 11.0, PI, TAU, 20, Color("5a6c94"), 5.0, true)
+	draw_arc(Vector2(w * 0.5, pivot.y + 2.0), 11.0, PI, TAU, 20, Color("55688a"), 5.0, true)
 
 ## Corrente: elos de verdade, alternando o plano — um de frente, um de
 ## perfil. É a alternância que faz o olho ler "corrente" e não "linha".
@@ -144,7 +146,7 @@ func _desenhar_corrente(corrente: float) -> void:
 		var de_frente := i % 2 == 0
 		var rx := 8.5 if de_frente else 4.0
 		var ry := passo * 0.62
-		var cor := Color("6b7ea8") if de_frente else Color("46557a")
+		var cor := Color("6e819f") if de_frente else Color("4a5c7c")
 		draw_polyline(_elipse(Vector2(0.0, cy), rx, ry, 22), cor, 4.5, true)
 		# Realce de metal na lateral esquerda do elo.
 		draw_line(
@@ -182,12 +184,12 @@ func _desenhar_corpo(topo: float, altura: float, largura: float) -> void:
 	var corte_cima := func(u: float) -> float: return tampa_cima + raio_y * 0.34 * _perfil(u)
 	var corte_baixo := func(u: float) -> float: return tampa_baixo + raio_y * 0.34 * _perfil(u)
 
-	# Contorno escuro: separa o saco do preto do gabinete.
-	_tiras(
-		meia_x + 5.0,
-		func(u: float) -> float: return corpo_topo - (raio_y + 5.0) * _perfil(u) - 5.0,
-		func(u: float) -> float: return corpo_base + (raio_y + 5.0) * _perfil(u) + 5.0,
-		func(_u: float) -> Color: return Color("0d1120")
+	# Contorno: um polígono LISO por baixo, e não tiras. Tiras desenham a
+	# curva das pontas em degraus, e o degrau aparecia justamente na
+	# borda — o lugar em que o olho mais repara.
+	draw_colored_polygon(
+		_capsula(corpo_topo, corpo_base, meia_x + 5.0, raio_y + 5.0),
+		Paleta.SACO_CONTORNO
 	)
 
 	# Vinil do corpo.
@@ -200,8 +202,8 @@ func _desenhar_corpo(topo: float, altura: float, largura: float) -> void:
 		_curva_do_anel(y - 3.0, meia_x, raio_y * 0.30, Color(1.0, 0.75, 0.80, 0.10), 2.0)
 
 	# Tampas de couro, com a luz do mesmo lado do corpo.
-	_tiras(meia_x, borda_cima, corte_cima, func(u: float) -> Color: return _tom(COR_COURO, u, false, 0.45))
-	_tiras(meia_x, corte_baixo, borda_baixo, func(u: float) -> Color: return _tom(COR_COURO, u, false, 0.45))
+	_tiras(meia_x, borda_cima, corte_cima, func(u: float) -> Color: return _tom(COR_COURO, u, false, 0.60))
+	_tiras(meia_x, corte_baixo, borda_baixo, func(u: float) -> Color: return _tom(COR_COURO, u, false, 0.60))
 	_curva_do_anel(tampa_cima, meia_x, raio_y * 0.34, Color(0, 0, 0, 0.45), 3.0)
 	_curva_do_anel(tampa_baixo, meia_x, raio_y * 0.34, Color(0, 0, 0, 0.45), 3.0)
 	_rebites(tampa_cima - altura * 0.028, meia_x, raio_y)
@@ -209,7 +211,7 @@ func _desenhar_corpo(topo: float, altura: float, largura: float) -> void:
 
 	# Contorno suavizado por cima: as tiras deixam degraus na curva das
 	# pontas, e uma linha antisserrilhada na silhueta exata os apaga.
-	draw_polyline(_capsula(corpo_topo, corpo_base, meia_x, raio_y), Color("0d1120"), 5.0, true)
+	draw_polyline(_capsula(corpo_topo, corpo_base, meia_x, raio_y), Paleta.SACO_CONTORNO, 5.0, true)
 
 	# Alvo impresso no vinil, na altura em que o soco deve chegar.
 	var alvo_y := topo + altura * 0.42
@@ -235,7 +237,14 @@ func _perfil(u: float) -> float:
 ## corpo usa a escala inteira; o couro das tampas usa metade, senão o
 ## realce lava o preto e a tampa vira uma peça de madeira clara.
 func _tom(base: Color, u: float, contraluz := true, amplitude := 1.0) -> Color:
-	var cor: Color = base.darkened(0.52 * amplitude).lerp(base.lightened(0.38 * amplitude), _luz(u))
+	var cor: Color = base.darkened(0.34 * amplitude).lerp(base.lightened(0.46 * amplitude), _luz(u))
+	# VERNIZ: uma faixa de brilho ESTREITA e quase branca, separada da
+	# luz difusa. É a diferença entre vinil e feltro — o vinil devolve a
+	# lâmpada do teto num risco fino, e é esse risco que dá o aspecto de
+	# equipamento novo em vez de desenho chapado.
+	if contraluz:
+		var verniz := pow(clampf(1.0 - absf(u + 0.46) / 0.26, 0.0, 1.0), 1.8)
+		cor = cor.lerp(Color("ffe9ee"), verniz * 0.55)
 	if contraluz and u > 0.72:
 		cor = cor.lerp(Color("ff8fa8"), (u - 0.72) / 0.28 * 0.30)
 	if _impacto > 0.01:
@@ -274,7 +283,7 @@ func _rebites(y: float, meia: float, raio: float) -> void:
 	for i in range(5):
 		var u := -0.70 + float(i) * 0.35
 		var centro := Vector2(u * meia, y + raio * 0.30 * _perfil(u))
-		draw_circle(centro, 3.4, Color("55637f"))
+		draw_circle(centro, 3.4, Color("9aa8bd"))
 		draw_circle(centro + Vector2(-0.8, -0.8), 1.6, Color(1, 1, 1, 0.35))
 
 ## O alvo impresso no saco: anéis achatados, porque estão na superfície
@@ -294,15 +303,23 @@ func _desenhar_mira(topo: float, altura: float, largura: float) -> void:
 	var centro := Vector2(0.0, topo + altura * 0.42)
 	var pulso := 0.5 + 0.5 * sin(tempo * 5.0)
 	var r := largura * 0.42 + pulso * 12.0
-	var cor := Color(1.0, 0.30, 0.42, 0.55 + 0.45 * pulso)
+	var cor := Color(Paleta.CREME, 0.6 + 0.4 * pulso)
 	var braco := r * 0.42
+	# Cada cantoneira leva um traço escuro por baixo: mira vermelha sobre
+	# vinil vermelho não se enxerga, e o contorno resolve sem trocar a
+	# cor do saco.
 	for sx in [-1.0, 1.0]:
 		for sy in [-1.0, 1.0]:
 			var canto := centro + Vector2(sx * r, sy * r * 1.06)
-			draw_line(canto, canto - Vector2(sx * braco, 0.0), cor, 5.0, true)
-			draw_line(canto, canto - Vector2(0.0, sy * braco), cor, 5.0, true)
-	draw_polyline(_elipse(centro, r * 0.30, r * 0.33, 28), Color(1, 1, 1, 0.75), 3.0, true)
-	draw_circle(centro, 7.0, cor)
+			for passada in [[Color(Paleta.SACO_CONTORNO, 0.7), 9.0], [cor, 5.0]]:
+				var c: Color = passada[0]
+				var l: float = passada[1]
+				draw_line(canto, canto - Vector2(sx * braco, 0.0), c, l, true)
+				draw_line(canto, canto - Vector2(0.0, sy * braco), c, l, true)
+	draw_polyline(_elipse(centro, r * 0.30, r * 0.33, 28), Color(Paleta.SACO_CONTORNO, 0.7), 6.0, true)
+	draw_polyline(_elipse(centro, r * 0.30, r * 0.33, 28), cor, 3.0, true)
+	draw_circle(centro, 8.0, Color(Paleta.SACO_CONTORNO, 0.7))
+	draw_circle(centro, 6.0, cor)
 
 ## A silhueta exata da cápsula, como linha fechada.
 func _capsula(topo: float, base: float, meia: float, raio: float) -> PackedVector2Array:

@@ -67,8 +67,8 @@ func _draw() -> void:
 	if w <= 0.0 or h <= 0.0:
 		return
 
-	var rotulo_altura := 46.0
-	var trilho := Rect2(w * 0.46, 34.0, w * 0.40, h - rotulo_altura - 48.0)
+	var rotulo_altura := 50.0
+	var trilho := Rect2(w * 0.46, 38.0, w * 0.40, h - rotulo_altura - 54.0)
 
 	_moldura(trilho, w, rotulo_altura, h)
 	_zonas(trilho)
@@ -77,16 +77,28 @@ func _draw() -> void:
 	_recorde(trilho)
 	_rotulo(w, h, rotulo_altura)
 
-## Caixa do medidor: fundo, borda e o vidro escuro do trilho.
+## O medidor é um cartão branco com sombra, como as outras peças da tela.
+## O trilho vazio é levemente mais escuro que o cartão: num tema claro é
+## a coluna colorida que salta, e não a caixa em volta dela.
 func _moldura(trilho: Rect2, w: float, rotulo_altura: float, h: float) -> void:
 	var caixa := Rect2(0.0, 0.0, w, h)
-	draw_rect(caixa, Color(0.035, 0.055, 0.115, 0.85))
-	draw_rect(caixa, Color(0.24, 0.44, 0.78, 0.35), false, 2.0)
-	draw_rect(Rect2(0.0, h - rotulo_altura, w, 1.0), Color(0.24, 0.44, 0.78, 0.30))
-	draw_rect(trilho.grow(5.0), Color(0.08, 0.12, 0.22, 1.0))
-	draw_rect(trilho, Color(0.012, 0.02, 0.05, 1.0))
+	draw_rect(Rect2(caixa.position + Vector2(0.0, 6.0), caixa.size), Paleta.SOMBRA)
+	draw_rect(caixa, Paleta.CARTAO)
+	# BISEL MARINHO, igual ao do visor do medalhão: as duas peças de
+	# instrumento da tela têm de parecer o mesmo equipamento.
+	draw_rect(caixa, Paleta.MARINHO, false, 5.0)
+	# Verniz: um reflexo claro na parte de cima da chapa.
+	draw_rect(Rect2(5.0, 5.0, w - 10.0, h * 0.14), Color(1, 1, 1, 0.55))
+	draw_line(
+		Vector2(10.0, h - rotulo_altura), Vector2(w - 10.0, h - rotulo_altura),
+		Paleta.CARTAO_BORDA, 1.5
+	)
+	draw_rect(trilho.grow(6.0), Paleta.MARINHO)
+	draw_rect(trilho, Paleta.VAZIO)
 
-## As três zonas, pintadas fracas atrás do trilho: a régua da máquina.
+## As três zonas, pintadas atrás do trilho: a régua da máquina. Num tema
+## claro elas podem ser bem mais fortes do que num escuro sem virar
+## borrão, e é isso que deixa a régua legível a três metros.
 func _zonas(trilho: Rect2) -> void:
 	var faixas := [
 		[0.0, float(_limiar_fraco) / GameDef.SCORE_MAX, GameDef.COR_FRACA],
@@ -99,12 +111,11 @@ func _zonas(trilho: Rect2) -> void:
 		var cor: Color = f[2]
 		var y0 := trilho.end.y - trilho.size.y * ate
 		var y1 := trilho.end.y - trilho.size.y * de
-		draw_rect(Rect2(trilho.position.x, y0, trilho.size.x, y1 - y0), Color(cor.r, cor.g, cor.b, 0.13))
-		# Traço divisor no limite superior da zona.
+		draw_rect(Rect2(trilho.position.x, y0, trilho.size.x, y1 - y0), Paleta.tinta_clara(cor, 0.30))
 		if ate < 1.0:
 			draw_line(
-				Vector2(trilho.position.x - 6.0, y0), Vector2(trilho.end.x + 6.0, y0),
-				Color(cor.r, cor.g, cor.b, 0.75), 2.0
+				Vector2(trilho.position.x - 7.0, y0), Vector2(trilho.end.x + 7.0, y0),
+				cor, 2.5
 			)
 
 ## Marcas numeradas à esquerda do trilho.
@@ -112,18 +123,29 @@ func _escala(trilho: Rect2) -> void:
 	for valor in MARCAS:
 		var t := float(valor) / float(GameDef.SCORE_MAX)
 		var y := trilho.end.y - trilho.size.y * t
-		draw_line(Vector2(trilho.position.x - 12.0, y), Vector2(trilho.position.x - 3.0, y), Color(0.45, 0.56, 0.78, 0.8), 2.0)
+		draw_line(
+			Vector2(trilho.position.x - 13.0, y), Vector2(trilho.position.x - 3.0, y),
+			Paleta.TINTA_LEVE, 2.0
+		)
 		if fonte != null:
 			draw_string(
 				fonte, Vector2(0.0, y + 6.0), str(valor), HORIZONTAL_ALIGNMENT_RIGHT,
-				trilho.position.x - 18.0, 17, Color(0.52, 0.62, 0.82, 0.9)
+				trilho.position.x - 19.0, 17, Paleta.TINTA_FRACA
 			)
-	# Marcas menores de 100 em 100, sem número.
 	for i in range(1, 10):
 		var y := trilho.end.y - trilho.size.y * (float(i) / 10.0)
-		draw_line(Vector2(trilho.end.x - 6.0, y), Vector2(trilho.end.x, y), Color(0.4, 0.5, 0.7, 0.35), 1.0)
+		draw_line(
+			Vector2(trilho.end.x - 6.0, y), Vector2(trilho.end.x, y),
+			Color(Paleta.TINTA_LEVE, 0.55), 1.0
+		)
 
 ## A coluna que sobe, e o cursor que marca onde ela parou.
+##
+## A CARGA MOSTRA O VALOR EXATO. Enquanto a barra de espaço está
+## pressionada, `carga` já vem convertido em pontos pelo jogo — não é
+## "quanto tempo você segurou", é "quanto vale se você soltar agora".
+## Por isso ela usa a cor da faixa e o mesmo cursor do resultado: o que
+## a coluna promete durante a carga é exatamente o que o placar vai dar.
 func _coluna(trilho: Rect2) -> void:
 	var nivel := nivel_visivel
 	var carregando := carga >= 0.0
@@ -133,33 +155,36 @@ func _coluna(trilho: Rect2) -> void:
 		return
 
 	var cor := cor_do_nivel(nivel)
-	if carregando:
-		# Carga: energia acumulando, ainda não é resultado. Pulsa e não
-		# usa a cor da faixa, para não prometer nota antes da hora.
-		cor = Color("4beaff")
-		cor.a = 0.70 + 0.30 * sin(tempo * 18.0)
-
 	var topo_y := trilho.end.y - trilho.size.y * nivel
 	var preenchido := Rect2(trilho.position.x, topo_y, trilho.size.x, trilho.end.y - topo_y)
-	draw_rect(preenchido, Color(cor.r, cor.g, cor.b, 0.92))
-	# Brilho interno na lateral esquerda: a coluna ganha volume.
+	draw_rect(preenchido, cor)
+	# Brilho na lateral esquerda e sombra na direita: a coluna ganha volume.
 	draw_rect(
-		Rect2(preenchido.position.x, preenchido.position.y, preenchido.size.x * 0.32, preenchido.size.y),
-		Color(1, 1, 1, 0.16)
+		Rect2(preenchido.position.x, preenchido.position.y, preenchido.size.x * 0.30, preenchido.size.y),
+		Color(1, 1, 1, 0.26)
 	)
-	# Fio de luz e halo no topo da coluna.
-	draw_rect(Rect2(preenchido.position, Vector2(preenchido.size.x, 5.0)), Color(1, 1, 1, 0.85))
-	_glow(Vector2(trilho.get_center().x, topo_y), 22.0, Color(cor.r, cor.g, cor.b, 0.28))
+	draw_rect(
+		Rect2(preenchido.end.x - preenchido.size.x * 0.18, preenchido.position.y,
+			preenchido.size.x * 0.18, preenchido.size.y),
+		Color(0, 0, 0, 0.10)
+	)
+	# Fio de luz no topo da coluna. Durante a carga ele pulsa, para a
+	# coluna parecer viva sem mentir sobre o número.
+	var brilho := 1.0 if not carregando else 0.55 + 0.45 * sin(tempo * 16.0)
+	draw_rect(Rect2(preenchido.position, Vector2(preenchido.size.x, 5.0)), Color(1, 1, 1, 0.55 + 0.35 * brilho))
+	draw_line(
+		Vector2(preenchido.position.x, topo_y), Vector2(preenchido.end.x, topo_y),
+		cor.darkened(0.25), 2.5
+	)
 
-	if not carregando:
-		# Cursor: a seta que aponta o resultado sobre a régua.
-		var x := trilho.end.x + 8.0
-		draw_colored_polygon(
-			PackedVector2Array([
-				Vector2(x, topo_y), Vector2(x + 13.0, topo_y - 9.0), Vector2(x + 13.0, topo_y + 9.0),
-			]),
-			cor
-		)
+	# Cursor: a seta que aponta o valor sobre a régua.
+	var x := trilho.end.x + 8.0
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(x, topo_y), Vector2(x + 14.0, topo_y - 10.0), Vector2(x + 14.0, topo_y + 10.0),
+		]),
+		cor.darkened(0.15)
+	)
 
 ## Traço do recorde da casa: a linha que o cliente quer passar.
 func _recorde(trilho: Rect2) -> void:
@@ -167,28 +192,22 @@ func _recorde(trilho: Rect2) -> void:
 		return
 	var t := clampf(float(recorde) / float(GameDef.SCORE_MAX), 0.0, 1.0)
 	var y := trilho.end.y - trilho.size.y * t
-	var cor := Color("58e8ff")
+	var cor := Paleta.MARINHO
 	# Tracejado, para não ser confundido com o topo da coluna.
 	var x := trilho.position.x - 4.0
 	while x < trilho.end.x + 4.0:
-		draw_line(Vector2(x, y), Vector2(minf(x + 7.0, trilho.end.x + 4.0), y), cor, 2.0)
+		draw_line(Vector2(x, y), Vector2(minf(x + 7.0, trilho.end.x + 4.0), y), cor, 2.5)
 		x += 12.0
-	draw_circle(Vector2(trilho.position.x - 9.0, y), 3.5, cor)
+	Icones.trofeu(self, Vector2(trilho.position.x - 15.0, y), 9.0, cor)
 
 func _rotulo(w: float, h: float, rotulo_altura: float) -> void:
 	if fonte == null:
 		return
 	draw_string(
 		fonte, Vector2(0.0, h - rotulo_altura * 0.55), "POTÊNCIA",
-		HORIZONTAL_ALIGNMENT_CENTER, w, 19, Color(0.62, 0.72, 0.92, 0.95)
+		HORIZONTAL_ALIGNMENT_CENTER, w, 19, Paleta.TINTA
 	)
 	draw_string(
-		fonte, Vector2(0.0, h - rotulo_altura * 0.14), "0 – 999",
-		HORIZONTAL_ALIGNMENT_CENTER, w, 14, Color(0.42, 0.51, 0.70, 0.9)
+		fonte, Vector2(0.0, h - rotulo_altura * 0.16), "0 – 999",
+		HORIZONTAL_ALIGNMENT_CENTER, w, 14, Paleta.TINTA_LEVE
 	)
-
-func _glow(centro: Vector2, raio: float, cor: Color) -> void:
-	for i in range(3):
-		var c := cor
-		c.a *= 1.0 - float(i) / 3.0
-		draw_circle(centro, raio * (1.0 + i * 0.6), c)

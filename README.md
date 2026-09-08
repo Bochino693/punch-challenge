@@ -26,6 +26,65 @@ Para testar no PC do escritório, sem girar o monitor, a janela abre em
 540 × 960 (`window_width_override` no `project.godot`) — a proporção é a
 mesma, só menor.
 
+### Tema claro
+
+A máquina trabalha num salão de festas iluminado, no meio de infláveis e
+mesas de aniversário. **Tela escura ali parece monitor desligado**, e o
+preto engole justamente o vermelho da marca da casa, que é o que precisa
+aparecer do outro lado do corredor. Então o jogo é claro: céu em degradê,
+piso em perspectiva, refletor quente sobre o saco, e as peças são cartões
+brancos com sombra e tinta escura em cima.
+
+Todas as cores moram em `scripts/paleta.gd`. Fundo, saco, medidor,
+moldura e textos leem de lá, então o tema é uma coisa só — mudar a cara
+do jogo é mexer num arquivo, e não caçar hexadecimal em seis.
+
+Dois detalhes que só existem porque o tema é claro:
+
+- **Lâmpada em vez de ponto de luz.** Um LED desenhado como brilho
+  difuso some num fundo claro. Cada bulbo tem corpo pintado e aro
+  escuro, então a apagada também se vê — e é a fieira inteira que faz o
+  olho ler "letreiro".
+- **Clarão em âmbar, com as bordas escurecendo.** Lavar a tela de branco
+  não funciona sobre quase-branco. O golpe acende em âmbar e escurece as
+  bordas ao mesmo tempo: o que o olho lê como flash é o contraste.
+
+### Acabamento de fliperama
+
+A referência é máquina de salão de verdade (PUNCH & KICK, KUNG FU): o que
+faz aquilo parecer equipamento caro, e não desenho, são três coisas — e
+as três estão aqui.
+
+**O medalhão.** Uma máquina de fliperama tem UM visor, e é ele que a
+pessoa olha o jogo inteiro. Aqui é a mesma peça em todos os momentos, e
+só muda o que está escrito dentro: `3, 2, 1` na contagem, os pontos da
+carga enquanto se segura a barra, traços piscando no impacto e a
+pontuação subindo no fim. Quatro faixas concêntricas, sem uma invadir a
+outra: raios girando por fora, o anel de faixa (que é o relógio — enche
+na contagem do placar e esvazia nos oito segundos do soco), o bisel e o
+vidro. O rótulo é serigrafado em curva na faixa, como no painel real.
+
+**O visor de sete segmentos** (`scripts/visor_led.gd`). Não é fonte: é
+segmento a segmento. O que faz o olho reconhecer um painel de LED não é
+o formato do algarismo, é o **segmento apagado** — num visor de verdade
+os sete traços estão sempre lá, e os que não fazem parte do número ficam
+visíveis, escuros. Nenhuma fonte dá isso. Cada traço aceso ainda leva um
+miolo quase branco, porque um LED aceso estoura no centro e guarda a cor
+só na borda.
+
+**A letra de fliperama** (`_letreiro`). Três passadas sobre a mesma
+palavra: um contorno grosso quase preto, que segura a letra sobre
+qualquer fundo; a palavra alguns pixels acima num tom claro, cujo
+resquício virando por cima da borda faz o brilho do topo (o Godot
+desenha texto de uma cor só, então o degradê é simulado assim); e o
+preenchimento. Com halo, entra antes um contorno largo e transparente na
+cor de destaque.
+
+Fora isso: o vinil do saco ganhou uma faixa de verniz estreita e quase
+branca — é o risco de luz que separa vinil de feltro — e o medidor ganhou
+o mesmo bisel marinho do visor, para as duas peças de instrumento da
+tela parecerem o mesmo equipamento.
+
 ### Como a tela se organiza
 
 A tela é dividida em **bandas horizontais fixas**, declaradas no topo de
@@ -52,18 +111,34 @@ o outro ficar pequeno.
 ABERTURA → (START) → ENTRADA → 3, 2, 1 → SENSOR ARMADO → IMPACTO → RESULTADO
 ```
 
-**Abertura.** É a tela que fica ligada o dia inteiro no salão, e é ela
-que faz alguém atravessar o corredor para jogar: a logo da Lazer & Sport
-em tamanho grande, raios girando, o nome do jogo em néon, o convite
-piscando, os números da casa e os **três passos de como jogar**. Sem
-crédito no modo ficha, o convite troca de texto em vez de sumir — quem
-chegou perto precisa saber o que fazer.
+**Abertura: três telas, alternando sozinhas.** Uma máquina parada não
+fica repetindo o mesmo cartaz — ela conta o jogo em capítulos, e é o
+rodízio que segura quem passa no corredor por tempo suficiente para
+decidir jogar. A cada sete segundos troca entre:
+
+1. **A marca** — a logo da casa montada como letreiro, o nome do jogo e
+   o recorde a bater, no mesmo medalhão que o jogo usa.
+2. **Melhores da casa** — as cinco marcas, com ouro, prata e bronze.
+3. **Como jogar** — os três passos, do tamanho de quem lê de longe.
+
+O convite e os números da máquina ficam FIXOS nas três, porque não podem
+depender de a pessoa ter chegado na página certa. Sem crédito no modo
+ficha, o convite troca de texto em vez de sumir — quem chegou perto
+precisa saber o que fazer.
 
 **START entra no jogo.** Em modo ficha, o crédito é debitado aqui; em
 modo livre, START entra direto.
 
 **A janela do soco é de oito segundos**, mostrada por uma barra que
 esvazia e fica vermelha no fim — sem número para ninguém precisar ler.
+
+**Carregando, o visor mostra o VALOR EXATO.** Enquanto a barra de espaço
+está pressionada, o número grande na tela e a coluna do medidor mostram
+quantos pontos o golpe vale *se soltar agora* — não a fração do tempo
+segurado. A conversão de tempo em pontos é uma curva, então uma barra
+proporcional ao tempo mostraria 60 % quando o golpe valeria 640. É a
+mesma chamada de `GameDef.pontos_da_carga` que o placar usa depois, e
+por isso o número prometido e o número pago não têm como divergir.
 
 **O resultado tem três faixas**, e é isso que faz o cliente jogar de novo:
 
@@ -94,10 +169,26 @@ momento pelo qual o cliente pagou.
   a 20° — o saco reage ao soco sem sair do enquadramento.
 - Medidor de potência com escala numerada, as três zonas coloridas da
   máquina e o traço do recorde da casa.
+- Tema claro inteiro num arquivo só (`scripts/paleta.gd`).
+- Medalhão com visor de sete segmentos, anel-relógio e rótulo curvo,
+  compartilhado por todos os momentos da partida.
+- Letras de fliperama com contorno grosso, brilho de topo e halo.
+- Ícones desenhados em código (`scripts/icones.gd`): troféu, luva, ficha,
+  raio, alvo, botão e estrela. Sem arquivo de imagem — não somem se
+  faltar um PNG, não serrilham em outra resolução e mudam de cor junto
+  com a faixa do golpe.
+- A marca da casa montada como letreiro de parque: placa creme, moldura
+  marinho e lâmpadas correndo em volta.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
 - Pontuação de potência de 0 a 999 baseada na velocidade medida.
 - Sete vereditos, distribuídos pelas três faixas ajustáveis.
-- Recorde, número total de partidas e saldo de créditos persistentes.
+- Ranking das cinco melhores marcas, persistente, com a posição
+  conquistada anunciada no fim da rodada. Cinco e não uma: com recorde
+  único, quem não bate o recorde não ganha nada, e o recorde de uma
+  máquina movimentada fica inalcançável em uma semana — entrar em quinto
+  ainda é entrar, e é essa vitória pequena que vende a segunda ficha.
+  Quem já tinha um recorde salvo não o perde: ele vira a primeira linha.
+- Número total de partidas e saldo de créditos persistentes.
 - Modo Livre ou 1 Ficha selecionável na Central Técnica.
 - `START`: entra no jogo e joga de novo depois do resultado.
 - `SELECT`: adiciona um crédito.
@@ -183,9 +274,10 @@ desça.
 ## Teste sem Arduino
 
 Durante a janela do soco, **segure a barra de espaço para carregar e
-solte para socar**: quanto mais tempo segura, mais forte o golpe. Fora
-da janela, a barra de espaço faz o papel do START. `C` adiciona crédito
-e `F9` abre a Central Técnica.
+solte para socar**: quanto mais tempo segura, mais forte o golpe. O
+número grande na tela mostra, a cada instante, exatamente quantos pontos
+sairão se você soltar naquele momento. Fora da janela, a barra de espaço
+faz o papel do START. `C` adiciona crédito e `F9` abre a Central Técnica.
 
 Essas instruções só aparecem no rodapé **quando o sensor não está
 conectado** — ou seja, na bancada de montagem. Com o Arduino no lugar, o
@@ -212,6 +304,17 @@ de mexer no traçado.
 O preset já está incluído. No Godot, instale os templates de exportação e
 use **Projeto → Exportar → Windows Desktop**. O executável será criado em
 `build/PunchChallenge.exe` com o pacote incorporado.
+
+## Refazer o ícone do aplicativo
+
+```
+python3 tools/gerar_icone.py
+```
+
+Redesenha `assets/icon.png` (512 × 512) a partir da mesma silhueta de
+luva que `scripts/icones.gd` usa no jogo — a luva da barra de tarefas e
+a luva do cartão de PARTIDAS são reconhecidamente a mesma coisa. Só
+depende do Python padrão; não há dependência de imagem para instalar.
 
 ## Documentação
 

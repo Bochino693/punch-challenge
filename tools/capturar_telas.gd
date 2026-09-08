@@ -25,6 +25,8 @@ func _initialize() -> void:
 	get_root().add_child(jogo)
 	passos = [
 		{"nome": "01_abertura", "fn": _abertura},
+		{"nome": "01b_recordes", "fn": _abertura_recordes},
+		{"nome": "01c_como_jogar", "fn": _abertura_como_jogar},
 		{"nome": "02_contagem", "fn": _contagem},
 		{"nome": "03_armado", "fn": _armado},
 		{"nome": "04_carga", "fn": _carga},
@@ -62,12 +64,22 @@ func _preparar(estado: int) -> void:
 	jogo.medidor.visible = estado != GameDef.State.IDLE
 
 func _abertura() -> void:
-	jogo.best_score = 872
+	jogo.ranking.assign([872, 705, 640, 512, 388])
 	jogo.plays = 431
 	jogo.credits = 3
 	jogo.medidor.recorde = 872
 	_preparar(GameDef.State.IDLE)
 	jogo.state_time = 2.0
+
+## O rodízio da abertura é por tempo, então cada página é capturada
+## colocando o relógio dentro da janela dela.
+func _abertura_recordes() -> void:
+	_abertura()
+	jogo.state_time = jogo.ABERTURA_SEGUNDOS + 2.0
+
+func _abertura_como_jogar() -> void:
+	_abertura()
+	jogo.state_time = jogo.ABERTURA_SEGUNDOS * 2.0 + 2.0
 
 func _contagem() -> void:
 	_preparar(GameDef.State.COUNTDOWN)
@@ -104,7 +116,7 @@ func _resultado(pontos: int, veredito: float) -> void:
 	jogo.result_score = pontos
 	jogo.result_speed = 9.4
 	jogo.result_simulado = false
-	jogo.novo_recorde = pontos > 900
+	jogo.posicao_no_ranking = 1 if pontos > 900 else (3 if pontos > 600 else 0)
 	jogo.displayed_score = float(pontos) if veredito >= 0.0 else float(pontos) * 0.55
 	jogo.medidor.set_pontos(jogo.displayed_score)
 	jogo.medidor.nivel_visivel = jogo.medidor.nivel_alvo
