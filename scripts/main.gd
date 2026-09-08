@@ -59,7 +59,7 @@ const LARGURA_UTIL := TELA.x - MARGEM * 2.0
 const CORES_FESTA := Paleta.FESTA
 
 ## Quantas marcas a máquina guarda.
-const RANKING_TAMANHO := 5
+const RANKING_TAMANHO := 20
 
 # ======================================================================
 # A CENTRAL TÉCNICA, DESCRITA UMA VEZ SÓ
@@ -324,6 +324,7 @@ func _processar_armado(delta: float) -> void:
 		_show_notice("TEMPO ESGOTADO — PRESSIONE START")
 
 func _entrar_em_resultado() -> void:
+	sons.start_score_loop()
 	state = GameDef.State.RESULT
 	state_time = 0.0
 	result_time = 0.0
@@ -340,9 +341,7 @@ func _processar_resultado(delta: float) -> void:
 	displayed_score = float(result_score) * ease(avanco, 0.42)
 	medidor.set_pontos(displayed_score)
 
-	if avanco < 1.0 and int(displayed_score) >= proximo_tique:
-		proximo_tique = int(displayed_score) + 11
-		sons.play("tick", -12.0)
+	sons.score_progress(avanco)
 
 	if verdict_time < 0.0 and avanco >= 1.0:
 		_disparar_veredito()
@@ -493,6 +492,7 @@ func _iniciar_rodada() -> void:
 	_salvar()
 
 func _entrar_em_abertura() -> void:
+	sons.stop("score_loop")
 	state = GameDef.State.IDLE
 	state_time = 0.0
 	verdict_time = -1.0
@@ -553,6 +553,7 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	_salvar()
 
 func _disparar_veredito() -> void:
+	sons.stop("score_loop")
 	## O momento em que a máquina diz quanto valeu o soco. Um por golpe.
 	verdict_time = 0.0
 	proximo_fogo = 0.0
@@ -965,6 +966,8 @@ func _draw() -> void:
 
 	if state == GameDef.State.IDLE:
 		_draw_abertura()
+	elif state == GameDef.State.RESULT and verdict_time >= 2.5:
+		_draw_ranking_reveal()
 	else:
 		_draw_partida()
 
@@ -1073,13 +1076,15 @@ func _pagina_marca(alpha: float) -> void:
 
 ## Página 2 — as cinco melhores marcas.
 func _pagina_recordes(alpha: float) -> void:
-	_texto_arcade("MELHORES DA CASA", 392.0, 62, Color(Paleta.MARINHO, alpha), LARGURA_UTIL)
+	_texto_arcade("TOP 20 • MELHORES", 392.0, 62, Color(Paleta.CIANO, alpha), LARGURA_UTIL)
 	if ranking.is_empty():
 		_texto("AINDA NINGUÉM SOCOU ESTA MÁQUINA", 780.0, 32, Color(Paleta.TINTA_FRACA, alpha))
 		_texto("O PRIMEIRO NOME DA LISTA PODE SER O SEU", 832.0, 24, Color(Paleta.TINTA_LEVE, alpha))
 		return
-	for i in range(RANKING_TAMANHO):
-		var y := 466.0 + i * 116.0
+	var page := int(state_time / (ABERTURA_SEGUNDOS * ABERTURA_PAGINAS)) % 4
+	for row in range(5):
+		var i := page * 5 + row
+		var y := 466.0 + row * 116.0
 		var cor := _cor_da_posicao(i + 1)
 		var linha := Rect2(MARGEM + 40.0, y, LARGURA_UTIL - 80.0, 98.0)
 		var vazia := i >= ranking.size()
@@ -1096,7 +1101,7 @@ func _pagina_recordes(alpha: float) -> void:
 			_draw_player_photo(Rect2(linha.position + Vector2(210.0, 11.0), Vector2(76.0, 76.0)), str(ranking[i].get("photo_path", "")), alpha)
 			_texto("%03d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 			_texto("PONTOS", meio, 18, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 190.0)
-	_texto("O SEU SOCO PODE ENTRAR NESSA LISTA", 1152.0, 26, Color(Paleta.VERMELHO, alpha))
+	_texto("POSIÇÕES %02d–%02d" % [page * 5 + 1, page * 5 + 5], 1152.0, 26, Color(Paleta.CIANO, alpha))
 
 ## Página 3 — os três passos, do tamanho de quem lê de longe.
 func _pagina_como_jogar(alpha: float) -> void:
@@ -1182,6 +1187,7 @@ func _draw_placar_abertura(alpha: float) -> void:
 ## o que está escrito nele, a cor do anel e quanto do anel está aceso.
 func _draw_partida() -> void:
 	_draw_header()
+	_draw_arena_lights()
 	if state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED]:
 		_draw_camera_card(Rect2(62.0, 264.0, 214.0, 292.0), 1.0, "JOGADOR")
 
@@ -1227,6 +1233,30 @@ func _draw_armado() -> void:
 		var dica := "O SENSOR ESTÁ ESPERANDO O SEU GOLPE" if _sensor_ligado() \
 			else "SEGURE ESPAÇO PARA CARREGAR O GOLPE"
 		_texto(dica, 1566.0, 22, Paleta.TINTA_FRACA)
+
+func _draw_arena_lights() -> void:
+	# Luzes varrem o palco continuamente; trajetórias determinísticas
+	# evitam o aspecto de flashes aleatórios trocando a cada frame.
+	var impact := clampf(1.0 - state_time / 0.7, 0.0, 1.0) if state == GameDef.State.MEASURING else 0.0
+	for side in [-1.0, 1.0]:
+		var origin := Vector2(540.0 + side * 460.0, 188.0)
+		var sweep := sin(animation_time * 0.55 + side) * 120.0
+		var end := Vector2(540.0 + side * 140.0 + sweep, 980.0)
+		var color := Paleta.CIANO if side < 0.0 else Paleta.ROSA
+		draw_colored_polygon(PackedVector2Array([origin, end + Vector2(-80, 0), end + Vector2(80, 0)]), Color(color, 0.06 + impact * 0.1))
+		draw_line(origin, end, Color(color, 0.14), 2.0, true)
+		for k in range(9):
+			var y := 320.0 + float(k) * 72.0
+			var pulse := 0.3 + 0.7 * (0.5 + 0.5 * sin(animation_time * 3.0 - float(k) * 0.6))
+			var x: float = 540.0 + side * 465.0
+			draw_line(Vector2(x, y), Vector2(x - side * 18.0, y + 24.0), Color(color, pulse), 5.0, true)
+	if impact > 0.0:
+		var center := _alvo()
+		for i in range(18):
+			var angle := float(i) * TAU / 18.0
+			var direction := Vector2.from_angle(angle)
+			var radius := 100.0 + (1.0 - impact) * 420.0
+			draw_line(center + direction * radius, center + direction * (radius + 90.0 * impact), Color(Paleta.AMBAR, impact * 0.7), 3.0, true)
 
 func _draw_resultado() -> void:
 	var classe := GameDef.classificar(result_score, limiar_fraco, limiar_forte)
@@ -1277,6 +1307,37 @@ func _cor_da_posicao(posicao: int) -> Color:
 		3:
 			return Color("c1783a")
 	return Paleta.CIANO
+
+## Resultado encerra em uma cerimônia: a lista se move até a colocação
+## conquistada, sem reduzir vinte fotos a miniaturas ilegíveis.
+func _draw_ranking_reveal() -> void:
+	saco.visible = false
+	medidor.visible = false
+	draw_rect(Rect2(Vector2.ZERO, TELA), Color("070c20"))
+	var progress := clampf((verdict_time - 2.5) / 1.6, 0.0, 1.0)
+	var eased := progress * progress * (3.0 - 2.0 * progress)
+	var position_index := maxi(posicao_no_ranking - 1, 0)
+	var target := clampi(position_index - 2, 0, 15)
+	var offset := float(target) * 164.0 * eased
+	_texto_arcade("TOP 20", 220.0, 110, Paleta.CIANO, LARGURA_UTIL)
+	var title := "%dº LUGAR • VOCÊ ENTROU!" % posicao_no_ranking if posicao_no_ranking > 0 else "TENTE SUPERAR ESSAS MARCAS"
+	_texto_cabendo(title, 312.0, 38, Paleta.AMBAR, LARGURA_UTIL)
+	for i in range(ranking.size()):
+		var y := 430.0 + float(i) * 164.0 - offset
+		if y < 425.0 or y > 1150.0:
+			continue
+		var selected := posicao_no_ranking == i + 1
+		var color := Paleta.AMBAR if selected else _cor_da_posicao(i + 1)
+		var shift := (1.0 - eased) * (80.0 + float(i % 5) * 30.0)
+		var card := Rect2(90.0 + shift, y, 900.0, 144.0)
+		_cartao(card, Color("172540") if selected else Color("0d1730"), color, 1.0, 4.0 if selected else 1.5)
+		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
+		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
+		_texto("VOCÊ" if selected else "JOGADOR", y + 64.0, 26, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
+		_texto("%03d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
+	_texto("SEU SOCO", 1400.0, 25, Paleta.TINTA_FRACA)
+	_texto("%03d" % result_score, 1520.0, 100, Paleta.TINTA)
+	_texto("START • JOGAR NOVAMENTE", 1710.0, 32, Paleta.CIANO)
 
 # ---------------------------------------------------------------- medalhão
 ## O VISOR DA MÁQUINA, do jeito que uma máquina de fliperama o monta:
@@ -1421,26 +1482,13 @@ func _draw_header() -> void:
 	_pill(Rect2(TELA.x - MARGEM - 180.0, 54.0, 180.0, 52.0), mode_text, Paleta.MARINHO)
 
 func _draw_cartoes() -> void:
-	var largura := (LARGURA_UTIL - 2.0 * 16.0) / 3.0
-	_stat_card(Rect2(MARGEM, CARTOES_Y, largura, CARTOES_ALTURA), "RECORDE", "%03d" % _melhor(), Paleta.AMBAR, "trofeu", 1.0)
-	_stat_card(Rect2(MARGEM + largura + 16.0, CARTOES_Y, largura, CARTOES_ALTURA), "PARTIDAS", str(plays), Paleta.ROXO, "luva", 1.0)
-	_stat_card(
-		Rect2(MARGEM + (largura + 16.0) * 2.0, CARTOES_Y, largura, CARTOES_ALTURA),
-		"CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Paleta.ROSA, "ficha", 1.0
-	)
+	_texto("RECORDE %03d     •     %s" % [_melhor(), "LIVRE" if game_mode == "free" else "CRÉDITOS %02d" % credits], 1692.0, 27, Paleta.TINTA_FRACA)
 
 ## Rodapé: a assinatura da casa. As teclas só aparecem quando o sensor
 ## NÃO está ligado — ou seja, na bancada de montagem. Com o Arduino no
 ## lugar, o cliente nunca vê instrução de teclado numa máquina de ficha.
 func _draw_rodape(alpha: float) -> void:
-	if notice != "":
-		return
-	if not _sensor_ligado():
-		_texto(
-			"BANCADA  •  ESPAÇO: START / GOLPE   C: CRÉDITO   F9: CENTRAL TÉCNICA",
-			1812.0, 17, Color(Paleta.TINTA_LEVE, alpha)
-		)
-	_texto("LAZER & SPORT BRINQUEDOS", RODAPE_Y, 16, Color(Paleta.TINTA_FRACA, alpha))
+	_texto("LAZER & SPORT", RODAPE_Y, 18, Color(Paleta.TINTA_LEVE, alpha))
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
@@ -1519,8 +1567,8 @@ func _draw_central() -> void:
 ## As cinco marcas em uma linha só: o técnico precisa VER o que vai
 ## apagar antes de apertar ZERAR RANKING.
 func _lista_do_ranking(rect: Rect2) -> void:
-	var largura := (rect.size.x - 4.0 * 10.0) / float(RANKING_TAMANHO)
-	for i in range(RANKING_TAMANHO):
+	var largura := (rect.size.x - 4.0 * 10.0) / 5.0
+	for i in range(5):
 		var celula := Rect2(rect.position + Vector2(i * (largura + 10.0), 0.0), Vector2(largura, rect.size.y))
 		var cor := _cor_da_posicao(i + 1)
 		var tem := i < ranking.size()

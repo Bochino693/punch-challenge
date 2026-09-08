@@ -24,6 +24,32 @@ const SONS := {
 
 var _players: Dictionary = {}
 
+func start_score_loop() -> void:
+	if not _players.has("score_loop"):
+		var player := AudioStreamPlayer.new()
+		var stream := AudioStreamWAV.new()
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.mix_rate = 22050
+		stream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		stream.loop_end = 22050
+		var pcm := PackedByteArray()
+		pcm.resize(44100)
+		for i in range(22050):
+			var t := float(i) / 22050.0
+			var envelope := 0.65 + 0.35 * cos(TAU * 8.0 * t)
+			var sample := (sin(TAU * 220.0 * t) + 0.25 * sin(TAU * 440.0 * t)) * envelope * 0.22
+			pcm.encode_s16(i * 2, int(sample * 32767.0))
+		stream.data = pcm
+		player.stream = stream
+		add_child(player)
+		_players["score_loop"] = player
+	play("score_loop", -12.0)
+
+func score_progress(progress: float) -> void:
+	var player: AudioStreamPlayer = _players.get("score_loop")
+	if player != null:
+		player.pitch_scale = lerpf(0.85, 1.8, clampf(progress, 0.0, 1.0))
+
 func _ready() -> void:
 	for nome in SONS:
 		var player := AudioStreamPlayer.new()

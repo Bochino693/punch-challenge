@@ -30,7 +30,6 @@ window/size/mode=3
 window/size/window_width_override=540
 window/size/window_height_override=960
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
 window/handheld/orientation=1
 
 [input]
@@ -48,6 +47,8 @@ input_credito={
 
 [rendering]
 
+textures/default_filters/use_nearest_mipmap_filter=false
+anti_aliasing/quality/msaa_2d=2
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.0196, 0.0314, 0.0863, 1)
