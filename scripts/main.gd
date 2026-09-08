@@ -1427,6 +1427,8 @@ func _draw_score_hero() -> void:
 	var color := Paleta.CIANO
 	if verdict_time >= 0.0:
 		color = GameDef.classificar(result_score, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+	_draw_campo_de_forca(center, color, progress, measuring)
+	_draw_colunas_de_forca(color, progress)
 	for i in range(12):
 		draw_arc(center, 335.0 + float(i) * 3.0, 0, TAU, 192, Color(color, 0.02), 9.0, true)
 	draw_circle(center, 326.0, Color("250911"))
@@ -1447,8 +1449,59 @@ func _draw_score_hero() -> void:
 	)
 	if verdict_time >= 0.0:
 		_texto("PONTOS", 1110.0, 26, color)
+		# A VELOCIDADE MEDIDA, ao lado dos pontos. Os pontos são uma nota
+		# que a máquina inventou a partir de uma curva ajustável; a
+		# velocidade é o que o sensor de fato viu. Quem duvida do placar
+		# ("essa máquina está roubando") tem aqui o número cru.
+		_texto("%.1f m/s no sensor" % result_speed, 1330.0, 22, Paleta.TINTA_LEVE)
 		var title := "%dº LUGAR" % posicao_no_ranking if posicao_no_ranking > 0 else "BOM SOCO!"
 		_texto_arcade(title, 1430.0, 64, color, LARGURA_UTIL)
+
+## O VAZIO ATRÁS DO PLACAR ERA O MAIOR PEDAÇO DA TELA.
+##
+## O medalhão ocupa o meio e o painel é alto: sobrava um retângulo preto
+## de mais de mil pixels em volta, justamente nos dois segundos em que
+## todo mundo está olhando. Agora o placar irradia — e irradia NA MEDIDA
+## DA PONTUAÇÃO, para que a tela inteira, e não só o número, diga se o
+## soco foi forte.
+func _draw_campo_de_forca(centro: Vector2, cor: Color, progresso: float, no_impacto: bool) -> void:
+	# No meio segundo do impacto ainda não há pontuação nenhuma para
+	# mostrar, então quem manda é o próprio golpe: começa no talo e
+	# desinfla enquanto a máquina "calcula".
+	var forca := progresso
+	if no_impacto:
+		forca = 1.0 - clampf(state_time / GameDef.IMPACTO_DURACAO, 0.0, 1.0)
+	for i in range(7):
+		draw_circle(centro, 380.0 + float(i) * 64.0, Color(cor, 0.013 * forca))
+	for i in range(36):
+		var ang := float(i) * TAU / 36.0 + animation_time * 0.22
+		var onda := 0.5 + 0.5 * sin(float(i) * 1.7 - animation_time * 4.0)
+		var perto := 372.0
+		var longe := perto + lerpf(24.0, 200.0, forca * onda)
+		draw_line(
+			centro + Vector2.from_angle(ang) * perto,
+			centro + Vector2.from_angle(ang) * longe,
+			Color(cor, 0.08 + 0.34 * forca * onda), 6.0, true
+		)
+
+## AS DUAS COLUNAS, uma de cada lado do painel.
+##
+## São a mesma pontuação lida de outro jeito, e existem porque o número
+## no meio é redondo e o olho não compara redondo com redondo. Coluna
+## cheia contra coluna pela metade é a diferença entre dois socos vista
+## de longe, sem ler algarismo nenhum.
+func _draw_colunas_de_forca(cor: Color, progresso: float) -> void:
+	var degraus := 22
+	for lado in [0.0, 1.0]:
+		var x := lerpf(92.0, 944.0, lado)
+		for i in range(degraus):
+			var fatia := float(i) / float(degraus)
+			var caixa := Rect2(x, 1512.0 - float(i) * 44.0, 44.0, 26.0)
+			if fatia < progresso:
+				draw_rect(caixa, cor)
+				draw_rect(caixa.grow(3.0), Color(cor, 0.18))
+			else:
+				draw_rect(caixa, Color("3a141d"))
 
 ## A JANELA DO SOCO, E O VALOR EXATO DA CARGA.
 ##
@@ -1573,7 +1626,14 @@ func _draw_ranking_reveal() -> void:
 		var vazia := i >= ranking.size()
 		var selected := posicao_no_ranking == i + 1
 		var color := Paleta.AMBAR if selected else _cor_da_posicao(i + 1)
-		var shift := (1.0 - eased) * (80.0 + float(i % 5) * 30.0)
+		# AS LINHAS ENTRAM PELA ESQUERDA, nunca pela direita.
+		#
+		# O deslocamento era positivo: cada linha começava até 200 px à
+		# direita do lugar dela e, como a largura não mudava, a linha
+		# inteira passava dos 1080 px da tela — a pontuação, que fica na
+		# ponta direita, ficava cortada durante toda a entrada. Negativo,
+		# a linha entra de fora da tela e assenta; nada some.
+		var shift := -(1.0 - eased) * (80.0 + float(i % 5) * 30.0)
 		var card := Rect2(90.0 + shift, y, 900.0, 144.0)
 		if vazia:
 			_cartao(card, Color("1c060c"), Color("4a1420"), 1.0, 1.5)
