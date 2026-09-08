@@ -193,7 +193,14 @@ var photo_retained := false
 var ranking_announced := false
 var intro_active := true
 var intro_time := 0.0
-var intro_hit_played := false
+## O QUANTO A ABERTURA JÁ CHEGOU, de 0 a 1.
+##
+## A entrada termina pousando o emblema e o letreiro exatamente onde a
+## abertura os desenha, e por isso esses dois não podem esmaecer de novo.
+## Mas o resto da abertura — o cabeçalho, o convite, os créditos — não
+## existe na entrada e apareceria de um quadro para o outro. Este número
+## faz só essa mobília entrar suave, sem tocar no que já estava na tela.
+var abertura_chegada := 1.0
 var _photo_cache: Dictionary = {}
 
 var fx := PunchFX.new()
@@ -225,7 +232,10 @@ func _ready() -> void:
 	_aplicar_faixas()
 	_iniciar_serial()
 	_entrar_em_abertura()
-	sons.play("start", -9.0)
+	# A música entra baixa por baixo da entrada e sobe na virada para a
+	# abertura: a trilha crescendo é o que faz a entrada terminar em vez
+	# de simplesmente parar. As deixas da entrada tocam por cima.
+	sons.music(-30.0)
 	set_process(true)
 
 func _exit_tree() -> void:
@@ -297,14 +307,35 @@ func _process(delta: float) -> void:
 
 func _processar_abertura(delta: float) -> void:
 	if intro_active:
+		var antes := intro_time
 		intro_time += delta
-		if intro_time >= 0.8 and not intro_hit_played:
-			intro_hit_played = true
-			sons.play("hit", -8.0)
+		# As deixas sonoras vêm da mesma tabela que desenha a entrada.
+		# Ler o intervalo (antes, agora] em vez de "passou de" é o que
+		# impede uma deixa de sumir num quadro longo ou tocar duas vezes.
+		for marca in ArcadeStage.intro_cues(antes, intro_time):
+			sons.play(marca["cue"], marca["db"])
+		# O soco da entrada sacode a máquina e cospe faíscas de verdade,
+		# com o mesmo sistema do soco do jogador: uma entrada que promete
+		# um impacto tem de entregar o impacto.
+		if antes < ArcadeStage.T_SOCO and intro_time >= ArcadeStage.T_SOCO:
+			tremor = 34.0
+			clarao = 0.60
+			fx.faiscas(ArcadeStage.SOCO, 26, Paleta.AMBAR, 1250.0)
+			fx.onda(ArcadeStage.SOCO, 60.0, 620.0, Paleta.CREME, 12.0, 0.55)
+			fx.poeira(ArcadeStage.SOCO + Vector2(0.0, 180.0), 14, Color(Paleta.AMBAR, 0.35), 380.0)
+		if antes < ArcadeStage.T_MORPH and intro_time >= ArcadeStage.T_MORPH:
+			sons.music(-16.0)
 		if intro_time >= ArcadeStage.INTRO_SECONDS:
 			intro_active = false
-			state_time = 0.0
+			# A abertura ENTRA JÁ NO AR, e não esmaecendo do zero. A
+			# entrada acaba de pousar o emblema e o letreiro exatamente
+			# onde a abertura os desenha; se ela ainda por cima começasse
+			# com o seu próprio esmaecer, o quadro seguinte à entrada
+			# seria um piscar — a única emenda visível do filme.
+			state_time = 0.7
+			abertura_chegada = 0.0
 		return
+	abertura_chegada = minf(1.0, abertura_chegada + delta * 2.2)
 	if randf() < delta * 4.0:
 		fx.poeira(
 			Vector2(randf_range(120.0, 960.0), TELA.y + 40.0),
@@ -539,6 +570,7 @@ func _iniciar_rodada() -> void:
 
 func _entrar_em_abertura() -> void:
 	_discard_round_photo()
+	abertura_chegada = 1.0
 	# Corta os efeitos da rodada e deixa a música da abertura no ar. Antes
 	# aqui era `silence()`, que também matava a música: a tela que fica
 	# ligada o dia inteiro chamando gente era a única muda do jogo.
@@ -1332,7 +1364,8 @@ const ABERTURA_CAPITULOS := 3
 const ABERTURA_DURACAO := 8.0
 
 func _draw_show_idle() -> void:
-	_texto("LAZER & SPORT", 220.0, 28, Paleta.CIANO)
+	var chegada := ease(abertura_chegada, 0.4)
+	_texto("LAZER & SPORT", 220.0, 28, Color(Paleta.CIANO, chegada))
 	var capitulo := int(state_time / ABERTURA_DURACAO) % ABERTURA_CAPITULOS
 	# Cada capítulo entra com o seu próprio esmaecer; sem isso só o
 	# primeiro teria entrada e os outros dariam um salto seco.
@@ -1344,15 +1377,18 @@ func _draw_show_idle() -> void:
 			_pagina_como_jogar(entrada)
 		_:
 			_capitulo_da_marca(entrada)
-	_pontos_do_capitulo(capitulo)
+	_pontos_do_capitulo(capitulo, chegada)
 	var pulse := 0.8 + 0.2 * sin(animation_time * 2.6)
-	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), 1.0, 3.0)
-	_texto("PRESSIONE START", 1635.0, 46, Color.WHITE)
-	_texto("JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits, 1740.0, 26, Paleta.CIANO)
+	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), chegada, 3.0)
+	_texto("PRESSIONE START", 1635.0, 46, Color(Color.WHITE, chegada))
+	_texto(
+		"JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits,
+		1740.0, 26, Color(Paleta.CIANO, chegada)
+	)
 	# CARIMBO DA BUILD. Discreto, mas na tela que fica ligada o dia
 	# inteiro: é ele que responde "atualizei e não mudou nada" sem
 	# ninguém precisar abrir terminal.
-	_texto(Versao.curta(), 1876.0, 15, Color(1, 1, 1, 0.55))
+	_texto(Versao.curta(), 1876.0, 15, Color(1, 1, 1, 0.55 * chegada))
 
 func _capitulo_da_marca(alpha: float) -> void:
 	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0, alpha)
@@ -1364,12 +1400,13 @@ func _capitulo_da_marca(alpha: float) -> void:
 
 ## Quantos capítulos existem e em qual estamos. Sem isso o rodízio parece
 ## a tela trocando sozinha por defeito.
-func _pontos_do_capitulo(capitulo: int) -> void:
+func _pontos_do_capitulo(capitulo: int, alpha := 1.0) -> void:
 	var largura := float(ABERTURA_CAPITULOS) * 30.0
 	for i in range(ABERTURA_CAPITULOS):
 		var atual := i == capitulo
 		var centro := Vector2(540.0 - largura * 0.5 + 15.0 + i * 30.0, 1500.0)
-		draw_circle(centro, 8.0 if atual else 5.0, Paleta.AMBAR if atual else Color("6d2835"))
+		var cor: Color = Paleta.AMBAR if atual else Color("6d2835")
+		draw_circle(centro, 8.0 if atual else 5.0, Color(cor, alpha))
 
 func _draw_score_hero() -> void:
 	var center := Vector2(540, 930)

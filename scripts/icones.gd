@@ -58,6 +58,15 @@ static func luva(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> vo
 		Color(1, 1, 1, 0.92), r * 0.12, true
 	)
 
+## A LUVA SEM OS BRILHOS: só o vulto, na cor pedida.
+##
+## Os riscos brancos de `luva()` são fixos e opacos de propósito, para o
+## ícone ler bem em qualquer fundo. Num rastro de movimento eles viram
+## listras de tinta atrás da luva — cada fantasma do rastro precisa ser
+## uma mancha só, e é isso que esta função entrega.
+static func luva_vulto(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
+	_massa_da_luva(ci, centro, raio, 0.0, cor)
+
 ## Punho, palma, dedão e cano da luva, todos crescidos de `folga`.
 static func _massa_da_luva(ci: CanvasItem, centro: Vector2, r: float, folga: float, cor: Color) -> void:
 	ci.draw_circle(centro + Vector2(r * 0.10, -r * 0.26), r * 0.64 + folga, cor)

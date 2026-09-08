@@ -66,7 +66,13 @@ func desenhar(tela: CanvasItem) -> void:
 			"confete":
 				# Retângulo girando: o confete de verdade mostra ora a
 				# face, ora o canto -- é a largura oscilando que dá isso.
-				var largura: float = p.tamanho * absf(cos(p.giro))
+				#
+				# A largura tem um piso: exatamente de perfil o cosseno
+				# zera, os quatro cantos caem sobre a mesma reta e o
+				# desenho vira um polígono sem área, que o motor recusa
+				# ("triangulation failed") e ainda enche o log. De perfil
+				# o confete é uma lasca fina, não um nada.
+				var largura: float = maxf(p.tamanho * 0.10, p.tamanho * absf(cos(p.giro)))
 				var pontos := PackedVector2Array([
 					p.posicao + Vector2(-largura, -p.tamanho * 1.6).rotated(p.giro * 0.35),
 					p.posicao + Vector2(largura, -p.tamanho * 1.6).rotated(p.giro * 0.35),
