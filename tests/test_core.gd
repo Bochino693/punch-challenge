@@ -4,8 +4,19 @@ func _initialize() -> void:
 	_test_score_curve()
 	_test_ranking_migration_and_ties()
 	_test_statistics()
+	_test_top20()
 	print("CORE_TESTS_OK")
 	quit(0)
+
+func _test_top20() -> void:
+	var entries: Array[Dictionary] = []
+	for score in range(100, 350, 10):
+		entries.assign(RankingStore.insert(entries, score)["entries"])
+	assert(entries.size() == 20)
+	assert(RankingStore.score_at(entries, 19) == 150)
+	var inserted := RankingStore.insert(entries, 155)
+	assert(int(inserted["position"]) == 20)
+	assert(int(RankingStore.insert(entries, 10)["position"]) == 0)
 
 func _test_score_curve() -> void:
 	assert(ScoreCurve.points_from_speed(0.2, 0.8, 12.0, 2.0, 0.06) == 0)

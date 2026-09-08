@@ -1,7 +1,7 @@
 class_name RankingStore
 extends RefCounted
 
-const LIMIT := 5
+const LIMIT := 20
 const PHOTO_DIR := "user://ranking_photos"
 
 static func migrate(raw: Variant, old_best := 0) -> Array[Dictionary]:
