@@ -1,15 +1,18 @@
 # Punch Challenge
 
-Jogo arcade de soco desenvolvido em Godot 4, preparado para máquina física com Arduino e sensor óptico de encoder.
+Máquina de soco da **Lazer & Sport Brinquedos**: jogo em Godot 4 e
+firmware Arduino com sensor MPU-6050 no saco. O sensor mede a
+velocidade do golpe; o jogo transforma em pontuação de arcade, mostra o
+número subindo e dá o veredito.
 
 ## Tela em pé
 
-O jogo é desenhado para **1080 × 1920 (vertical)**. A máquina é um armário
-alto com o saco na frente: quem joga olha para cima, não para os lados.
-Numa tela deitada, metade da largura seria moldura vazia e o número da
-pontuação ficaria pequeno justamente para quem está a três metros de
-distância. Em pé, a leitura desce em coluna — marca, número, veredito —
-que é a ordem em que a pessoa procura.
+O jogo é desenhado para **1080 × 1920 (vertical)**. A máquina é um
+armário alto com o saco na frente: quem joga olha para cima, não para os
+lados. Numa tela deitada, metade da largura seria moldura vazia e o
+número da pontuação ficaria pequeno justamente para quem está a três
+metros de distância. Em pé, a leitura desce em coluna — saco, número,
+veredito — que é a ordem em que a pessoa procura.
 
 Para montar:
 
@@ -21,145 +24,202 @@ Para montar:
 
 Para testar no PC do escritório, sem girar o monitor, a janela abre em
 540 × 960 (`window_width_override` no `project.godot`) — a proporção é a
-mesma, só menor. O `aspect="keep"` mantém as margens pretas em monitores
-que não sejam 9:16 exatos, em vez de esticar a marca.
+mesma, só menor.
+
+### Como a tela se organiza
+
+A tela é dividida em **bandas horizontais fixas**, declaradas no topo de
+`scripts/main.gd` (`BANDA_TOPO`, `PALCO_*`, `LEITURA_*`, `CARTOES_Y`,
+`RODAPE_Y`). Cada coisa desenhada mora dentro da sua banda:
+
+```
+  0 –  150   cabeçalho: marca do jogo e modo de operação
+168 – 1104   palco: o saco e o medidor de potência
+1124 – 1580  leitura: número, veredito e convite
+1608 – 1740  cartões: recorde, partidas, créditos
+1876         rodapé: assinatura da casa
+```
+
+Enquanto tudo respeitar a sua banda, nada se sobrepõe. Textos que podem
+crescer (o veredito, valores de configuração) passam por
+`_texto_cabendo`, que **mede a palavra e encolhe o corpo até caber** —
+`PESO-PESADO` e `FRACO!` ocupam o mesmo lugar sem um estourar a tela nem
+o outro ficar pequeno.
 
 ## Como a máquina se comporta
 
 ```
-ABERTURA → (START) → ENTRADA → 3, 2, 1 → SENSOR ARMADO → RESULTADO
+ABERTURA → (START) → ENTRADA → 3, 2, 1 → SENSOR ARMADO → IMPACTO → RESULTADO
 ```
 
-**Abertura.** É a tela que fica ligada o dia inteiro no salão, e é ela que
-faz alguém atravessar o corredor para jogar: a logo da Lazer & Sport em
-tamanho grande, com brilho, raios girando e uma luz varrendo a marca a
-cada quatro segundos; o nome do jogo em néon; e o convite piscando. Sem
+**Abertura.** É a tela que fica ligada o dia inteiro no salão, e é ela
+que faz alguém atravessar o corredor para jogar: a logo da Lazer & Sport
+em tamanho grande, raios girando, o nome do jogo em néon, o convite
+piscando, os números da casa e os **três passos de como jogar**. Sem
 crédito no modo ficha, o convite troca de texto em vez de sumir — quem
 chegou perto precisa saber o que fazer.
 
-**START entra no jogo.** A marca vem para a frente, estoura num clarão e
-a contagem começa. Em modo ficha, o crédito é debitado aqui; em modo
-livre, START entra direto.
+**START entra no jogo.** Em modo ficha, o crédito é debitado aqui; em
+modo livre, START entra direto.
 
-**O resultado tem três finais**, e é isso que faz o cliente jogar de novo:
+**A janela do soco é de oito segundos**, mostrada por uma barra que
+esvazia e fica vermelha no fim — sem número para ninguém precisar ler.
 
-| Faixa | O que a tela faz |
-| --- | --- |
-| **Forte** (padrão: 700+) | `NOCAUTE!` — confete, fogos, raios dourados girando, tremor e clarão. Animação de vitória. |
-| **Médio** (padrão: 330 a 699) | `BOM GOLPE` — âmbar, faíscas e anéis pulsando. Nem festa, nem derrota. |
-| **Fraco** (padrão: até 329) | `FRACO!` — moldura vermelha pulsando, estilhaços caindo e o carimbo escorregando para baixo. Animação de derrota. |
+**O resultado tem três faixas**, e é isso que faz o cliente jogar de novo:
 
-As duas faixas são ajustáveis na Central Técnica: a mecânica de cada
+| Faixa | Padrão | O que a tela faz |
+| --- | --- | --- |
+| **Forte** | 700 a 999 | `NOCAUTE!`, `PESO-PESADO` ou `LENDÁRIO` — confete, fogos, tremor e clarão. |
+| **Média** | 330 a 699 | `BOM GOLPE` ou `GOLPE FORTE` — âmbar, faíscas e anéis pulsando. |
+| **Fraca** | 0 a 329 | `FRACO!` ou `GOLPE LEVE` — cinza, estilhaços caindo. |
+
+Os dois limites são ajustáveis na Central Técnica: a mecânica de cada
 máquina responde diferente, e uma faixa errada faz todo mundo ganhar (ou
-todo mundo perder), que é o jeito mais rápido de esvaziar a fila.
+todo mundo perder), que é o jeito mais rápido de esvaziar a fila. A
+mesma faixa manda na cor da moldura de LEDs, nas zonas do medidor e na
+cor do veredito — os três nunca discordam sobre o que é um golpe forte.
 
 **A contagem é o suspense.** O número sobe de zero até a pontuação em
-cerca de dois segundos, com tique a cada passo e o ponteiro colorindo o
-arco conforme cruza as faixas. O veredito só entra quando a contagem
-termina — é o momento pelo qual o cliente pagou.
+cerca de dois segundos, com tique a cada passo e a coluna de potência
+acompanhando. O veredito só entra quando a contagem termina — é o
+momento pelo qual o cliente pagou.
 
 ## O que já está pronto
 
 - Interface vertical em 1080 × 1920, adaptável para outras resoluções.
-- Abertura com a marca da casa, efeito de luz, partículas e convite piscando.
+- Abertura com a marca da casa, efeito de luz, partículas, convite
+  piscando e os três passos de como jogar.
+- Saco de pancadas desenhado em código, com volume de cilindro, corrente
+  de elos até o teto do gabinete, amassado no impacto e balanço limitado
+  a 20° — o saco reage ao soco sem sair do enquadramento.
+- Medidor de potência com escala numerada, as três zonas coloridas da
+  máquina e o traço do recorde da casa.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
 - Pontuação de potência de 0 a 999 baseada na velocidade medida.
-- Três animações de resultado: vitória, intermediária e derrota.
+- Sete vereditos, distribuídos pelas três faixas ajustáveis.
 - Recorde, número total de partidas e saldo de créditos persistentes.
 - Modo Livre ou 1 Ficha selecionável na Central Técnica.
 - `START`: entra no jogo e joga de novo depois do resultado.
 - `SELECT`: adiciona um crédito.
 - `F9`: abre e fecha a Central Técnica.
 - `ESC`: fecha a configuração ou cancela uma rodada sem travar a interface.
-- Seleção de COM1 a COM99, teste visual do sensor e calibração mínima/máxima.
-- Aprendizado dos botões da placa zero delay, sem mexer em código.
+- Seleção de porta serial, teste do sensor e envio de configuração ao firmware.
 - Ícone, abertura e identificação próprios — sem símbolo padrão do Godot.
 
-## Hardware recomendado
+## Hardware
 
-- Arduino Nano ou Uno.
-- Sensor óptico encoder LM393 igual ao da referência, alimentado entre 3,3 e 5 V e com saídas digital e analógica.
-- Disco ranhurado fixado no eixo móvel da máquina.
-- Placa USB Zero Delay para os botões arcade.
+- Arduino Nano ou Uno (ATmega328P).
+- **MPU-6050** (acelerômetro + giroscópio) fixado no saco, no I2C.
+- Placa USB Zero Delay para os botões arcade, ou os botões direto na placa.
 
-### Ligação do sensor
+### Ligação
 
-| Sensor | Arduino |
+| MPU-6050 | Arduino |
 | --- | --- |
-| VCC / + | 5V |
-| GND / - | GND |
-| D0 / saída digital | D2 |
-| A0 / saída analógica | Não conectar neste projeto |
+| VCC | 5 V (ou 3,3 V, conforme o módulo) |
+| GND | GND |
+| SDA | A4 |
+| SCL | A5 |
+| AD0 | GND (endereço 0x68) |
 
-Confira sempre as marcações impressas no seu módulo, pois a ordem física dos pinos pode variar. O modelo B22-004 utiliza comparador LM393, alimentação de 3,3–5 V e passagem de aproximadamente 5 mm para o disco. O fio do sensor deve ficar afastado de motor, solenoide e cabos de potência. Em uma máquina com ruído elétrico, use fonte estabilizada, aterramento correto e cabo de sinal blindado.
+| Botão do gabinete | Arduino |
+| --- | --- |
+| START | D2 → GND |
+| CREDIT / SELECT | D3 → GND |
 
-## Ajustes obrigatórios no Arduino
-
-Abra `arduino/punch_sensor/punch_sensor.ino` e confira:
-
-```cpp
-const uint16_t PULSOS_POR_VOLTA = 20;
-const float RAIO_METROS = 0.100f;
-```
-
-`PULSOS_POR_VOLTA` é o número de janelas do disco. `RAIO_METROS` é a distância do centro do eixo até o ponto cuja velocidade deve ser calculada. Se esses valores estiverem errados, a velocidade exibida também ficará errada.
-
-O sensor óptico mede velocidade; ele não mede força física em newtons ou quilogramas-força. O jogo transforma a velocidade em uma pontuação arcade calibrada.
+Os botões usam o `INPUT_PULLUP` interno: ligam direto no GND, sem
+resistor externo. Quem preferir uma placa USB Zero Delay em vez dos
+pinos do Arduino tem o caminho alternativo pronto: as ações
+`input_start` e `input_credito` do `project.godot` já respondem a botões
+de controle (por padrão, os índices 6 e 4). Cada placa numera os botões
+de um jeito, então confira o índice da sua em **Projeto → Configurações
+do Projeto → Mapa de Entrada**. O cabo do sensor deve ficar afastado de motor,
+solenoide e cabos de potência. Em máquina com ruído elétrico, use fonte
+estabilizada, aterramento correto e cabo de sinal blindado.
 
 ## Instalação
 
-1. Grave o arquivo `.ino` no Arduino com velocidade serial de `115200`.
-2. Instale o Python 3 no Windows, marcando **Add Python to PATH**.
-3. Execute uma vez `tools/INSTALAR_PONTE_SERIAL.bat`.
-4. Abra `project.godot` no Godot 4.3 ou mais recente.
-5. Execute o projeto e pressione `F9`.
-6. Escolha a porta COM do Arduino e pressione **RECONECTAR**.
-7. Gire manualmente o disco: a entrada deve piscar e mostrar a frequência.
+1. Grave `arduino/punch_sensor/punch_sensor.ino` no Arduino a 115200 bps.
+2. Abra `project.godot` no Godot 4.4 ou mais recente (a extensão serial
+   `gdserial` exige 4.4).
+3. Execute o projeto e pressione `F9`.
+4. Escolha a porta serial e pressione **RECONECTAR**.
+5. Balance o saco: a linha de diagnóstico deve mostrar telemetria.
 
-## Placa Zero Delay
+Sem a extensão serial, ou sem Arduino, o jogo continua funcionando em
+**modo simulação** — nada trava por falta de hardware.
 
-As ações já aceitam estas entradas:
+## Central Técnica (F9)
 
-| Função | Teclado | Controle USB |
-| --- | --- | --- |
-| START | `1`, `Enter` ou `Espaço` | botão 7 |
-| SELECT / crédito | `5` ou `C` | botão 6 |
-| Configuração | `F9` | teclado técnico |
+| Seção | Para quê |
+| --- | --- |
+| **Modo de operação** | Livre ou 1 ficha por partida. |
+| **Faixas do placar** | Os dois limites que separam fraco, médio e forte. A régua colorida acima muda na hora — o técnico regula olhando o resultado. |
+| **Velocidade que vira ponto** | Que velocidade vale 0 e que velocidade vale 999. |
+| **Sensor e firmware** | Porta serial, eixo do golpe, raio do braço e sensibilidade. |
+| **Ações no firmware** | Enviar a configuração e pedir um golpe de teste. |
+| **Diagnóstico** | Telemetria ao vivo, contadores e reconexão. |
 
-Cada placa zero delay numera os botões de um jeito, e o número que
-funciona numa não funciona na outra. Em vez de mexer em código, use a
-Central Técnica (`F9`): aperte **APRENDER START**, depois o botão físico
-da máquina; repita em **APRENDER SELECT**. O número aprendido fica salvo
-e aparece na linha de diagnóstico. Uma vez por máquina, e acabou.
+Cada par `−` / `+` sai da tabela `PASSOS` no topo de `scripts/main.gd`: o
+mesmo retângulo desenha o botão e confere o clique, e o valor é
+desenhado **no espaço livre entre os dois** — não há como um número
+cobrir uma área de toque.
 
 ## Calibração da pontuação
 
-1. Na Central Técnica, deixe o mínimo inicialmente em `1,0 m/s` e o máximo em `12,0 m/s`.
-2. Faça dez golpes leves e anote aproximadamente as velocidades.
+1. Na Central Técnica, deixe a mínima em `0,8 m/s` e a máxima em `12,0 m/s`.
+2. Faça dez golpes leves e anote aproximadamente as velocidades
+   (aparecem na linha de diagnóstico).
 3. Faça dez golpes fortes com segurança e anote o maior valor repetível.
-4. Use como mínimo o valor de um golpe fraco verdadeiro.
-5. Use como máximo o maior golpe que a mecânica suporta de forma repetível.
+4. Use como mínima o valor de um golpe fraco verdadeiro.
+5. Use como máxima o maior golpe que a mecânica suporta de forma repetível.
 
-Valores abaixo do mínimo ficam próximos de 0; valores no máximo ou acima chegam a 999.
-
-Depois disso, ajuste as faixas na mesma tela: **ATÉ AQUI É FRACO** e
-**DAQUI É FORTE**. Uma referência que costuma funcionar em máquina nova é
-deixar a criança tirando "médio" e o adulto empenhado tirando "forte" —
-se todo mundo estiver tirando nocaute, suba o limite; se ninguém
-conseguir, desça.
+Depois disso, ajuste as faixas em **ATÉ AQUI É FRACO** e **DAQUI É
+FORTE**. Uma referência que costuma funcionar em máquina nova é deixar a
+criança tirando "médio" e o adulto empenhado tirando "forte" — se todo
+mundo estiver tirando nocaute, suba o limite; se ninguém conseguir,
+desça.
 
 ## Teste sem Arduino
 
-Abra o jogo, pressione `F9` e depois a tecla `T` para simular pulsos. Durante uma rodada, `T` também simula um golpe. Esse recurso existe apenas para montagem e teste da interface.
+Durante a janela do soco, **segure a barra de espaço para carregar e
+solte para socar**: quanto mais tempo segura, mais forte o golpe. Fora
+da janela, a barra de espaço faz o papel do START. `C` adiciona crédito
+e `F9` abre a Central Técnica.
 
-Com o Arduino ligado, o comando `TEST` pela serial devolve um golpe
-sintético: se ele aparece na tela e o soco real não, o problema é o
-sensor, e não o software.
+Essas instruções só aparecem no rodapé **quando o sensor não está
+conectado** — ou seja, na bancada de montagem. Com o Arduino no lugar, o
+cliente nunca vê instrução de teclado numa máquina de ficha.
+
+Com o Arduino ligado, o botão **TESTAR SENSOR** (ou a tecla `T` na
+Central) pede um golpe sintético à placa: se ele aparece na tela e o
+soco real não, o problema é o sensor, e não o software.
+
+## Conferir a tela sem abrir o editor
+
+```
+godot --path . --script tools/capturar_telas.gd
+```
+
+Percorre todos os momentos do jogo — abertura, contagem, sensor armado,
+carga, impacto, contagem do placar, os três vereditos e a Central
+Técnica — e salva um PNG de cada um em `.telas/` (ou na pasta apontada
+por `PUNCH_SHOTS`). É como se confere que nada saiu da sua banda depois
+de mexer no traçado.
 
 ## Exportação Windows
 
-O preset já está incluído. No Godot, instale os templates de exportação e use **Projeto → Exportar → Windows Desktop**. O executável será criado em `build/PunchChallenge.exe` com o pacote incorporado.
+O preset já está incluído. No Godot, instale os templates de exportação e
+use **Projeto → Exportar → Windows Desktop**. O executável será criado em
+`build/PunchChallenge.exe` com o pacote incorporado.
+
+## Documentação
+
+- `docs/PROTOCOLO_SERIAL.md` — todas as mensagens entre placa e jogo,
+  os limites aceitos e um guia de diagnóstico.
 
 ## Segurança mecânica
 
-Instale batentes, proteções e amortecimento adequados para impedir que o mecanismo alcance o operador. O sensor e o Arduino não substituem proteções físicas, parada de emergência nem projeto mecânico seguro.
+Instale batentes, proteções e amortecimento adequados para impedir que o
+mecanismo alcance o operador. O sensor e o Arduino não substituem
+proteções físicas, parada de emergência nem projeto mecânico seguro.
