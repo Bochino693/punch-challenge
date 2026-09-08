@@ -1,12 +1,13 @@
-[gd_scene format=3 uid="uid://j1iigsl0puq5"]
+[gd_scene load_steps=7 format=3 uid="uid://j1iigsl0puq5"]
 
 [ext_resource type="Script" uid="uid://5ua44uvnia2p" path="res://scripts/main.gd" id="1_main"]
-[ext_resource type="AudioStream" uid="uid://dgq42hbxov80y" path="res://assets/audio/count.wav" id="2_count"]
-[ext_resource type="AudioStream" uid="uid://xystgd2j187k" path="res://assets/audio/go.wav" id="3_go"]
-[ext_resource type="AudioStream" uid="uid://l7hbgktdi86t" path="res://assets/audio/hit.wav" id="4_hit"]
-[ext_resource type="AudioStream" uid="uid://dmq3bwfy8btik" path="res://assets/audio/credit.wav" id="5_credit"]
+[ext_resource type="Script" path="res://scripts/background.gd" id="2_fundo"]
+[ext_resource type="Script" path="res://scripts/punch_bag.gd" id="3_saco"]
+[ext_resource type="Script" path="res://scripts/power_meter.gd" id="4_medidor"]
+[ext_resource type="Script" path="res://scripts/led_frame.gd" id="5_moldura"]
+[ext_resource type="Script" path="res://scripts/audio_bank.gd" id="6_audio"]
 
-[node name="PunchChallenge" type="Control" unique_id=1118720703]
+[node name="PunchChallenge" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -15,18 +16,43 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_main")
 
-[node name="SoundCount" type="AudioStreamPlayer" parent="." unique_id=692737523]
-stream = ExtResource("2_count")
-volume_db = -2.0
+[node name="Fundo" type="Control" parent="."]
+z_index = -2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_fundo")
 
-[node name="SoundGo" type="AudioStreamPlayer" parent="." unique_id=474496017]
-stream = ExtResource("3_go")
-volume_db = -1.0
+[node name="Saco" type="Control" parent="."]
+z_index = -1
+layout_mode = 0
+offset_left = 300.0
+offset_top = 210.0
+offset_right = 780.0
+offset_bottom = 1070.0
+script = ExtResource("3_saco")
 
-[node name="SoundHit" type="AudioStreamPlayer" parent="." unique_id=538260213]
-stream = ExtResource("4_hit")
-volume_db = 1.5
+[node name="Medidor" type="Control" parent="."]
+z_index = -1
+layout_mode = 0
+offset_left = 872.0
+offset_top = 420.0
+offset_right = 1022.0
+offset_bottom = 1180.0
+script = ExtResource("4_medidor")
 
-[node name="SoundCredit" type="AudioStreamPlayer" parent="." unique_id=702434573]
-stream = ExtResource("5_credit")
-volume_db = -3.0
+[node name="Moldura" type="Control" parent="."]
+z_index = 4
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5_moldura")
+
+[node name="Audio" type="Node" parent="."]
+script = ExtResource("6_audio")
