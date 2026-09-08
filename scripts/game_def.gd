@@ -20,7 +20,7 @@ const JANELA_DO_SOCO := 8.0 ## Segundos para golpear depois do ARM.
 const CONTAGEM_DURACAO := 1.9 ## Subida do número no resultado.
 const IMPACTO_DURACAO := 0.55 ## Estado MEASURING: flash + onda de choque.
 const RESULTADO_TIMEOUT := 12.0
-const CARGA_MAX_S := 1.5 ## Carga máxima da simulação pela barra de espaço.
+const CARGA_MAX_S := 2.8 ## Legado; a curva atual mora em ScoreCurve.
 
 ## Limites de fábrica das faixas, na escala de 0 a 999.
 const LIMIAR_FRACO_PADRAO := 330
@@ -110,12 +110,13 @@ static func classificar(pontos: int, fraco: int, forte: int) -> Dictionary:
 ## Simulação: tempo de carga (s) -> pontos, por interpolação linear entre
 ## as faixas acordadas. Contínua por construção — não há saltos.
 const CARGA_PONTOS := [
-	Vector2(0.00, 80.0),
-	Vector2(0.08, 200.0),
-	Vector2(0.35, 480.0),
-	Vector2(0.80, 760.0),
-	Vector2(1.20, 920.0),
-	Vector2(1.50, 999.0),
+	Vector2(0.00, 0.0),
+	Vector2(0.20, 15.0),
+	Vector2(0.70, 150.0),
+	Vector2(1.30, 380.0),
+	Vector2(2.00, 680.0),
+	Vector2(2.50, 880.0),
+	Vector2(2.80, 999.0),
 ]
 
 static func pontos_da_carga(tempo_s: float) -> int:

@@ -23,7 +23,7 @@ extends Control
 ## Dois jeitos de socar: o MPU-6050 no saco manda HIT pela serial
 ## (protocolo V2, ver docs/PROTOCOLO_SERIAL.md), ou a simulação —
 ## SEGURAR a barra de espaço carrega o golpe e SOLTAR desfere. Quanto
-## mais tempo segura, mais forte o soco (GameDef.pontos_da_carga).
+## mais tempo segura, mais forte o soco (ScoreCurve.points_from_charge).
 
 const TELA := Vector2(1080.0, 1920.0)
 
@@ -76,6 +76,7 @@ const PASSOS := {
 	"limiar_forte": Rect2(570, 546, 400, LADO_BOTAO),
 	"vmin": Rect2(110, 780, 400, LADO_BOTAO),
 	"vmax": Rect2(570, 780, 400, LADO_BOTAO),
+	"curva": Rect2(340, 826, 400, 54),
 	"porta": Rect2(110, 1020, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1140, 400, LADO_BOTAO),
 	"amin": Rect2(570, 1140, 400, LADO_BOTAO),
@@ -86,11 +87,15 @@ const BOTOES_SIMPLES := {
 	"modo_livre": Rect2(110, 320, 400, 72),
 	"modo_ficha": Rect2(570, 320, 400, 72),
 	"eixo": Rect2(620, 1020, 280, LADO_BOTAO),
-	"enviar_config": Rect2(110, 1350, 400, 72),
-	"testar": Rect2(570, 1350, 400, 72),
-	"zerar": Rect2(110, 1636, 288, 66),
-	"zerar_ranking": Rect2(416, 1636, 288, 66),
-	"reconectar": Rect2(722, 1636, 248, 66),
+	"enviar_config": Rect2(110, 1392, 400, 48),
+	"testar": Rect2(570, 1392, 400, 48),
+	"camera": Rect2(110, 1334, 260, 46),
+	"trocar_camera": Rect2(390, 1334, 260, 46),
+	"foto_teste": Rect2(670, 1334, 300, 46),
+	"zerar": Rect2(110, 1636, 196, 66),
+	"zerar_stats": Rect2(322, 1636, 196, 66),
+	"zerar_ranking": Rect2(534, 1636, 208, 66),
+	"reconectar": Rect2(758, 1636, 212, 66),
 	"padroes": Rect2(110, 1752, 400, 76),
 	"salvar": Rect2(570, 1752, 400, 76),
 }
@@ -107,18 +112,22 @@ var plays := 0
 ## movimentada fica inalcançável em uma semana. Com uma lista, entrar em
 ## quinto ainda é entrar — e é essa pequena vitória que faz a pessoa
 ## pagar a segunda ficha.
-var ranking: Array[int] = []
+var ranking: Array[Dictionary] = []
 ## Faixa de velocidade (m/s) que vira pontos no placar.
 var hit_min_speed := 0.8
 var hit_max_speed := 12.0
+## Expoente 2 torna os pontos altos raros; o valor anterior (0.8)
+## inflava os golpes médios e fazia a máquina parecer fácil demais.
+var score_exponent := ScoreCurve.DEFAULT_EXPONENT
+var score_dead_zone := ScoreCurve.DEFAULT_DEAD_ZONE
 ## Os dois limites que separam fraco, médio e forte no placar.
 var limiar_fraco := GameDef.LIMIAR_FRACO_PADRAO
 var limiar_forte := GameDef.LIMIAR_FORTE_PADRAO
 ## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,amin).
 var sensor_eixo := "X"
 var sensor_raio := 0.45
-var sensor_vmin := 0.5
-var sensor_amin := 2.5
+var sensor_vmin := 0.8
+var sensor_amin := 3.5
 ## Porta serial configurada; "" = automática (primeira disponível).
 var porta_configurada := ""
 
@@ -141,11 +150,13 @@ var tremor := 0.0
 var clarao := 0.0
 var notice := ""
 var notice_left := 0.0
+var confirm_action := ""
+var confirm_until := 0.0
 
 ## Carga da simulação: >= 0 enquanto a barra de espaço está pressionada.
 var carga_tempo := -1.0
 ## Quanto a carga VALE agora, em pontos. É o mesmo número que
-## `GameDef.pontos_da_carga` vai devolver se a barra for solta neste
+## `ScoreCurve.points_from_charge` vai devolver se a barra for solta neste
 ## instante — o visor não mostra "quanto tempo você segurou", mostra o
 ## placar que você leva.
 var carga_pontos := 0
@@ -160,6 +171,14 @@ var proximo_ping := 0.0
 ## Última telemetria, exibida na Central Técnica.
 var telemetria := ""
 var portas_visiveis: PackedStringArray = []
+
+## Câmera e dados locais do proprietário. Nenhum deles depende da rede.
+var camera_service: CameraService
+var camera_enabled := true
+var camera_mirrored := true
+var statistics: Dictionary = {}
+var result_photo_path := ""
+var _photo_cache: Dictionary = {}
 
 var fx := PunchFX.new()
 ## Deslocamento do tremor no quadro atual. Fica guardado porque o texto
@@ -183,6 +202,10 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
+	camera_service = CameraService.new()
+	camera_service.enabled = camera_enabled
+	camera_service.mirrored = camera_mirrored
+	add_child(camera_service)
 	_aplicar_faixas()
 	_iniciar_serial()
 	_entrar_em_abertura()
@@ -191,6 +214,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if link != null:
 		link.close_port()
+	_photo_cache.clear()
 
 ## Um lugar só onde as faixas chegam a quem as desenha. Régua do medidor,
 ## cor da moldura e veredito passam a concordar por construção.
@@ -204,20 +228,16 @@ func _aplicar_faixas() -> void:
 ## A melhor marca da casa. Sai do topo do ranking, e não de uma variável
 ## paralela — duas fontes para o mesmo número é como elas divergem.
 func _melhor() -> int:
-	return ranking[0] if not ranking.is_empty() else 0
+	return RankingStore.best(ranking)
 
 ## Insere uma pontuação e devolve a posição conquistada (1 a 5), ou 0 se
 ## ela não foi boa o bastante para entrar na lista.
-func _entrar_no_ranking(pontos: int) -> int:
-	var lista := ranking.duplicate()
-	lista.append(pontos)
-	lista.sort()
-	lista.reverse()
-	if lista.size() > RANKING_TAMANHO:
-		lista.resize(RANKING_TAMANHO)
-	ranking.assign(lista)
-	var pos := ranking.find(pontos)
-	return pos + 1 if pos >= 0 else 0
+func _entrar_no_ranking(pontos: int, foto := "", origem := "SENSOR") -> int:
+	var inserted := RankingStore.insert(ranking, pontos, foto, origem)
+	ranking.assign(inserted["entries"])
+	for path in inserted["dropped_photos"]:
+		RankingStore.delete_photo(path)
+	return int(inserted["position"])
 
 ## Onde o soco aterrissa. Pergunta ao saco em vez de repetir a conta: o
 ## saco pode mudar de tamanho ou de posição sem levar junto a onda de
@@ -240,6 +260,8 @@ func _process(delta: float) -> void:
 		notice_left -= delta
 	else:
 		notice = ""
+	if not confirm_action.is_empty() and animation_time > confirm_until:
+		confirm_action = ""
 
 	if not central_aberta:
 		match state:
@@ -288,12 +310,14 @@ func _processar_armado(delta: float) -> void:
 		# fração do tempo: a conversão tempo → pontos é uma curva, então
 		# uma barra proporcional ao tempo mostraria 60 % quando o golpe
 		# valeria 640. Quem carrega vê o número que vai tirar.
-		carga_tempo = minf(carga_tempo + delta, GameDef.CARGA_MAX_S)
-		carga_pontos = GameDef.pontos_da_carga(carga_tempo)
+		carga_tempo = minf(carga_tempo + delta, ScoreCurve.CHARGE_MAX_SECONDS)
+		carga_pontos = ScoreCurve.points_from_charge(
+			carga_tempo, hit_min_speed, hit_max_speed, score_exponent, score_dead_zone
+		)
 		medidor.set_carga(float(carga_pontos) / float(GameDef.SCORE_MAX))
 		# O saco, esse sim, tensiona conforme o tempo: é o gesto de tomar
 		# distância, e não a nota.
-		saco.set_carga(carga_tempo / GameDef.CARGA_MAX_S)
+		saco.set_carga(carga_tempo / ScoreCurve.CHARGE_MAX_SECONDS)
 	if armed_left <= 0.0:
 		_cancelar_carga()
 		_entrar_em_abertura()
@@ -418,10 +442,8 @@ func _soltou_espaco() -> void:
 	_cancelar_carga()
 	# A MESMA conta que o visor vinha mostrando. Um segundo caminho aqui
 	# faria o número prometido e o número pago divergirem.
-	var pontos := GameDef.pontos_da_carga(tempo_carga)
-	# Velocidade equivalente, só para o visor do resultado.
-	var frac := float(pontos) / float(GameDef.SCORE_MAX)
-	_registrar_impacto(pontos, lerpf(hit_min_speed, hit_max_speed, pow(frac, 1.25)), true)
+	var velocidade := ScoreCurve.speed_from_charge(tempo_carga, hit_min_speed, hit_max_speed)
+	_processar_golpe(velocidade, true)
 
 func _cancelar_carga() -> void:
 	if carga_tempo >= 0.0:
@@ -457,6 +479,7 @@ func _iniciar_rodada() -> void:
 	countdown_left = 3.0
 	last_count = 3
 	result_score = 0
+	result_photo_path = ""
 	displayed_score = 0.0
 	fx.limpar()
 	medidor.reset()
@@ -475,6 +498,8 @@ func _entrar_em_abertura() -> void:
 	verdict_time = -1.0
 	result_time = 0.0
 	posicao_no_ranking = 0
+	result_photo_path = ""
+	_photo_cache.clear()
 	fx.limpar()
 	medidor.reset()
 	saco.visible = false
@@ -514,7 +539,16 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
 	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
 	plays += 1
-	posicao_no_ranking = _entrar_no_ranking(result_score)
+	result_photo_path = camera_service.capture_photo() if camera_service != null else ""
+	if not result_photo_path.is_empty():
+		_photo_texture(result_photo_path)
+	var origem := "SIMULAÇÃO" if simulado else "MPU-6050"
+	posicao_no_ranking = _entrar_no_ranking(result_score, result_photo_path, origem)
+	statistics = StatisticsStore.record(
+		statistics, result_score,
+		GameDef.faixa_de(result_score, limiar_fraco, limiar_forte),
+		posicao_no_ranking > 0
+	)
 	medidor.recorde = _melhor()
 	_salvar()
 
@@ -669,12 +703,18 @@ func _receber_hit(msg: Dictionary) -> void:
 		]
 		return
 	_cancelar_carga()
-	var span := maxf(hit_max_speed - hit_min_speed, 0.1)
-	var normalizado := clampf((speed - hit_min_speed) / span, 0.0, 1.0)
-	var pontos := clampi(int(round(pow(normalizado, 0.8) * GameDef.SCORE_MAX)), 0, GameDef.SCORE_MAX)
-	if speed > 0.0 and pontos < 10:
-		pontos = 10
-	_registrar_impacto(pontos, speed, false)
+	_processar_golpe(speed, false)
+
+## Sensor e teclado passam obrigatoriamente por esta única porta. Assim a
+## régua mostrada na Central é a mesma que decide o resultado real.
+func _processar_golpe(speed: float, simulado: bool) -> void:
+	var pontos := ScoreCurve.points_from_speed(
+		speed, hit_min_speed, hit_max_speed, score_exponent, score_dead_zone
+	)
+	if pontos <= 0:
+		_show_notice("MOVIMENTO ABAIXO DA ZONA DE PONTUAÇÃO")
+		return
+	_registrar_impacto(pontos, speed, simulado)
 
 func _enviar_config() -> void:
 	if link != null and link.is_open():
@@ -759,14 +799,39 @@ func _click_central(p: Vector2) -> void:
 		_show_notice("CONFIG ENVIADA AO ARDUINO")
 	elif BOTOES_SIMPLES["testar"].has_point(p):
 		_teste_de_golpe()
+	elif BOTOES_SIMPLES["camera"].has_point(p):
+		camera_enabled = not camera_enabled
+		camera_service.set_enabled(camera_enabled)
+		_show_notice(camera_service.status)
+	elif BOTOES_SIMPLES["trocar_camera"].has_point(p):
+		camera_service.cycle_camera()
+		_show_notice(camera_service.status)
+	elif BOTOES_SIMPLES["foto_teste"].has_point(p):
+		var test_path := camera_service.capture_photo()
+		if test_path.is_empty():
+			_show_notice(camera_service.status)
+		else:
+			RankingStore.delete_photo(test_path)
+			_show_notice("CAPTURA DA CÂMERA APROVADA")
 	elif BOTOES_SIMPLES["zerar"].has_point(p):
+		if not _confirmar("contadores"):
+			return
 		credits = 0
 		plays = 0
 		_show_notice("CONTADORES ZERADOS")
+	elif BOTOES_SIMPLES["zerar_stats"].has_point(p):
+		if not _confirmar("estatisticas"):
+			return
+		statistics = {}
+		_show_notice("ESTATÍSTICAS ZERADAS")
 	elif BOTOES_SIMPLES["zerar_ranking"].has_point(p):
+		if not _confirmar("ranking"):
+			return
+		RankingStore.clear_photos(ranking)
 		ranking.clear()
+		_photo_cache.clear()
 		medidor.recorde = 0
-		_show_notice("RANKING ZERADO")
+		_show_notice("RANKING E FOTOS ZERADOS")
 	elif BOTOES_SIMPLES["reconectar"].has_point(p):
 		if link != null:
 			link.close_port()
@@ -777,12 +842,14 @@ func _click_central(p: Vector2) -> void:
 		porta_configurada = ""
 		hit_min_speed = 0.8
 		hit_max_speed = 12.0
+		score_exponent = ScoreCurve.DEFAULT_EXPONENT
+		score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
 		limiar_fraco = GameDef.LIMIAR_FRACO_PADRAO
 		limiar_forte = GameDef.LIMIAR_FORTE_PADRAO
 		sensor_eixo = "X"
 		sensor_raio = 0.45
-		sensor_vmin = 0.5
-		sensor_amin = 2.5
+		sensor_vmin = 0.8
+		sensor_amin = 3.5
 		_show_notice("PADRÕES RESTAURADOS")
 	else:
 		return
@@ -801,6 +868,8 @@ func _ajustar(chave: String, direcao: int) -> void:
 			hit_min_speed = clampf(hit_min_speed + direcao * 0.1, 0.2, hit_max_speed - 0.5)
 		"vmax":
 			hit_max_speed = clampf(hit_max_speed + direcao * 0.5, hit_min_speed + 0.5, 40.0)
+		"curva":
+			score_exponent = clampf(score_exponent + direcao * 0.05, ScoreCurve.EXPONENT_MIN, ScoreCurve.EXPONENT_MAX)
 		"porta":
 			_girar_porta(direcao)
 		"raio":
@@ -821,6 +890,15 @@ func _show_notice(message: String) -> void:
 	notice = message
 	notice_left = 2.8
 
+func _confirmar(action: String) -> bool:
+	if confirm_action == action and animation_time <= confirm_until:
+		confirm_action = ""
+		return true
+	confirm_action = action
+	confirm_until = animation_time + 4.0
+	_show_notice("CONFIRME: CLIQUE NOVAMENTE EM ATÉ 4 SEGUNDOS")
+	return false
+
 # ======================================================================
 # ESTADO EM DISCO
 # ======================================================================
@@ -834,21 +912,22 @@ func _carregar() -> void:
 	# MIGRAÇÃO: instalações antigas guardavam um recorde só. Ele vira a
 	# primeira linha do ranking, para o dono não perder a marca da casa
 	# ao atualizar o software.
-	ranking.clear()
-	for valor in data.get("ranking", []):
-		ranking.append(int(valor))
 	var antigo := int(data.get("best_score", 0))
-	if ranking.is_empty() and antigo > 0:
-		ranking.append(antigo)
+	ranking = RankingStore.migrate(data.get("ranking", []), antigo)
 	porta_configurada = str(data.get("port", porta_configurada))
 	hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
 	hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
+	score_exponent = float(data.get("score_exponent", score_exponent))
+	score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
 	limiar_fraco = int(data.get("limiar_fraco", limiar_fraco))
 	limiar_forte = int(data.get("limiar_forte", limiar_forte))
 	sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 	sensor_raio = float(data.get("sensor_raio", sensor_raio))
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
+	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
+	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
+	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
 
 func _salvar() -> void:
 	SettingsStore.save_data({
@@ -861,12 +940,17 @@ func _salvar() -> void:
 		"port": porta_configurada,
 		"hit_min_speed": hit_min_speed,
 		"hit_max_speed": hit_max_speed,
+		"score_exponent": score_exponent,
+		"score_dead_zone": score_dead_zone,
 		"limiar_fraco": limiar_fraco,
 		"limiar_forte": limiar_forte,
 		"sensor_eixo": sensor_eixo,
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
 		"sensor_amin": sensor_amin,
+		"camera_enabled": camera_enabled,
+		"camera_mirrored": camera_mirrored,
+		"statistics": statistics,
 	})
 
 # ======================================================================
@@ -908,6 +992,13 @@ func _draw_clarao() -> void:
 	draw_rect(Rect2(0.0, TELA.y - borda, TELA.x, borda), escuro)
 	draw_rect(Rect2(0.0, 0.0, borda, TELA.y), escuro)
 	draw_rect(Rect2(TELA.x - borda, 0.0, borda, TELA.y), escuro)
+	# Dois ecos deslocados por poucos pixels criam a separação cromática
+	# curta do impacto sem exigir shader ou deixar o placar ilegível.
+	if clarao > 0.18 and state == GameDef.State.MEASURING:
+		var alvo := _alvo()
+		var raio := 100.0 + (1.0 - clarao) * 120.0
+		draw_arc(alvo + Vector2(-9.0, 0.0), raio, 0.0, TAU, 72, Color(Paleta.CIANO, clarao * 0.65), 7.0, true)
+		draw_arc(alvo + Vector2(9.0, 0.0), raio, 0.0, TAU, 72, Color(Paleta.VERMELHO, clarao * 0.60), 7.0, true)
 
 # ---------------------------------------------------------------- abertura
 ## A ABERTURA NÃO É UMA TELA SÓ.
@@ -918,7 +1009,7 @@ func _draw_clarao() -> void:
 ## páginas alternando sozinhas — a marca, os melhores da casa e como
 ## jogar — e, fixos em todas, o convite e os números da máquina, porque
 ## esses dois não podem depender de a pessoa ter chegado na página certa.
-const ABERTURA_PAGINAS := 3
+const ABERTURA_PAGINAS := 4
 const ABERTURA_SEGUNDOS := 7.0
 
 func _pagina_da_abertura() -> int:
@@ -938,8 +1029,10 @@ func _draw_abertura() -> void:
 			_pagina_marca(suave)
 		1:
 			_pagina_recordes(suave)
-		_:
+		2:
 			_pagina_como_jogar(suave)
+		_:
+			_pagina_camera(suave)
 
 	_draw_convite(suave)
 	_pontinhos_da_pagina(pagina, suave)
@@ -1000,7 +1093,8 @@ func _pagina_recordes(alpha: float) -> void:
 		if vazia:
 			_texto("—", meio, 34, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 		else:
-			_texto("%03d" % ranking[i], meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
+			_draw_player_photo(Rect2(linha.position + Vector2(210.0, 11.0), Vector2(76.0, 76.0)), str(ranking[i].get("photo_path", "")), alpha)
+			_texto("%03d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 			_texto("PONTOS", meio, 18, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 190.0)
 	_texto("O SEU SOCO PODE ENTRAR NESSA LISTA", 1152.0, 26, Color(Paleta.VERMELHO, alpha))
 
@@ -1032,6 +1126,15 @@ func _pagina_como_jogar(alpha: float) -> void:
 			Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_LEFT,
 			MARGEM + 270.0, LARGURA_UTIL - 340.0
 		)
+
+## A câmera transforma uma tentativa em lembrança e dá rosto ao ranking.
+## Sem webcam a mesma página vira demonstração com avatar, nunca erro.
+func _pagina_camera(alpha: float) -> void:
+	_texto_arcade("VOCÊ NO RANKING", 304.0, 60, Color(Paleta.MARINHO, alpha), LARGURA_UTIL)
+	_draw_camera_card(Rect2(230.0, 360.0, 620.0, 700.0), alpha, "CÂMERA AO VIVO")
+	_texto("DÊ O SEU MELHOR SOCO", 1132.0, 34, Color(Paleta.VERMELHO, alpha))
+	_texto("SUA FOTO FICA AO LADO DA SUA MARCA NO TOP 5", 1186.0, 22, Color(Paleta.TINTA_FRACA, alpha))
+	_texto("FOTOS SALVAS SOMENTE NESTA MÁQUINA", 1234.0, 17, Color(Paleta.TINTA_LEVE, alpha))
 
 ## O convite fica no MESMO lugar em todas as páginas. É o único elemento
 ## que a pessoa precisa achar sem procurar, e um botão que muda de lugar
@@ -1079,6 +1182,8 @@ func _draw_placar_abertura(alpha: float) -> void:
 ## o que está escrito nele, a cor do anel e quanto do anel está aceso.
 func _draw_partida() -> void:
 	_draw_header()
+	if state in [GameDef.State.COUNTDOWN, GameDef.State.ARMED]:
+		_draw_camera_card(Rect2(62.0, 264.0, 214.0, 292.0), 1.0, "JOGADOR")
 
 	match state:
 		GameDef.State.COUNTDOWN:
@@ -1130,6 +1235,7 @@ func _draw_resultado() -> void:
 	var avanco := clampf(result_time / GameDef.CONTAGEM_DURACAO, 0.0, 1.0)
 	var cor_visor: Color = cor_faixa if verdict_time >= 0.0 else Paleta.CIANO
 	_draw_medalhao("%03d" % int(round(displayed_score)), cor_visor, avanco, 1.0)
+	_draw_player_photo(Rect2(62.0, 1112.0, 218.0, 218.0), result_photo_path, 1.0)
 
 	if verdict_time < 0.0:
 		_texto("MEDINDO O IMPACTO…", 1516.0, 26, Paleta.TINTA_LEVE)
@@ -1364,6 +1470,11 @@ func _draw_central() -> void:
 	_secao(Rect2(80, 702, 920, 210), "VELOCIDADE QUE VIRA PONTO (m/s)", Paleta.CIANO)
 	_stepper("vmin", "%.1f" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
 	_stepper("vmax", "%.1f" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
+	_stepper(
+		"curva", "γ %.2f" % score_exponent,
+		"CURVA %s  •  ZONA MORTA %.0f%%" % [ScoreCurve.difficulty_name(score_exponent), score_dead_zone * 100.0],
+		Paleta.ROXO
+	)
 
 	# ---- sensor e firmware
 	_secao(Rect2(80, 932, 920, 330), "SENSOR E FIRMWARE (MPU-6050)", Paleta.ROXO)
@@ -1378,6 +1489,9 @@ func _draw_central() -> void:
 
 	# ---- ações no firmware
 	_secao(Rect2(80, 1282, 920, 170), "AÇÕES NO FIRMWARE", Paleta.VERDE)
+	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 14)
+	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 14)
+	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 14)
 	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
 	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
@@ -1388,13 +1502,15 @@ func _draw_central() -> void:
 		telemetria if telemetria != "" else "sem telemetria ainda",
 		1590.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
+	var resumo := StatisticsStore.summary(statistics)
 	_texto(
-		"%d partidas  •  %02d créditos" % [plays, credits],
-		1616.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		"Hoje %d  •  7 dias %d  •  média %03d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
+		1616.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	_botao(BOTOES_SIMPLES["zerar"], "ZERAR CONTADORES", false, Paleta.VERMELHO, 15)
-	_botao(BOTOES_SIMPLES["zerar_ranking"], "ZERAR RANKING", false, Paleta.VERMELHO, 15)
-	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 15)
+	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 13)
+	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 13)
+	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 12)
+	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 13)
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
@@ -1411,7 +1527,7 @@ func _lista_do_ranking(rect: Rect2) -> void:
 		_cartao(celula, Paleta.tinta_clara(cor, 0.14) if tem else Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
 		_texto("%dº" % (i + 1), celula.position.y + 20.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
 		_texto(
-			"%03d" % ranking[i] if tem else "—", celula.position.y + 44.0, 22,
+			"%03d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
 			Paleta.TINTA if tem else Paleta.TINTA_LEVE,
 			HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x
 		)
@@ -1555,6 +1671,77 @@ func _contorno_arredondado(rect: Rect2, raio: float) -> PackedVector2Array:
 			var a := a0 + float(i) / 8.0 * PI * 0.5
 			pontos.append(meio + Vector2(cos(a), sin(a)) * r)
 	return pontos
+
+func _photo_texture(path: String) -> Texture2D:
+	if path.is_empty():
+		return null
+	if _photo_cache.has(path):
+		return _photo_cache[path] as Texture2D
+	if not FileAccess.file_exists(path):
+		return null
+	var image := Image.new()
+	if image.load(ProjectSettings.globalize_path(path)) != OK or image.is_empty():
+		return null
+	var texture := ImageTexture.create_from_image(image)
+	_photo_cache[path] = texture
+	return texture
+
+func _draw_texture_cover(texture: Texture2D, rect: Rect2, alpha: float, mirror := false) -> void:
+	if texture == null:
+		return
+	var source_size := texture.get_size()
+	if source_size.x <= 0.0 or source_size.y <= 0.0:
+		return
+	var source := Rect2(Vector2.ZERO, source_size)
+	var source_aspect := source_size.x / source_size.y
+	var target_aspect := rect.size.x / rect.size.y
+	if source_aspect > target_aspect:
+		var wanted_width := source_size.y * target_aspect
+		source.position.x = (source_size.x - wanted_width) * 0.5
+		source.size.x = wanted_width
+	else:
+		var wanted_height := source_size.x / target_aspect
+		source.position.y = (source_size.y - wanted_height) * 0.5
+		source.size.y = wanted_height
+	if mirror:
+		draw_set_transform(_deslocamento + Vector2(rect.end.x, rect.position.y), 0.0, Vector2(-1.0, 1.0))
+		draw_texture_rect_region(texture, Rect2(Vector2.ZERO, rect.size), source, Color(1, 1, 1, alpha))
+		draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
+	else:
+		draw_texture_rect_region(texture, rect, source, Color(1, 1, 1, alpha))
+
+func _draw_avatar(rect: Rect2, alpha: float) -> void:
+	draw_rect(rect, Color(Paleta.MARINHO, 0.90 * alpha))
+	var center := rect.get_center()
+	var unit := minf(rect.size.x, rect.size.y)
+	draw_circle(center - Vector2(0.0, unit * 0.14), unit * 0.15, Color(Paleta.CIANO, alpha))
+	draw_colored_polygon(PackedVector2Array([
+		center + Vector2(-unit * 0.30, unit * 0.38),
+		center + Vector2(-unit * 0.20, unit * 0.08),
+		center + Vector2(unit * 0.20, unit * 0.08),
+		center + Vector2(unit * 0.30, unit * 0.38),
+	]), Color(Paleta.ROXO, alpha))
+
+func _draw_player_photo(rect: Rect2, path: String, alpha: float) -> void:
+	var texture := _photo_texture(path)
+	if texture == null:
+		_draw_avatar(rect, alpha)
+	else:
+		_draw_texture_cover(texture, rect, alpha)
+	draw_rect(rect, Color(Paleta.CIANO, alpha), false, 3.0)
+
+func _draw_camera_card(rect: Rect2, alpha: float, label: String) -> void:
+	_cartao(rect.grow(8.0), Color(Paleta.MARINHO, alpha), Color(Paleta.CIANO, alpha), alpha, 3.0)
+	var preview := Rect2(rect.position, Vector2(rect.size.x, rect.size.y - 52.0))
+	var texture: Texture2D = camera_service.preview_texture() if camera_service != null else null
+	if texture == null:
+		_draw_avatar(preview, alpha)
+	else:
+		_draw_texture_cover(texture, preview, alpha, camera_mirrored)
+	draw_rect(preview, Color(Paleta.CIANO, 0.75 * alpha), false, 2.0)
+	_texto_cabendo(label, rect.end.y - 15.0, 18, Color(Paleta.CREME, alpha), rect.size.x - 20.0, rect.position.x + 10.0)
+	var dot := Paleta.VERDE if camera_service != null and camera_service.available() else Paleta.AMBAR
+	draw_circle(rect.position + Vector2(18.0, 18.0), 7.0, Color(dot, alpha))
 
 ## O aviso de operação ocupa o rodapé, e não o topo: no topo ele cairia
 ## em cima do cabeçalho, e no meio disputaria com o número.

@@ -42,8 +42,8 @@ const unsigned long COOLDOWN_MS = 650;      // um golpe por vez
 // Configuração ativa (chega pelo comando CONFIG; padrões sensatos).
 char eixoMedicao = 'X';
 float raioMetros = 0.45f;
-float velocidadeMinima = 0.5f;   // m/s — abaixo disso nem reporta
-float accelMinG = 2.5f;          // g — limiar que arma a medição
+float velocidadeMinima = 0.8f;   // m/s — abaixo disso nem reporta
+float accelMinG = 3.5f;          // g — evita balanço/toque como golpe
 
 // Offsets de repouso, medidos na calibração.
 float offAccel[3] = {0, 0, 0};   // em g

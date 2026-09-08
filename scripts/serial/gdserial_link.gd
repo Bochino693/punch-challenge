@@ -31,7 +31,12 @@ func list_ports() -> PackedStringArray:
 	for key in ports:
 		var info: Variant = ports[key]
 		if info is Dictionary and info.has("port_name"):
-			found.append(str(info["port_name"]))
+			var port_name := str(info["port_name"])
+			# Algumas imagens Linux anunciam ttyS0 mesmo sem o dispositivo.
+			# No Windows as portas COM não usam caminho e passam normalmente.
+			if port_name.begins_with("/dev/") and not FileAccess.file_exists(port_name):
+				continue
+			found.append(port_name)
 	found.sort()
 	return found
 

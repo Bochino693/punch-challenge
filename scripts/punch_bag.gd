@@ -166,8 +166,8 @@ func _desenhar_corpo(topo: float, altura: float, largura: float) -> void:
 	# Amassado: o soco achata o saco na horizontal e o estica um pouco na
 	# vertical, e isso passa em meio segundo.
 	var amasso := _impacto * _impacto * _forca_impacto
-	var meia_x := meia * (1.0 - amasso * 0.13)
-	var raio_y := raio * (1.0 + amasso * 0.05)
+	var meia_x := meia * (1.0 - amasso * 0.19)
+	var raio_y := raio * (1.0 + amasso * 0.09)
 
 	var corpo_topo := topo + raio_y
 	var corpo_base := topo + altura - raio_y
