@@ -24,8 +24,14 @@ var _next_bridge_poll_ms := 0
 var status := "PROCURANDO CÂMERA"
 
 func _ready() -> void:
-	if not CameraServer.camera_feeds_updated.is_connected(_on_camera_feeds_updated):
-		CameraServer.camera_feeds_updated.connect(_on_camera_feeds_updated)
+	# O CameraServer avisa por DOIS sinais (feed entrou / feed saiu), e não
+	# por um "feeds_updated" — este último não existe, e enquanto o código
+	# tentava conectá-lo o script inteiro não compilava: a câmera não
+	# falhava, ela nunca chegava a existir.
+	if not CameraServer.camera_feed_added.is_connected(_on_camera_feeds_updated):
+		CameraServer.camera_feed_added.connect(_on_camera_feeds_updated)
+	if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
+		CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
 	set_process(true)
 	call_deferred("refresh")
 
@@ -62,7 +68,6 @@ func refresh() -> void:
 	if not enabled:
 		status = "CÂMERA DESATIVADA"
 		return
-	CameraServer.set_monitoring_feeds(true)
 	var feeds := CameraServer.feeds()
 	if feeds.is_empty():
 		if OS.get_name() == "Windows":
@@ -72,13 +77,21 @@ func refresh() -> void:
 		return
 	selected_index = clampi(selected_index, 0, feeds.size() - 1)
 	_feed = feeds[selected_index]
+	# ESCOLHER O FORMATO ANTES DE ATIVAR. Nas plataformas em que o Godot
+	# fala com a câmera de verdade (V4L2 no Linux, Media Foundation no
+	# Windows), um feed sem formato escolhido ativa mas nunca entrega
+	# quadro — fica "conectada" e preta. Pegamos o primeiro formato que a
+	# câmera anuncia, que é sempre um que ela suporta.
+	var formatos := _feed.get_formats()
+	if not formatos.is_empty():
+		_feed.set_format(0, {})
 	_feed.set_active(true)
 	_texture = CameraTexture.new()
 	_texture.camera_feed_id = _feed.get_id()
-	_texture.which_feed = 0
+	_texture.which_feed = CameraServer.FEED_RGBA_IMAGE
 	status = "CÂMERA CONECTADA"
 
-func _on_camera_feeds_updated() -> void:
+func _on_camera_feeds_updated(_id: int = 0) -> void:
 	if enabled and _feed == null and _bridge_pid <= 0:
 		refresh()
 
@@ -106,8 +119,7 @@ func available() -> bool:
 	return enabled and (native_ok or (_bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500))
 
 func camera_count() -> int:
-	CameraServer.set_monitoring_feeds(true)
-	return CameraServer.feeds().size()
+	return CameraServer.get_feed_count()
 
 func capture_photo() -> String:
 	if not available():
@@ -134,7 +146,6 @@ func capture_photo() -> String:
 
 func _exit_tree() -> void:
 	_stop_feed()
-	CameraServer.set_monitoring_feeds(false)
 
 func _stop_feed() -> void:
 	if _feed != null:

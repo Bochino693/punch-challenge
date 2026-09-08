@@ -122,19 +122,19 @@ func _desenhar_sombra(w: float, h: float, saco_largura: float, inclinacao: float
 		var k := 1.0 - float(i) * 0.17
 		draw_colored_polygon(
 			_elipse(Vector2(cx, cy), rx * k, rx * 0.17 * k, 44),
-			Color(0.22, 0.34, 0.55, 0.055)
+			Color(0.0, 0.0, 0.0, 0.11)
 		)
 
 ## O ponto onde a corrente encontra o teto do gabinete: chapa, parafusos
 ## e manilha. Não gira com o saco — é ele que está preso, não o teto.
 func _desenhar_suporte(pivot: Vector2, w: float) -> void:
 	var chapa := Rect2(w * 0.5 - 62.0, pivot.y - 22.0, 124.0, 22.0)
-	draw_rect(chapa, Color("55688a"))
-	draw_rect(Rect2(chapa.position.x, chapa.position.y, chapa.size.x, 5.0), Color("8a9bb8"))
+	draw_rect(chapa, Color("8f9bb5"))
+	draw_rect(Rect2(chapa.position.x, chapa.position.y, chapa.size.x, 5.0), Color("c3ccdd"))
 	for i in range(4):
 		draw_circle(Vector2(chapa.position.x + 16.0 + i * 30.0, chapa.position.y + 11.0), 3.5, Color("2f3f5c"))
 	# Manilha em U segurando o primeiro elo.
-	draw_arc(Vector2(w * 0.5, pivot.y + 2.0), 11.0, PI, TAU, 20, Color("55688a"), 5.0, true)
+	draw_arc(Vector2(w * 0.5, pivot.y + 2.0), 11.0, PI, TAU, 20, Color("8f9bb5"), 5.0, true)
 
 ## Corrente: elos de verdade, alternando o plano — um de frente, um de
 ## perfil. É a alternância que faz o olho ler "corrente" e não "linha".

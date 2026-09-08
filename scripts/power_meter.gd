@@ -86,14 +86,19 @@ func _moldura(trilho: Rect2, w: float, rotulo_altura: float, h: float) -> void:
 	draw_rect(caixa, Paleta.CARTAO)
 	# BISEL MARINHO, igual ao do visor do medalhão: as duas peças de
 	# instrumento da tela têm de parecer o mesmo equipamento.
-	draw_rect(caixa, Paleta.MARINHO, false, 5.0)
-	# Verniz: um reflexo claro na parte de cima da chapa.
-	draw_rect(Rect2(5.0, 5.0, w - 10.0, h * 0.14), Color(1, 1, 1, 0.55))
+	# BISEL DOURADO, e não marinho: no tema escuro o marinho é quase o
+	# fundo, e a peça perdia o contorno. O ouro é o mesmo da moldura do
+	# gabinete, então as duas leem como o mesmo equipamento.
+	draw_rect(caixa, Paleta.AMBAR, false, 4.0)
+	# Verniz: um reflexo QUENTE e fraco no alto da chapa. O reflexo branco
+	# a 55 %, que funcionava no tema claro, virava uma mancha leitosa
+	# cobrindo o topo da escala.
+	draw_rect(Rect2(5.0, 5.0, w - 10.0, h * 0.10), Color(Paleta.AMBAR, 0.10))
 	draw_line(
 		Vector2(10.0, h - rotulo_altura), Vector2(w - 10.0, h - rotulo_altura),
 		Paleta.CARTAO_BORDA, 1.5
 	)
-	draw_rect(trilho.grow(6.0), Paleta.MARINHO)
+	draw_rect(trilho.grow(6.0), Color("120409"))
 	draw_rect(trilho, Paleta.VAZIO)
 
 ## As três zonas, pintadas atrás do trilho: a régua da máquina. Num tema
@@ -111,7 +116,10 @@ func _zonas(trilho: Rect2) -> void:
 		var cor: Color = f[2]
 		var y0 := trilho.end.y - trilho.size.y * ate
 		var y1 := trilho.end.y - trilho.size.y * de
-		draw_rect(Rect2(trilho.position.x, y0, trilho.size.x, y1 - y0), Paleta.tinta_clara(cor, 0.30))
+		# As zonas ficam mais fortes no escuro do que ficavam no claro: um
+		# fundo preto engole cor diluída, e é a régua que precisa ser lida
+		# de longe antes do soco.
+		draw_rect(Rect2(trilho.position.x, y0, trilho.size.x, y1 - y0), Color(cor, 0.42))
 		if ate < 1.0:
 			draw_line(
 				Vector2(trilho.position.x - 7.0, y0), Vector2(trilho.end.x + 7.0, y0),
@@ -192,7 +200,7 @@ func _recorde(trilho: Rect2) -> void:
 		return
 	var t := clampf(float(recorde) / float(GameDef.SCORE_MAX), 0.0, 1.0)
 	var y := trilho.end.y - trilho.size.y * t
-	var cor := Paleta.MARINHO
+	var cor := Paleta.CREME
 	# Tracejado, para não ser confundido com o topo da coluna.
 	var x := trilho.position.x - 4.0
 	while x < trilho.end.x + 4.0:
