@@ -1349,6 +1349,10 @@ func _draw_show_idle() -> void:
 	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), 1.0, 3.0)
 	_texto("PRESSIONE START", 1635.0, 46, Color.WHITE)
 	_texto("JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits, 1740.0, 26, Paleta.CIANO)
+	# CARIMBO DA BUILD. Discreto, mas na tela que fica ligada o dia
+	# inteiro: é ele que responde "atualizei e não mudou nada" sem
+	# ninguém precisar abrir terminal.
+	_texto(Versao.curta(), 1876.0, 15, Color(1, 1, 1, 0.55))
 
 func _capitulo_da_marca(alpha: float) -> void:
 	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0, alpha)
@@ -1781,7 +1785,14 @@ func _draw_central() -> void:
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
-	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1878.0, 15, Paleta.TINTA_LEVE)
+	# Uma linha só: entre a última fileira de botões e a borda do painel
+	# sobram poucos pixels, e duas linhas aí se atropelam. O carimbo da
+	# build entra junto porque quem abre a Central é justamente quem
+	# acabou de instalar a atualização e precisa confirmar que pegou.
+	_texto(
+		"%s     Tecla T: golpe de teste  •  ESC: fecha sem sair da rodada" % Versao.curta(),
+		1872.0, 14, Paleta.TINTA_LEVE
+	)
 
 ## As cinco marcas em uma linha só: o técnico precisa VER o que vai
 ## apagar antes de apertar ZERAR RANKING.
