@@ -33,7 +33,7 @@ marinho/preta, painéis tecnológicos e luzes ciano, magenta, verde e âmbar.
 O contraste mantém o placar legível a distância e aproxima a apresentação
 das máquinas modernas de boxe com câmera e ranking visual.
 
-Todas as cores moram em `scripts/paleta.gd`. Fundo, saco, medidor,
+Todas as cores moram em `scripts/paleta.gd`. Fundo, alvo, placar,
 moldura e textos leem de lá, então o tema é uma coisa só — mudar a cara
 do jogo é mexer num arquivo, e não caçar hexadecimal em seis.
 
@@ -53,14 +53,20 @@ A referência é máquina de salão de verdade (PUNCH & KICK, KUNG FU): o que
 faz aquilo parecer equipamento caro, e não desenho, são três coisas — e
 as três estão aqui.
 
-**O medalhão.** Uma máquina de fliperama tem UM visor, e é ele que a
-pessoa olha o jogo inteiro. Aqui é a mesma peça em todos os momentos, e
-só muda o que está escrito dentro: `3, 2, 1` na contagem, os pontos da
-carga enquanto se segura a barra, traços piscando no impacto e a
-pontuação subindo no fim. Quatro faixas concêntricas, sem uma invadir a
-outra: raios girando por fora, o anel de faixa (que é o relógio — enche
-na contagem do placar e esvazia nos oito segundos do soco), o bisel e o
-vidro. O rótulo é serigrafado em curva na faixa, como no painel real.
+**O visor é UM SÓ, o jogo inteiro.** Uma máquina de fliperama tem um
+painel, e é para ele que a pessoa olha do começo ao fim. Aqui é a mesma
+peça em todos os momentos, e só muda o que está escrito dentro: traços
+piscando enquanto a máquina espera o soco, os pontos da carga enquanto se
+segura a barra, e a pontuação subindo no fim. O anel de sessenta marcas
+em volta muda de papel junto: corre em três marcas quando está esperando,
+enche com a carga quando alguém simula pelo teclado, e enche com a
+PONTUAÇÃO na contagem — nunca com o relógio.
+
+**Não há saco de pancadas desenhado.** O saco é a peça física que a
+pessoa tem na frente do corpo; um segundo saco na tela dividia a atenção
+entre dois alvos, e o de pixel não é o que se acerta. No lugar dele, a
+tela de espera acende um FAROL: anéis saindo do visor, sempre para fora,
+chamando o punho para onde o número vai nascer.
 
 **O visor de sete segmentos** (`scripts/visor_led.gd`). Não é fonte: é
 segmento a segmento. O que faz o olho reconhecer um painel de LED não é
@@ -78,11 +84,6 @@ desenha texto de uma cor só, então o degradê é simulado assim); e o
 preenchimento. Com halo, entra antes um contorno largo e transparente na
 cor de destaque.
 
-Fora isso: o vinil do saco ganhou uma faixa de verniz estreita e quase
-branca — é o risco de luz que separa vinil de feltro — e o medidor ganhou
-o mesmo bisel marinho do visor, para as duas peças de instrumento da
-tela parecerem o mesmo equipamento.
-
 ### Como a tela se organiza
 
 A tela é dividida em **bandas horizontais fixas**, declaradas no topo de
@@ -91,7 +92,7 @@ A tela é dividida em **bandas horizontais fixas**, declaradas no topo de
 
 ```
   0 –  150   cabeçalho: marca do jogo e modo de operação
-168 – 1104   palco: o saco e o medidor de potência
+168 – 1104   alvo: o visor, o farol e o campo de força
 1124 – 1580  leitura: número, veredito e convite
 1608 – 1740  cartões: recorde, partidas, créditos
 1876         rodapé: assinatura da casa
@@ -128,11 +129,17 @@ precisa saber o que fazer.
 **START entra no jogo.** Em modo ficha, o crédito é debitado aqui; em
 modo livre, START entra direto.
 
-**A janela do soco é de oito segundos**, mostrada por uma barra que
-esvazia e fica vermelha no fim — sem número para ninguém precisar ler.
+**A máquina ESPERA o soco, e não cobra a espera.** Não há relógio na
+tela nem barra esvaziando: o jogo fica armado, com o farol chamando, até
+o golpe chegar. Existe um limite de noventa segundos, para a máquina não
+passar a tarde armada se a pessoa foi embora — e, ao fim dele, **o
+crédito é devolvido**. Nos últimos quinze segundos a tela avisa que vai
+voltar e diz, na mesma linha, que a ficha volta junto. Antes a janela era
+de oito segundos e a rodada morria com o crédito já debitado: quem
+hesitou pagou e não jogou.
 
 **Carregando, o visor mostra o VALOR EXATO.** Enquanto a barra de espaço
-está pressionada, o número grande na tela e a coluna do medidor mostram
+está pressionada, o número no visor mostra
 quantos pontos o golpe vale *se soltar agora* — não a fração do tempo
 segurado. A conversão de tempo em pontos é uma curva, então uma barra
 proporcional ao tempo mostraria 60 % quando o golpe valeria 640. É a
@@ -150,7 +157,7 @@ por isso o número prometido e o número pago não têm como divergir.
 Os dois limites são ajustáveis na Central Técnica: a mecânica de cada
 máquina responde diferente, e uma faixa errada faz todo mundo ganhar (ou
 todo mundo perder), que é o jeito mais rápido de esvaziar a fila. A
-mesma faixa manda na cor da moldura de LEDs, nas zonas do medidor e na
+mesma faixa manda na cor da moldura de LEDs, no anel do placar e na
 cor do veredito — os três nunca discordam sobre o que é um golpe forte.
 
 **A contagem é o suspense.** O número sobe de zero até a pontuação em
@@ -178,7 +185,7 @@ momento pelo qual o cliente pagou.
   com a faixa do golpe.
 - A marca da casa montada como letreiro de parque: placa creme, moldura
   marinho e lâmpadas correndo em volta.
-- Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
+- Contagem regressiva animada `3, 2, 1` e tela de espera que aguarda o soco sem consumir a ficha.
 - Pontuação de 0 a 999 baseada em curva gradual `smoothstep + gamma`.
   O padrão difícil usa expoente `2,00`; o cálculo antigo com `0,8`, que
   favorecia demais golpes médios, não é mais utilizado.

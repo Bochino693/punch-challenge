@@ -16,7 +16,15 @@ enum Faixa { FRACA, MEDIA, FORTE }
 const SCORE_MAX := 999
 const CREDITOS_MAX := 99
 const SERIAL_BAUD := 115200
-const JANELA_DO_SOCO := 8.0 ## Segundos para golpear depois do ARM.
+## QUANTO A MÁQUINA ESPERA PELO SOCO.
+##
+## Eram oito segundos, e ao fim deles a rodada morria com o crédito já
+## gasto: quem hesitou pagou e não jogou. Agora a espera é longa, e o
+## fim dela DEVOLVE o crédito — o limite existe só para a máquina não
+## passar a tarde armada se a pessoa foi embora, nunca para cobrar.
+const ESPERA_DO_SOCO := 90.0
+## A partir daqui a tela avisa que vai voltar, com o relógio à mostra.
+const AVISO_DE_VOLTA := 15.0
 const CONTAGEM_DURACAO := 1.9 ## Subida do número no resultado.
 const IMPACTO_DURACAO := 0.55 ## Estado MEASURING: flash + onda de choque.
 const RESULTADO_TIMEOUT := 12.0

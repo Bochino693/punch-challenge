@@ -28,7 +28,7 @@ func _initialize() -> void:
 		{"nome": "01b_recordes", "fn": _abertura_recordes},
 		{"nome": "01c_como_jogar", "fn": _abertura_como_jogar},
 		{"nome": "02_contagem", "fn": _contagem},
-		{"nome": "03_armado", "fn": _armado},
+		{"nome": "03_espera", "fn": _espera},
 		{"nome": "04_carga", "fn": _carga},
 		{"nome": "05_impacto", "fn": _impacto},
 		{"nome": "06_contando", "fn": _contando},
@@ -64,14 +64,11 @@ func _preparar(estado: int) -> void:
 	jogo.state = estado
 	jogo.state_time = 1.4
 	jogo.animation_time = 3.0
-	jogo.saco.visible = estado != GameDef.State.IDLE
-	jogo.medidor.visible = estado != GameDef.State.IDLE
 
 func _abertura() -> void:
 	jogo.ranking = RankingStore.migrate([872, 705, 640, 512, 388])
 	jogo.plays = 431
 	jogo.credits = 3
-	jogo.medidor.recorde = 872
 	_preparar(GameDef.State.IDLE)
 	jogo.state_time = 2.0
 
@@ -90,40 +87,31 @@ func _contagem() -> void:
 	jogo.countdown_left = 2.4
 	jogo.moldura.set_estado(LedFrame.CONTAGEM)
 
-func _armado() -> void:
+func _espera() -> void:
 	_preparar(GameDef.State.ARMED)
-	jogo.armed_left = 5.7
+	jogo.espera_left = 60.0
 	jogo.carga_tempo = -1.0
-	jogo.saco.set_alvo(true)
 	jogo.moldura.set_estado(LedFrame.ARMADA)
 
 func _carga() -> void:
 	_preparar(GameDef.State.ARMED)
-	jogo.armed_left = 4.2
+	jogo.espera_left = 55.0
 	jogo.carga_tempo = 0.9
-	jogo.medidor.set_carga(0.6)
-	jogo.saco.set_carga(0.6)
 
 func _impacto() -> void:
 	jogo.carga_tempo = -1.0
-	jogo.medidor.set_carga(-1.0)
-	jogo.saco.set_carga(-1.0)
 	_preparar(GameDef.State.MEASURING)
 	jogo.state_time = 0.25
 	jogo.result_score = 903
-	jogo.saco.golpear(0.9)
 
 func _resultado(pontos: int, veredito: float) -> void:
 	_preparar(GameDef.State.RESULT)
-	jogo.saco.set_alvo(false)
 	jogo.fx.limpar()
 	jogo.result_score = pontos
 	jogo.result_speed = 9.4
 	jogo.result_simulado = false
 	jogo.posicao_no_ranking = 1 if pontos > 900 else (3 if pontos > 600 else 0)
 	jogo.displayed_score = float(pontos) if veredito >= 0.0 else float(pontos) * 0.55
-	jogo.medidor.set_pontos(jogo.displayed_score)
-	jogo.medidor.nivel_visivel = jogo.medidor.nivel_alvo
 	jogo.verdict_time = veredito
 	jogo.result_time = 1.9 if veredito >= 0.0 else 1.0
 	if veredito >= 0.0:

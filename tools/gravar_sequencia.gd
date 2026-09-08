@@ -20,9 +20,9 @@ extends SceneTree
 
 const TELA := Vector2i(1080, 1920)
 ## De quantos em quantos quadros uma foto é tirada.
-const PASSO := 6
+const PASSO := 10
 ## Quantas fotos no total.
-const FOTOS := 60
+const FOTOS := 72
 
 var jogo: Control
 var destino := ""
@@ -44,8 +44,6 @@ func _initialize() -> void:
 	get_root().content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
 	jogo = (load("res://scenes/main.tscn") as PackedScene).instantiate()
 	get_root().add_child(jogo)
-	jogo.credits = 9
-	jogo.game_mode = "credit"
 
 func _process(_delta: float) -> bool:
 	quadro += 1
@@ -62,8 +60,16 @@ func _dirigir() -> void:
 	if roteiro != "rodada":
 		return
 	match quadro:
+		1:
+			# AS FICHAS SÓ VALEM A PARTIR DAQUI. Postas em `_initialize`,
+			# elas eram apagadas pelo `_carregar` do jogo, que só roda no
+			# primeiro quadro — e a rodada inteira morria num aviso de
+			# "insira 1 crédito" em vez de acontecer.
+			jogo.credits = 9
+			jogo.game_mode = "credit"
 		30:
 			jogo._pressionou_start()
-		140:
-			# Golpe de nocaute, no meio da janela do soco.
+		400:
+			# Golpe de nocaute, já com alguns segundos de tela de espera
+			# no ar: é essa espera que se quer ver no filme.
 			jogo._registrar_impacto(961, 11.4, true)

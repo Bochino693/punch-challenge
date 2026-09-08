@@ -1,9 +1,7 @@
-[gd_scene load_steps=7 format=3 uid="uid://j1iigsl0puq5"]
+[gd_scene load_steps=5 format=3 uid="uid://j1iigsl0puq5"]
 
 [ext_resource type="Script" uid="uid://5ua44uvnia2p" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/background.gd" id="2_fundo"]
-[ext_resource type="Script" path="res://scripts/punch_bag.gd" id="3_saco"]
-[ext_resource type="Script" path="res://scripts/power_meter.gd" id="4_medidor"]
 [ext_resource type="Script" path="res://scripts/led_frame.gd" id="5_moldura"]
 [ext_resource type="Script" path="res://scripts/audio_bank.gd" id="6_audio"]
 
@@ -25,24 +23,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("2_fundo")
-
-[node name="Saco" type="Control" parent="."]
-z_index = -1
-layout_mode = 0
-offset_left = 250.0
-offset_top = 236.0
-offset_right = 710.0
-offset_bottom = 1136.0
-script = ExtResource("3_saco")
-
-[node name="Medidor" type="Control" parent="."]
-z_index = -1
-layout_mode = 0
-offset_left = 790.0
-offset_top = 360.0
-offset_right = 984.0
-offset_bottom = 1136.0
-script = ExtResource("4_medidor")
 
 [node name="Moldura" type="Control" parent="."]
 z_index = 4

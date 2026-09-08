@@ -5,14 +5,13 @@ extends Control
 ## TELA EM PÉ, 1080 × 1920, LIDA EM BANDAS. Quem joga está a dois ou três
 ## metros do gabinete e olha para cima. A tela é dividida em faixas
 ## horizontais fixas (`BANDA_*`), e cada coisa desenhada mora dentro da
-## sua: cabeçalho, palco (saco e medidor), leitura (número e veredito),
+## sua: cabeçalho, alvo do soco, leitura (número e veredito),
 ## cartões e rodapé. Enquanto tudo respeitar a sua banda, nada se
 ## sobrepõe — que é a diferença entre um placar que se lê de longe e um
 ## amontoado de texto por cima de texto.
 ##
 ## O nó raiz desenha textos, placar e a Central Técnica; o cenário vivo
-## fica nos filhos: `PunchBackground` (fundo), `PunchBag` (saco),
-## `PowerMeter` (coluna de potência), `LedFrame` (moldura de LEDs) e
+## fica nos filhos: `PunchBackground` (fundo), `LedFrame` (moldura de LEDs) e
 ## `AudioBank` (sons). O que voa — confete, faísca, estilhaço — mora em
 ## `fx.gd`.
 ##
@@ -20,7 +19,7 @@ extends Control
 ##
 ##   ABERTURA → (START) → 3, 2, 1 → SENSOR ARMADO → IMPACTO → RESULTADO
 ##
-## Dois jeitos de socar: o MPU-6050 no saco manda HIT pela serial
+## Dois jeitos de socar: o MPU-6050 do alvo manda HIT pela serial
 ## (protocolo V2, ver docs/PROTOCOLO_SERIAL.md), ou a simulação —
 ## SEGURAR a barra de espaço carrega o golpe e SOLTAR desfere. Quanto
 ## mais tempo segura, mais forte o soco (ScoreCurve.points_from_charge).
@@ -33,7 +32,7 @@ const ArcadeStage = preload("res://scripts/presentation/arcade_stage.gd")
 # ======================================================================
 ## Cabeçalho: marca do jogo e modo de operação.
 const BANDA_TOPO := 150.0
-## Palco: o saco e o medidor. Nada de texto entra aqui.
+## Alvo do soco: de onde saem ondas, faíscas e clarão.
 const PALCO_TOPO := 162.0
 const PALCO_BASE := 1032.0
 ## O MEDALHÃO: o visor da máquina. Uma máquina de fliperama tem UM
@@ -53,6 +52,9 @@ const CARTOES_ALTURA := 122.0
 const RODAPE_Y := 1876.0
 ## Margem lateral livre de moldura de LED.
 const MARGEM := 60.0
+## O ALVO NA TELA. É o centro do visor — o mesmo lugar em que o farol
+## chama o soco e em que o número nasce logo depois.
+const ALVO_DO_SOCO := Vector2(540.0, 930.0)
 const LARGURA_UTIL := TELA.x - MARGEM * 2.0
 
 ## As cores que voam. Saem da paleta porque confete branco, que num
@@ -143,7 +145,11 @@ var porta_configurada := ""
 
 var countdown_left := 3.0
 var last_count := 3
-var armed_left := GameDef.JANELA_DO_SOCO
+var espera_left := GameDef.ESPERA_DO_SOCO
+## Se a rodada em curso debitou uma ficha. É o que autoriza a devolução
+## quando a espera acaba sem soco — e, sendo consumido na devolução,
+## impede que a mesma ficha volte duas vezes.
+var credito_gasto := false
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -212,8 +218,6 @@ var fonte: Font
 var logo: Texture2D = null
 
 @onready var fundo: PunchBackground = $Fundo
-@onready var saco: PunchBag = $Saco
-@onready var medidor: PowerMeter = $Medidor
 @onready var moldura: LedFrame = $Moldura
 @onready var sons: AudioBank = $Audio
 
@@ -221,7 +225,6 @@ func _ready() -> void:
 	fonte = ThemeDB.fallback_font
 	if ResourceLoader.exists("res://assets/fonts/Bungee-Regular.ttf"):
 		fonte = load("res://assets/fonts/Bungee-Regular.ttf")
-	medidor.fonte = fonte
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
@@ -243,14 +246,12 @@ func _exit_tree() -> void:
 		link.close_port()
 	_photo_cache.clear()
 
-## Um lugar só onde as faixas chegam a quem as desenha. Régua do medidor,
+## Um lugar só onde as faixas chegam a quem as desenha. Régua da Central,
 ## cor da moldura e veredito passam a concordar por construção.
 func _aplicar_faixas() -> void:
 	var lim := GameDef.limiares(limiar_fraco, limiar_forte)
 	limiar_fraco = lim.x
 	limiar_forte = lim.y
-	medidor.set_faixas(limiar_fraco, limiar_forte)
-	medidor.recorde = _melhor()
 
 ## A melhor marca da casa. Sai do topo do ranking, e não de uma variável
 ## paralela — duas fontes para o mesmo número é como elas divergem.
@@ -266,11 +267,14 @@ func _entrar_no_ranking(pontos: int, foto := "", origem := "SENSOR") -> int:
 		RankingStore.delete_photo(path)
 	return int(inserted["position"])
 
-## Onde o soco aterrissa. Pergunta ao saco em vez de repetir a conta: o
-## saco pode mudar de tamanho ou de posição sem levar junto a onda de
-## choque, as faíscas e o clarão.
+## ONDE O SOCO ATERRISSA NA TELA.
+##
+## Antes era o saco de pancadas desenhado que dizia o ponto. Sem ele, o
+## alvo é o próprio visor: é dele que saem as ondas, as faíscas e o
+## clarão, e é para ele que a tela de espera chama o punho. Um lugar só,
+## para que efeito e imagem nunca discordem.
 func _alvo() -> Vector2:
-	return saco.ponto_de_impacto()
+	return ALVO_DO_SOCO
 
 # ======================================================================
 # CICLO
@@ -359,17 +363,16 @@ func _processar_contagem(delta: float) -> void:
 	if countdown_left <= -1.2:
 		state = GameDef.State.ARMED
 		state_time = 0.0
-		armed_left = GameDef.JANELA_DO_SOCO
+		espera_left = GameDef.ESPERA_DO_SOCO
 		carga_tempo = -1.0
 		sons.play("go")
 		sons.music(-19.0)
 		moldura.set_estado(LedFrame.ARMADA)
-		saco.set_alvo(true)
 
 func _processar_armado(delta: float) -> void:
-	armed_left -= delta
+	espera_left -= delta
 	if carga_tempo >= 0.0:
-		# Simulação carregando. O MEDIDOR RECEBE O VALOR EXATO, não a
+		# Simulação carregando. O VISOR MOSTRA O VALOR EXATO, e não a
 		# fração do tempo: a conversão tempo → pontos é uma curva, então
 		# uma barra proporcional ao tempo mostraria 60 % quando o golpe
 		# valeria 640. Quem carrega vê o número que vai tirar.
@@ -377,18 +380,18 @@ func _processar_armado(delta: float) -> void:
 		carga_pontos = ScoreCurve.points_from_charge(
 			carga_tempo, hit_min_speed, hit_max_speed, score_exponent, score_dead_zone
 		)
-		medidor.set_carga(float(carga_pontos) / float(GameDef.SCORE_MAX))
-		# O saco, esse sim, tensiona conforme o tempo: é o gesto de tomar
-		# distância, e não a nota.
-		saco.set_carga(carga_tempo / ScoreCurve.CHARGE_MAX_SECONDS)
-	if armed_left <= 0.0:
-		# A janela fechou sem soco. Precisa de som: uma rodada que acaba
-		# em silêncio deixa a pessoa achando que a máquina travou, e ela
-		# fica esperando em vez de apertar START de novo.
+	if espera_left <= 0.0:
+		# A ESPERA ACABOU SEM SOCO — E A FICHA VOLTA.
+		#
+		# Antes a rodada simplesmente morria, com o crédito já debitado:
+		# quem hesitou oito segundos pagou e não jogou, e é isso que
+		# fazia o saldo evaporar sozinho. O limite continua existindo,
+		# senão a máquina passa a tarde armada se a pessoa foi embora,
+		# mas agora ele devolve em vez de cobrar.
 		_cancelar_carga()
 		sons.play("error", -4.0)
+		_devolver_credito()
 		_entrar_em_abertura()
-		_show_notice("TEMPO ESGOTADO — PRESSIONE START")
 
 func _entrar_em_resultado() -> void:
 	sons.start_score_loop()
@@ -406,7 +409,6 @@ func _processar_resultado(delta: float) -> void:
 	# O número dispara e vai freando — o suspense que um placar de
 	# arcade precisa ter. O veredito só entra quando a contagem termina.
 	displayed_score = float(result_score) * ease(avanco, 0.42)
-	medidor.set_pontos(displayed_score)
 
 	sons.score_progress(avanco)
 
@@ -425,7 +427,7 @@ func _processar_resultado(delta: float) -> void:
 
 func _manter_festa(delta: float) -> void:
 	## A festa continua enquanto o veredito está na tela, e o tamanho
-	## dela é o da faixa — as mesmas três faixas da régua do medidor.
+	## dela é o da faixa — as mesmas três faixas da régua da Central.
 	match GameDef.faixa_de(result_score, limiar_fraco, limiar_forte):
 		GameDef.Faixa.FORTE:
 			if verdict_time < 5.0 and verdict_time >= proximo_fogo:
@@ -520,8 +522,6 @@ func _cancelar_carga() -> void:
 		sons.stop("charge")
 	carga_tempo = -1.0
 	carga_pontos = 0
-	medidor.set_carga(-1.0)
-	saco.set_carga(-1.0)
 
 func _pressionou_start() -> void:
 	## START faz uma coisa só em cada tela, e é sempre "seguir em frente".
@@ -541,13 +541,12 @@ func _iniciar_rodada() -> void:
 			sons.play("error", -6.0)
 			return
 		credits -= 1
+		credito_gasto = true
 	_discard_round_photo()
 	intro_active = false
 	sons.stop("score_loop")
 	state = GameDef.State.COUNTDOWN
 	posicao_no_ranking = 0
-	saco.visible = false
-	medidor.visible = false
 	state_time = 0.0
 	countdown_left = 3.0
 	last_count = 3
@@ -558,8 +557,6 @@ func _iniciar_rodada() -> void:
 	ranking_announced = false
 	displayed_score = 0.0
 	fx.limpar()
-	medidor.reset()
-	medidor.recorde = _melhor()
 	clarao = 1.0
 	tremor = 14.0
 	sons.play("start")
@@ -567,6 +564,20 @@ func _iniciar_rodada() -> void:
 	moldura.set_estado(LedFrame.CONTAGEM)
 	fundo.matiz = Color(0, 0, 0, 0)
 	_salvar()
+
+## DEVOLVE A FICHA DA RODADA QUE NÃO ACONTECEU.
+##
+## Só em modo ficha, e só uma vez: quem jogou de graça não tem o que
+## receber de volta, e devolver duas vezes seria fabricar crédito.
+func _devolver_credito() -> void:
+	if not credito_gasto:
+		return
+	credito_gasto = false
+	if game_mode != "credit":
+		return
+	credits = mini(credits + 1, GameDef.CREDITOS_MAX)
+	_salvar()
+	_show_notice("TEMPO ESGOTADO — CRÉDITO DEVOLVIDO  •  SALDO %02d" % credits)
 
 func _entrar_em_abertura() -> void:
 	_discard_round_photo()
@@ -583,11 +594,6 @@ func _entrar_em_abertura() -> void:
 	result_photo_path = ""
 	_photo_cache.clear()
 	fx.limpar()
-	medidor.reset()
-	saco.visible = false
-	medidor.visible = false
-	saco.set_alvo(false)
-	saco.set_carga(-1.0)
 	moldura.set_estado(LedFrame.PARADA)
 	fundo.matiz = Color(0, 0, 0, 0)
 
@@ -611,15 +617,15 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	## O soco aterrissou: meio segundo de impacto puro, e só então o
 	## placar começa a subir. Sem esse intervalo o golpe e o número
 	## chegam juntos e nenhum dos dois brilha.
+	# A ficha foi usada de verdade: daqui em diante não há o que devolver.
+	credito_gasto = false
 	result_score = clampi(pontos, 0, GameDef.SCORE_MAX)
 	result_speed = maxf(velocidade, 0.0)
 	result_simulado = simulado
 	state = GameDef.State.MEASURING
 	state_time = 0.0
-	saco.set_alvo(false)
 	var forca := float(result_score) / float(GameDef.SCORE_MAX)
 	var alvo := _alvo()
-	saco.golpear(forca)
 	moldura.impacto(0.4 + forca * 0.6)
 	sons.play("hit", 1.5)
 	sons.stop("charge")
@@ -637,7 +643,6 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 		GameDef.faixa_de(result_score, limiar_fraco, limiar_forte),
 		posicao_no_ranking > 0
 	)
-	medidor.recorde = _melhor()
 	_salvar()
 
 func _disparar_veredito() -> void:
@@ -927,7 +932,6 @@ func _click_central(p: Vector2) -> void:
 		RankingStore.clear_photos(ranking)
 		ranking.clear()
 		_photo_cache.clear()
-		medidor.recorde = 0
 		_show_notice("RANKING E FOTOS ZERADOS")
 	elif BOTOES_SIMPLES["reconectar"].has_point(p):
 		if link != null:
@@ -1054,15 +1058,8 @@ func _salvar() -> void:
 # DESENHO
 # ======================================================================
 func _draw() -> void:
-	# O PALCO APARECE NA JANELA DO SOCO, E SÓ NELA. É o único momento em
-	# que a pessoa está olhando para o saco de verdade; na pose quem manda
-	# é a câmera, e no resultado é o anel do placar — os três disputariam
-	# o mesmo espaço se ficassem juntos.
-	var no_palco := state == GameDef.State.ARMED and not central_aberta
 	fundo.visible = true
 	moldura.visible = false
-	saco.visible = no_palco
-	medidor.visible = no_palco
 	# O TREMOR SACODE A TELA INTEIRA: um deslocamento só, antes de tudo.
 	_deslocamento = Vector2.ZERO
 	if tremor > 0.1:
@@ -1123,65 +1120,6 @@ func _draw_clarao() -> void:
 const ABERTURA_PAGINAS := 4
 const ABERTURA_SEGUNDOS := 7.0
 
-func _pagina_da_abertura() -> int:
-	return int(state_time / ABERTURA_SEGUNDOS) % ABERTURA_PAGINAS
-
-func _draw_abertura() -> void:
-	# Cada página entra com o seu próprio esmaecer, e não o da rodada:
-	# senão só a primeira apareceria com entrada e as outras dariam um
-	# salto seco.
-	var no_ar := fmod(state_time, ABERTURA_SEGUNDOS)
-	var suave := ease(clampf(no_ar / 0.55, 0.0, 1.0), 0.35)
-	var pagina := _pagina_da_abertura()
-
-	_fundo_da_abertura(suave)
-	match pagina:
-		0:
-			_pagina_marca(suave)
-		1:
-			_pagina_recordes(suave)
-		2:
-			_pagina_como_jogar(suave)
-		_:
-			_pagina_camera(suave)
-
-	_draw_convite(suave)
-	_pontinhos_da_pagina(pagina, suave)
-	_draw_placar_abertura(suave)
-	_draw_rodape(suave)
-
-## Raios e anéis girando atrás de qualquer página. Num fundo claro eles
-## são MAIS ESCUROS que o céu, não mais claros — a leitura é a mesma, a
-## conta é a inversa.
-func _fundo_da_abertura(alpha: float) -> void:
-	var centro := Vector2(540, 620)
-	for i in range(16):
-		var angulo := animation_time * 0.22 + i * TAU / 16.0
-		var comprimento := 1000.0 + sin(animation_time * 1.4 + i) * 50.0
-		var cor := Color(Paleta.CIANO, 0.055 * alpha)
-		if i % 2 == 0:
-			cor = Color(Paleta.VERMELHO, 0.045 * alpha)
-		draw_colored_polygon(
-			PackedVector2Array([
-				centro,
-				centro + Vector2(cos(angulo - 0.055), sin(angulo - 0.055)) * comprimento,
-				centro + Vector2(cos(angulo + 0.055), sin(angulo + 0.055)) * comprimento,
-			]),
-			cor
-		)
-	for i in range(3):
-		var raio := 320.0 + i * 84.0 + sin(animation_time * 1.1 + i * 0.7) * 14.0
-		draw_arc(centro, raio * alpha, 0.0, TAU, 120, Color(Paleta.MARINHO, 0.08 * alpha), 2.0)
-
-## Página 1 — a marca da casa e o recorde a bater.
-func _pagina_marca(alpha: float) -> void:
-	var flutuar := sin(animation_time * 1.6) * 12.0
-	_draw_marca(Vector2(540, 470) + Vector2(0, flutuar), 690.0 * lerpf(0.9, 1.0, alpha), alpha)
-	_texto_arcade("PUNCH CHALLENGE", 872.0, 86, Color(Paleta.VERMELHO, alpha), LARGURA_UTIL)
-	_texto("QUAL É A FORÇA DO SEU SOCO?", 918.0, 27, Color(Paleta.MARINHO, alpha))
-	_draw_medalhao("%03d" % _melhor(), Paleta.AMBAR, 1.0, alpha, Vector2(540, 1160), 122.0)
-	_texto("RECORDE DA CASA  •  BATA ESSA MARCA", 1332.0, 22, Color(Paleta.TINTA_FRACA, alpha))
-
 ## Página 2 — as cinco melhores marcas.
 func _pagina_recordes(alpha: float) -> void:
 	_texto_arcade("TOP 20 • MELHORES", 392.0, 62, Color(Paleta.CIANO, alpha), LARGURA_UTIL)
@@ -1240,56 +1178,6 @@ func _pagina_como_jogar(alpha: float) -> void:
 			MARGEM + 270.0, LARGURA_UTIL - 340.0
 		)
 
-## A câmera transforma uma tentativa em lembrança e dá rosto ao ranking.
-## Sem webcam a mesma página vira demonstração com avatar, nunca erro.
-func _pagina_camera(alpha: float) -> void:
-	_texto_arcade("VOCÊ NO RANKING", 304.0, 60, Color(Paleta.MARINHO, alpha), LARGURA_UTIL)
-	_draw_camera_card(Rect2(230.0, 360.0, 620.0, 700.0), alpha, "CÂMERA AO VIVO")
-	_texto("DÊ O SEU MELHOR SOCO", 1132.0, 34, Color(Paleta.VERMELHO, alpha))
-	_texto("SUA FOTO FICA AO LADO DA SUA MARCA NO TOP 5", 1186.0, 22, Color(Paleta.TINTA_FRACA, alpha))
-	_texto("FOTOS SALVAS SOMENTE NESTA MÁQUINA", 1234.0, 17, Color(Paleta.TINTA_LEVE, alpha))
-
-## O convite fica no MESMO lugar em todas as páginas. É o único elemento
-## que a pessoa precisa achar sem procurar, e um botão que muda de lugar
-## a cada sete segundos é um botão que ninguém acha.
-func _draw_convite(alpha: float) -> void:
-	var piscada := 0.6 + 0.4 * sin(animation_time * 4.2)
-	var convite := "PRESSIONE  START"
-	var cor := Paleta.VERDE
-	if game_mode == "credit" and credits <= 0:
-		convite = "INSIRA 1 FICHA"
-		cor = Paleta.CIANO
-	var caixa := Rect2(MARGEM + 80.0, 1400.0, LARGURA_UTIL - 160.0, 118.0)
-	_placa(Rect2(caixa.position + Vector2(0.0, 7.0), caixa.size), 22.0, Color(Paleta.SOMBRA, alpha))
-	_placa(caixa, 22.0, Color(cor.darkened(0.22), alpha))
-	_placa(Rect2(caixa.position, caixa.size - Vector2(0.0, 7.0)), 22.0, Color(cor, alpha))
-	_texto_arcade(convite, 1476.0, 46, Color(Paleta.CREME, alpha * piscada), caixa.size.x - 60.0, caixa.position.x + 30.0)
-
-## Quantas páginas existem e em qual delas estamos. Sem isso o rodízio
-## parece a tela trocando sozinha por defeito.
-func _pontinhos_da_pagina(pagina: int, alpha: float) -> void:
-	var largura := float(ABERTURA_PAGINAS) * 26.0
-	var x := 540.0 - largura * 0.5 + 13.0
-	for i in range(ABERTURA_PAGINAS):
-		var atual := i == pagina
-		draw_circle(Vector2(x + i * 26.0, 1560.0), 7.0 if atual else 5.0,
-			Color(Paleta.MARINHO if atual else Paleta.TINTA_LEVE, alpha))
-
-## Os quatro números da casa, numa fileira só, presentes em toda página.
-func _draw_placar_abertura(alpha: float) -> void:
-	var itens := [
-		["RECORDE", "%03d" % _melhor(), Paleta.AMBAR, "trofeu"],
-		["PARTIDAS", str(plays), Paleta.ROXO, "luva"],
-		["CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Paleta.ROSA, "ficha"],
-		["MODO", "LIVRE" if game_mode == "free" else "FICHA", Paleta.VERDE, "raio"],
-	]
-	var largura := (LARGURA_UTIL - 3.0 * 16.0) / 4.0
-	for i in range(itens.size()):
-		_stat_card(
-			Rect2(MARGEM + i * (largura + 16.0), CARTOES_Y, largura, CARTOES_ALTURA),
-			str(itens[i][0]), str(itens[i][1]), itens[i][2] as Color, str(itens[i][3]), alpha
-		)
-
 # ---------------------------------------------------------------- partida
 ## Todos os momentos da partida compartilham o mesmo visor. O que muda é
 ## o que está escrito nele, a cor do anel e quanto do anel está aceso.
@@ -1313,44 +1201,97 @@ func _draw_partida() -> void:
 				_texto("FOTO PRONTA" if not result_photo_path.is_empty() else "SEM CÂMERA • VAMOS JOGAR", 1390.0, 32, Paleta.CIANO)
 				_texto("PREPARE O SOCO", 1500.0, 46, Color.WHITE)
 		GameDef.State.ARMED:
-			_draw_janela_do_soco()
+			_draw_espera_do_soco()
 		GameDef.State.MEASURING, GameDef.State.RESULT:
 			_draw_score_hero()
 
-## A JANELA DO SOCO. O saco e o medidor são desenhados pelos nós filhos,
-## atrás desta camada; aqui entram só as letras, e elas ficam ABAIXO do
-## palco de propósito — quem está com o punho erguido olha para o saco,
-## não para o texto, e o texto que cobre o saco só atrapalha a mira.
-func _draw_janela_do_soco() -> void:
+## A TELA QUE ESPERA O SOCO.
+##
+## Não há mais saco desenhado nem barra de tempo. O saco de pancadas é a
+## peça FÍSICA que a pessoa tem na frente do corpo; desenhar um segundo
+## saco na tela dividia a atenção entre dois alvos, e o de pixel não é o
+## que se acerta. E a barra que esvaziava contava um tempo que ninguém
+## pediu — com o crédito já debitado, ela só servia para apressar.
+##
+## No lugar entra um FAROL: o mesmo visor que vai mostrar a pontuação,
+## piscando e mandando anéis para fora, dizendo "estou armado, pode
+## vir". Quem soca vê o número nascer exatamente onde o farol estava.
+func _draw_espera_do_soco() -> void:
 	var carregando := carga_tempo >= 0.0
-	var restante := clampf(armed_left / GameDef.JANELA_DO_SOCO, 0.0, 1.0)
+	# ÂMBAR, E NÃO VERMELHO, ENQUANTO ESPERA. O painel já é vermelho
+	# sobre vermelho; um farol vermelho dentro dele desaparece a três
+	# metros, que é exatamente a distância de quem ainda está decidindo
+	# se soca. Assim que a carga começa, a cor passa a ser a da faixa.
+	var cor := Paleta.AMBAR
+	if carregando:
+		cor = GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+
+	_draw_farol(cor, carregando)
 
 	if carregando:
-		# CARREGANDO: o número exato que sai se soltar agora, no mesmo
-		# formato em que ele vai aparecer no resultado.
-		var cor := GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
-		_texto_arcade("%03d" % carga_pontos, 1310.0, 128, cor, LARGURA_UTIL)
-		_texto("PONTOS SE SOLTAR AGORA", 1362.0, 26, Color.WHITE)
+		# CARREGANDO (teclado, sem sensor): o número exato que sai se
+		# soltar agora, no mesmo visor e no mesmo formato em que ele vai
+		# aparecer no resultado. Quem carrega não adivinha quanto vale
+		# quanto: solta quando o número que está vendo serve.
+		_texto("PONTOS SE SOLTAR AGORA", 785.0, 25, cor)
+		VisorLed.desenhar(self, "%03d" % carga_pontos, ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, Color.WHITE)
 		var piscada := 0.6 + 0.4 * sin(animation_time * 9.0)
-		_texto_arcade("SOLTE!", 1452.0, 66, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
+		_texto_arcade("SOLTE!", 1430.0, 72, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
 	else:
-		_texto_arcade("SOQUE AGORA!", 1300.0, 104, Color.WHITE, LARGURA_UTIL)
-		var dica := "ACERTE O ALVO COM FORÇA" if _sensor_ligado() \
-			else "SEGURE E SOLTE ESPAÇO"
-		_texto(dica, 1370.0, 28, Paleta.CIANO)
+		_texto("ESTOU PRONTO", 785.0, 25, cor)
+		VisorLed.desenhar(self, "---", ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, cor)
+		var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
+		_texto_arcade("SOQUE AGORA!", 1400.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
+		var dica := "ACERTE O ALVO COM TODA A FORÇA" if _sensor_ligado() \
+			else "SEGURE E SOLTE ESPAÇO PARA SIMULAR"
+		_texto(dica, 1468.0, 26, Color.WHITE)
+		# A MARCA A BATER FICA DENTRO DO VISOR, não embaixo dele: a faixa
+		# vermelha do fundo começa perto de 1500 px e engole qualquer
+		# texto miúdo que caia ali. Dentro do vidro escuro ela é legível
+		# e, de quebra, fica ao lado do número que vai substituí-la.
+		_texto("RECORDE DA CASA  %03d" % _melhor(), 1105.0, 26, Paleta.AMBAR)
 
-	# O relógio dos oito segundos: esvazia da direita e vira vermelho no
-	# fim, sem número para ninguém precisar ler.
-	var trilho := Rect2(220, 1470, 640, 16)
-	draw_rect(trilho, Color("5c2530"))
-	draw_rect(
-		Rect2(trilho.position, Vector2(trilho.size.x * restante, trilho.size.y)),
-		Paleta.CIANO if restante > 0.35 else Paleta.VERMELHO
-	)
-	draw_rect(trilho, Color(Paleta.AMBAR, 0.5), false, 2.0)
+	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
+	#
+	# Nos primeiros setenta e cinco segundos não há relógio nenhum: a
+	# máquina espera calada, que é o que se pediu. Só quando ela vai
+	# mesmo desistir é que avisa — e avisa dizendo que a ficha volta,
+	# senão o aviso vira ameaça.
+	if espera_left <= GameDef.AVISO_DE_VOLTA:
+		var segundos := maxi(0, int(ceil(espera_left)))
+		_texto("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1660.0, 24, Color.WHITE)
 
-func _draw_show_background() -> void:
-	ArcadeStage.background(self, animation_time)
+## O FAROL: anéis saindo do alvo, em batidas.
+##
+## Três anéis defasados, sempre no mesmo compasso, e um halo respirando
+## por trás. É a única coisa que se move nesta tela, e move sempre para
+## FORA — na direção de quem está olhando, chamando o soco. Anéis
+## entrando para dentro leriam como contagem regressiva, que é
+## exatamente o que esta tela deixou de ter.
+func _draw_farol(cor: Color, carregando: bool) -> void:
+	var centro := ALVO_DO_SOCO
+	var compasso := 1.15
+	for i in range(3):
+		var fase := fmod(animation_time / compasso + float(i) / 3.0, 1.0)
+		var raio := lerpf(330.0, 620.0, ease(fase, 0.45))
+		draw_arc(centro, raio, 0.0, TAU, 96, Color(cor, (1.0 - fase) * 0.55), 10.0, true)
+	# O anel do visor: correndo em volta enquanto espera, cheio conforme
+	# a carga quando alguém está simulando pelo teclado.
+	draw_circle(centro, 326.0, Color("250911"))
+	draw_arc(centro, 327.0, 0.0, TAU, 192, Color("6d2835"), 4.0, true)
+	var carga := clampf(float(carga_pontos) / float(GameDef.SCORE_MAX), 0.0, 1.0)
+	for i in range(60):
+		var angulo := float(i) / 60.0 * TAU - PI * 0.5
+		var aceso := false
+		if carregando:
+			aceso = float(i) / 60.0 <= carga
+		else:
+			# Três marcas correndo, do jeito que um letreiro de fliperama
+			# fica quando está ligado e ocioso.
+			var passo := fmod(animation_time * 0.55, 1.0)
+			var d := fmod(float(i) / 60.0 - passo + 1.0, 1.0)
+			aceso = d < 0.06 or absf(d - 0.3333) < 0.03 or absf(d - 0.6667) < 0.03
+		draw_arc(centro, 347.0, angulo, angulo + 0.065, 5, cor if aceso else Color("57212c"), 14.0, true)
 
 ## A ABERTURA GIRA EM TRÊS CAPÍTULOS.
 ##
@@ -1503,93 +1444,6 @@ func _draw_colunas_de_forca(cor: Color, progresso: float) -> void:
 			else:
 				draw_rect(caixa, Color("3a141d"))
 
-## A JANELA DO SOCO, E O VALOR EXATO DA CARGA.
-##
-## Enquanto a barra de espaço está pressionada, o visor deixa de mostrar
-## traços e passa a mostrar O NÚMERO — o mesmo visor, no mesmo lugar, com
-## os mesmos algarismos que vão aparecer no resultado. Quem carrega não
-## precisa adivinhar quanto tempo vale quanto: solta quando o número que
-## está vendo serve. E o anel do medalhão é o relógio dos oito segundos,
-## então tempo e valor ficam no mesmo objeto.
-func _draw_armado() -> void:
-	var carregando := carga_tempo >= 0.0
-	var restante := clampf(armed_left / GameDef.JANELA_DO_SOCO, 0.0, 1.0)
-	var cor_anel := Paleta.AMBAR if restante > 0.35 else Paleta.VERMELHO
-
-	if carregando:
-		var cor := GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
-		_draw_medalhao("%03d" % carga_pontos, cor, restante, 1.0)
-		_texto_arcade("SOLTE PARA SOCAR", 1516.0, 50, Paleta.AMBAR, LARGURA_UTIL)
-		_texto("PONTOS SE SOLTAR AGORA", 1562.0, 22, Paleta.TINTA_FRACA)
-	else:
-		_draw_medalhao("---", cor_anel, restante, 1.0)
-		_texto_arcade("SOQUE AGORA!", 1520.0, 70, Paleta.VERMELHO, LARGURA_UTIL)
-		var dica := "O SENSOR ESTÁ ESPERANDO O SEU GOLPE" if _sensor_ligado() \
-			else "SEGURE ESPAÇO PARA CARREGAR O GOLPE"
-		_texto(dica, 1566.0, 22, Paleta.TINTA_FRACA)
-
-func _draw_arena_lights() -> void:
-	# Luzes varrem o palco continuamente; trajetórias determinísticas
-	# evitam o aspecto de flashes aleatórios trocando a cada frame.
-	var impact := clampf(1.0 - state_time / 0.7, 0.0, 1.0) if state == GameDef.State.MEASURING else 0.0
-	for side in [-1.0, 1.0]:
-		var origin := Vector2(540.0 + side * 460.0, 188.0)
-		var sweep := sin(animation_time * 0.55 + side) * 120.0
-		var end := Vector2(540.0 + side * 140.0 + sweep, 980.0)
-		var color := Paleta.CIANO if side < 0.0 else Paleta.ROSA
-		draw_colored_polygon(PackedVector2Array([origin, end + Vector2(-80, 0), end + Vector2(80, 0)]), Color(color, 0.06 + impact * 0.1))
-		draw_line(origin, end, Color(color, 0.14), 2.0, true)
-		for k in range(9):
-			var y := 320.0 + float(k) * 72.0
-			var pulse := 0.3 + 0.7 * (0.5 + 0.5 * sin(animation_time * 3.0 - float(k) * 0.6))
-			var x: float = 540.0 + side * 465.0
-			draw_line(Vector2(x, y), Vector2(x - side * 18.0, y + 24.0), Color(color, pulse), 5.0, true)
-	if impact > 0.0:
-		var center := _alvo()
-		for i in range(18):
-			var angle := float(i) * TAU / 18.0
-			var direction := Vector2.from_angle(angle)
-			var radius := 100.0 + (1.0 - impact) * 420.0
-			draw_line(center + direction * radius, center + direction * (radius + 90.0 * impact), Color(Paleta.AMBAR, impact * 0.7), 3.0, true)
-
-func _draw_resultado() -> void:
-	var classe := GameDef.classificar(result_score, limiar_fraco, limiar_forte)
-	var cor_faixa: Color = classe["cor_faixa"]
-	# Enquanto conta, o anel enche junto com o número.
-	var avanco := clampf(result_time / GameDef.CONTAGEM_DURACAO, 0.0, 1.0)
-	var cor_visor: Color = cor_faixa if verdict_time >= 0.0 else Paleta.CIANO
-	_draw_medalhao("%03d" % int(round(displayed_score)), cor_visor, avanco, 1.0)
-	_draw_player_photo(Rect2(62.0, 1112.0, 218.0, 218.0), result_photo_path, 1.0)
-
-	if verdict_time < 0.0:
-		_texto("MEDINDO O IMPACTO…", 1516.0, 26, Paleta.TINTA_LEVE)
-		return
-
-	_draw_carimbo(str(classe["label"]), Paleta.para_texto(classe["color"] as Color))
-
-	# A CONQUISTA entra ABAIXO do veredito, e não por cima dele — foi
-	# assim que a palavra ficava ilegível justamente quando havia mais
-	# motivo para lê-la. E ela fala do RANKING, não de um recorde só:
-	# entrar em quinto também é uma vitória, e é a que faz a maioria das
-	# pessoas pagar a segunda ficha.
-	var origem := "SIMULAÇÃO" if result_simulado else "SENSOR"
-	var detalhe := "%s  •  %.2f m/s" % [origem, result_speed]
-	if posicao_no_ranking > 0:
-		var brilho := 0.65 + 0.35 * sin(animation_time * 6.0)
-		var cor_pos := _cor_da_posicao(posicao_no_ranking)
-		var faixa := Rect2(MARGEM + 190.0, 1536.0, LARGURA_UTIL - 380.0, 44.0)
-		_cartao(faixa, Paleta.tinta_clara(cor_pos, 0.24), Color(cor_pos, brilho), 1.0, 3.0)
-		Icones.trofeu(self, Vector2(faixa.position.x + 28.0, faixa.position.y + 22.0), 13.0, cor_pos)
-		Icones.trofeu(self, Vector2(faixa.end.x - 28.0, faixa.position.y + 22.0), 13.0, cor_pos)
-		var frase := "NOVO RECORDE DA CASA" if posicao_no_ranking == 1 \
-			else "ENTROU NO TOP %d  •  %dº LUGAR" % [RANKING_TAMANHO, posicao_no_ranking]
-		_texto_cabendo(frase, 1565.0, 23, Paleta.para_texto(cor_pos), faixa.size.x - 86.0, faixa.position.x + 43.0)
-	else:
-		_texto_cabendo(detalhe, 1556.0, 21, Paleta.TINTA_LEVE, LARGURA_UTIL)
-		if verdict_time > 1.0:
-			var piscada := 0.55 + 0.45 * sin(animation_time * 3.6)
-			_texto("START PARA JOGAR NOVAMENTE", 1596.0, 20, Color(Paleta.TINTA_FRACA, piscada))
-
 ## Ouro, prata e bronze nos três primeiros; azul da casa nos demais. É a
 ## convenção que todo mundo já lê sem legenda.
 func _cor_da_posicao(posicao: int) -> Color:
@@ -1605,8 +1459,6 @@ func _cor_da_posicao(posicao: int) -> Color:
 ## Resultado encerra em uma cerimônia: a lista se move até a colocação
 ## conquistada, sem reduzir vinte fotos a miniaturas ilegíveis.
 func _draw_ranking_reveal() -> void:
-	saco.visible = false
-	medidor.visible = false
 	var progress := clampf((verdict_time - 2.5) / 1.6, 0.0, 1.0)
 	var eased := progress * progress * (3.0 - 2.0 * progress)
 	var position_index := maxi(posicao_no_ranking - 1, 0)
@@ -1648,157 +1500,6 @@ func _draw_ranking_reveal() -> void:
 	_texto("SEU SOCO", 1400.0, 25, Paleta.TINTA_FRACA)
 	_texto("%03d" % result_score, 1520.0, 100, Paleta.TINTA)
 	_texto("START • JOGAR NOVAMENTE", 1710.0, 32, Paleta.CIANO)
-
-# ---------------------------------------------------------------- medalhão
-## O VISOR DA MÁQUINA, do jeito que uma máquina de fliperama o monta:
-## raios girando por fora, anel de faixa, bisel e, no miolo, o vidro
-## escuro com os algarismos de LED.
-##
-## Por que os raios giram e o anel enche: são as duas únicas peças
-## animadas, e cada uma diz uma coisa. Os raios giram sempre, devagar —
-## é o "a máquina está viva". O anel é o RELÓGIO: enche na contagem do
-## placar e esvazia nos oito segundos do soco. Uma pessoa a três metros
-## não lê um número de tempo, mas vê um anel fechando.
-##
-## `energia` (0..1) é quanto do anel está aceso; `intensidade` escurece
-## tudo de uma vez, para o visor poder "apagar" sem cada peça precisar
-## saber disso.
-func _draw_medalhao(
-	texto: String, cor: Color, energia: float, intensidade: float,
-	centro := MEDALHAO_CENTRO, raio := MEDALHAO_RAIO
-) -> void:
-	var c := centro
-	var r := raio
-	var a := intensidade
-
-	# AS QUATRO FAIXAS, de fora para dentro, sem uma invadir a outra:
-	#   raios      0.80 … 1.00
-	#   anel       0.66 … 0.80   (o relógio, e o rótulo curvo)
-	#   bisel      0.60 … 0.66
-	#   vidro      0.00 … 0.60
-	var r_vidro := r * 0.60
-	var r_bisel := r * 0.66
-	var r_anel := r * 0.73          ## linha média da faixa
-	var esp_anel := r * 0.14
-
-	draw_circle(c + Vector2(0.0, 7.0), r, Color(Paleta.SOMBRA, Paleta.SOMBRA.a * a))
-	_raios_do_medalhao(c, r, a)
-
-	# Anel de faixa: fundo CREME e, por cima, o trecho aceso. Creme e não
-	# cinza porque os raios em volta já são vermelho e âmbar — um fundo
-	# frio faria a faixa sumir dentro deles, e é justamente ela que
-	# marca o tempo.
-	draw_arc(c, r_anel, 0.0, TAU, 96, Color(Paleta.CREME, a), esp_anel)
-	if energia > 0.001:
-		draw_arc(
-			c, r_anel, -PI * 0.5, -PI * 0.5 + TAU * clampf(energia, 0.0, 1.0),
-			96, Color(cor, a), esp_anel, true
-		)
-	draw_arc(c, r_anel + esp_anel * 0.5, 0.0, TAU, 96, Color(Paleta.MARINHO, a), 3.0, true)
-	draw_arc(c, r_anel - esp_anel * 0.5, 0.0, TAU, 96, Color(Paleta.MARINHO, a), 3.0, true)
-
-	# Rótulo curvo na faixa: é o que faz a peça parecer serigrafada no
-	# painel da máquina, e não um anel de progresso de aplicativo.
-	# O corpo do rótulo acompanha o tamanho da peça: o mesmo medalhão
-	# aparece grande na partida e pequeno na abertura.
-	_texto_curvo("PONTOS DE POTÊNCIA", c, r_anel, -PI * 0.5, int(r * 0.091), Color(Paleta.CONTORNO, 0.75 * a))
-	_texto_curvo("LAZER & SPORT", c, r_anel, PI * 0.5, int(r * 0.086), Color(Paleta.CONTORNO, 0.6 * a), true)
-
-	# Bisel e vidro do visor.
-	draw_circle(c, r_bisel, Color(Paleta.MARINHO, a))
-	draw_circle(c, r_vidro, Color(Paleta.VISOR_FUNDO, a))
-
-	VisorLed.desenhar(self, texto, c, r * 0.52, Color(cor, a))
-
-	# Reflexo do vidro: um crescente claro no alto, à esquerda. Sem ele o
-	# miolo escuro parece um buraco em vez de um vidro.
-	draw_arc(c, r_vidro * 0.86, PI * 1.06, PI * 1.60, 32, Color(Paleta.VISOR_VIDRO, 0.40 * a), 10.0, true)
-
-## Raios do medalhão: cunhas alternadas girando devagar atrás do anel.
-func _raios_do_medalhao(c: Vector2, r: float, a: float) -> void:
-	var giro := animation_time * 0.16
-	var r0 := r * 0.80
-	for i in range(24):
-		var ang := giro + float(i) / 24.0 * TAU
-		var meia := TAU / 48.0 * 0.84
-		var cor: Color = Paleta.VERMELHO if i % 2 == 0 else Paleta.AMBAR
-		draw_colored_polygon(
-			PackedVector2Array([
-				c + Vector2(cos(ang - meia), sin(ang - meia)) * r0,
-				c + Vector2(cos(ang - meia), sin(ang - meia)) * r,
-				c + Vector2(cos(ang + meia), sin(ang + meia)) * r,
-				c + Vector2(cos(ang + meia), sin(ang + meia)) * r0,
-			]),
-			Color(cor, a)
-		)
-	draw_arc(c, r, 0.0, TAU, 96, Color(Paleta.MARINHO, a), 5.0, true)
-	draw_arc(c, r0, 0.0, TAU, 80, Color(Paleta.MARINHO, a), 4.0, true)
-
-## Texto seguindo uma circunferência, uma letra por vez. `de_cabeca` vira
-## a palavra para dentro, que é como se lê a metade de baixo de um selo.
-func _texto_curvo(
-	texto: String, centro: Vector2, raio: float, angulo: float,
-	tamanho: int, cor: Color, de_cabeca := false
-) -> void:
-	var larguras: Array[float] = []
-	var total := 0.0
-	for i in range(texto.length()):
-		var w := fonte.get_string_size(texto[i], HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho).x
-		larguras.append(w)
-		total += w
-	var passo_total := total / raio
-	var direcao := -1.0 if de_cabeca else 1.0
-	var atual := angulo - direcao * passo_total * 0.5
-	for i in range(texto.length()):
-		var passo := larguras[i] / raio * direcao
-		var meio := atual + passo * 0.5
-		var p := centro + Vector2(cos(meio), sin(meio)) * raio
-		draw_set_transform(_deslocamento + p, meio + (PI * 0.5 if not de_cabeca else -PI * 0.5))
-		draw_string(
-			fonte, Vector2(-larguras[i] * 0.5, tamanho * 0.36), texto[i],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, cor
-		)
-		atual += passo
-	draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
-
-func _draw_carimbo(titulo: String, cor: Color) -> void:
-	## O CARIMBO CAI NA TELA, não aparece: entra grande, passa do lugar e
-	## volta — o gesto de um carimbo batendo no papel. O tamanho final
-	## sai de `_tamanho_que_cabe`, então "PESO-PESADO" não estoura a tela
-	## do mesmo jeito que "FRACO!" não fica pequeno.
-	var t := clampf(verdict_time / 0.45, 0.0, 1.0)
-	var escala := 1.0
-	if t < 1.0:
-		escala = lerpf(2.2, 1.0, ease(t, 0.28)) + sin(t * PI) * 0.10
-	var alpha := clampf(verdict_time / 0.2, 0.0, 1.0)
-	var base := _tamanho_que_cabe(titulo, 82, LARGURA_UTIL - 60.0)
-	var tamanho := int(clampf(float(base) * escala, 20.0, 190.0))
-	# Sem largura de caixa: durante a entrada o carimbo é MAIOR que a
-	# tela de propósito, e uma caixa o cortaria em vez de deixá-lo passar.
-	var medida := fonte.get_string_size(titulo, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
-	_letreiro(titulo, Vector2((TELA.x - medida.x) * 0.5, 1520.0), tamanho, Color(cor, alpha))
-
-## Cabeçalho: só a marca do jogo e o modo. O estado da serial é assunto
-## do técnico, e vive na Central Técnica — na tela do cliente ele vira,
-## no máximo, um ponto âmbar quando há problema.
-func _draw_header() -> void:
-	draw_rect(Rect2(MARGEM, BANDA_TOPO, LARGURA_UTIL, 2.0), Paleta.CARTAO_BORDA)
-	_texto("PUNCH", 92.0, 32, Paleta.TINTA, HORIZONTAL_ALIGNMENT_LEFT, MARGEM)
-	var largura_punch := fonte.get_string_size("PUNCH ", HORIZONTAL_ALIGNMENT_LEFT, -1, 32).x
-	_texto("CHALLENGE", 92.0, 32, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, MARGEM + largura_punch)
-	if not _sensor_ligado() and link != null and link.available():
-		draw_circle(Vector2(MARGEM + 500.0, 82.0), 8.0, Paleta.AMBAR)
-	var mode_text := "MODO LIVRE" if game_mode == "free" else "MODO FICHA"
-	_pill(Rect2(TELA.x - MARGEM - 180.0, 54.0, 180.0, 52.0), mode_text, Paleta.MARINHO)
-
-func _draw_cartoes() -> void:
-	_texto("RECORDE %03d     •     %s" % [_melhor(), "LIVRE" if game_mode == "free" else "CRÉDITOS %02d" % credits], 1692.0, 27, Paleta.TINTA_FRACA)
-
-## Rodapé: a assinatura da casa. As teclas só aparecem quando o sensor
-## NÃO está ligado — ou seja, na bancada de montagem. Com o Arduino no
-## lugar, o cliente nunca vê instrução de teclado numa máquina de ficha.
-func _draw_rodape(alpha: float) -> void:
-	_texto("LAZER & SPORT", RODAPE_Y, 18, Color(Paleta.TINTA_LEVE, alpha))
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
@@ -1928,7 +1629,7 @@ func _stepper(chave: String, valor: String, legenda: String, accent: Color) -> v
 	var r: Rect2 = PASSOS[chave]
 	_texto(legenda, r.end.y + 28.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x)
 
-## A régua das três faixas, do jeito que o cliente vai ver no medidor.
+## A régua das três faixas, do jeito que o cliente vai ver no placar.
 ## Mexer num limite muda esta barra na hora: o técnico regula olhando o
 ## resultado, não imaginando o resultado.
 func _regua_das_faixas(rect: Rect2) -> void:
@@ -1946,83 +1647,6 @@ func _regua_das_faixas(rect: Rect2) -> void:
 		if x1 - x0 > 90.0:
 			_texto(str(f[3]), rect.position.y + rect.size.y * 0.70, 15, Color(1, 1, 1, 0.95), HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0)
 	draw_rect(rect, Paleta.CARTAO_BORDA, false, 2.0)
-
-# ---------------------------------------------------------------- peças
-## A MARCA DA CASA COMO LETREIRO DE PARQUE, e não como uma figura solta
-## no meio da tela.
-##
-## POR QUE A PLACA EXISTE. A logo é uma arte clara — plaqueta branca com
-## contorno preto — e num céu claro ela não tem em que se apoiar: fica
-## boiando, do jeito que qualquer figura colada fica. A placa resolve
-## isso do jeito que um parque resolve: miolo creme para a marca
-## descansar, moldura marinho em volta para separá-la do céu, e a fieira
-## de lâmpadas correndo na moldura.
-##
-## AS LÂMPADAS PRECISAM DA MOLDURA. Numa primeira versão elas ficavam
-## direto sobre o céu, e a lâmpada APAGADA sumia — sobrava um pedacinho
-## de luz correndo no vazio, que não lê como letreiro. Sobre o marinho,
-## acesa e apagada aparecem as duas, e é a fieira inteira que dá o
-## desenho.
-func _draw_marca(centro: Vector2, largura: float, alpha: float) -> void:
-	if logo == null:
-		_texto_cabendo("LAZER & SPORT", centro.y, 64, Color(Paleta.TINTA, alpha), LARGURA_UTIL)
-		return
-
-	var tamanho := logo.get_size()
-	var escala := largura / tamanho.x
-	var altura := tamanho.y * escala
-	var destino := Rect2(centro - Vector2(largura, altura) * 0.5, Vector2(largura, altura))
-
-	var banda := 34.0
-	var placa := destino.grow(46.0)
-	var canto := 46.0
-
-	# Halo quente atrás de tudo: a luz do refletor batendo no letreiro.
-	for i in range(4):
-		draw_circle(centro, largura * (0.66 - i * 0.11), Color(Paleta.LUZ, 0.11 * alpha))
-
-	_placa(Rect2(placa.position + Vector2(0.0, 12.0), placa.size), canto, Color(Paleta.SOMBRA, 0.9 * alpha))
-	_placa(placa, canto, Color(Paleta.MARINHO, alpha))
-	_placa(placa.grow(-banda), canto - banda * 0.55, Color(Paleta.CREME, alpha))
-
-	draw_texture_rect(logo, destino, false, Color(1, 1, 1, alpha))
-
-	_lampadas_do_letreiro(placa.grow(-banda * 0.5), alpha)
-
-## As lâmpadas do letreiro, distribuídas pelo perímetro, com a luz
-## correndo. Mesma ideia da moldura da tela, em escala de marca.
-func _lampadas_do_letreiro(caixa: Rect2, alpha: float) -> void:
-	var passo := 54.0
-	var perimetro := 2.0 * (caixa.size.x + caixa.size.y)
-	var total := maxi(12, int(perimetro / passo))
-	var cabeca := fmod(animation_time * 9.0, float(total))
-	for i in range(total):
-		var p := _ponto_do_retangulo(caixa, float(i) / float(total) * perimetro)
-		var dist := fmod(cabeca - float(i) + total, float(total))
-		var acesa := maxf(0.0, 1.0 - dist / 5.0)
-		# Apagada é creme sobre o marinho: continua sendo um bulbo de
-		# vidro, e não um buraco.
-		var cor: Color = Color("93a4c6").lerp(Paleta.LUZ, acesa)
-		if acesa > 0.05:
-			draw_circle(p, 19.0, Color(Paleta.AMBAR, acesa * 0.45 * alpha))
-		draw_circle(p, 9.5, Color(cor, alpha))
-		draw_circle(p + Vector2(-2.6, -2.6), 3.2, Color(1, 1, 1, 0.65 * alpha))
-
-## Ponto a `d` de distância ao longo do perímetro de um retângulo, no
-## sentido horário a partir do canto superior esquerdo.
-func _ponto_do_retangulo(r: Rect2, d: float) -> Vector2:
-	var w := r.size.x
-	var h := r.size.y
-	if d < w:
-		return r.position + Vector2(d, 0.0)
-	d -= w
-	if d < h:
-		return r.position + Vector2(w, d)
-	d -= h
-	if d < w:
-		return r.position + Vector2(w - d, h)
-	d -= w
-	return r.position + Vector2(0.0, h - d)
 
 ## Retângulo de cantos redondos. O Godot só desenha retângulo de canto
 ## vivo, e canto vivo em peça grande destoa do resto da tela — a placa,
@@ -2117,19 +1741,6 @@ func _draw_player_photo(rect: Rect2, path: String, alpha: float) -> void:
 		_draw_texture_cover(texture, rect, alpha)
 	draw_rect(rect, Color(Paleta.CIANO, alpha), false, 3.0)
 
-func _draw_camera_card(rect: Rect2, alpha: float, label: String) -> void:
-	_cartao(rect.grow(8.0), Color(Paleta.MARINHO, alpha), Color(Paleta.CIANO, alpha), alpha, 3.0)
-	var preview := Rect2(rect.position, Vector2(rect.size.x, rect.size.y - 52.0))
-	var texture: Texture2D = camera_service.preview_texture() if camera_service != null else null
-	if texture == null:
-		_draw_avatar(preview, alpha)
-	else:
-		_draw_texture_cover(texture, preview, alpha, camera_mirrored)
-	draw_rect(preview, Color(Paleta.CIANO, 0.75 * alpha), false, 2.0)
-	_texto_cabendo(label, rect.end.y - 15.0, 18, Color(Paleta.CREME, alpha), rect.size.x - 20.0, rect.position.x + 10.0)
-	var dot := Paleta.VERDE if camera_service != null and camera_service.available() else Paleta.AMBAR
-	draw_circle(rect.position + Vector2(18.0, 18.0), 7.0, Color(dot, alpha))
-
 ## O aviso de operação ocupa o rodapé, e não o topo: no topo ele cairia
 ## em cima do cabeçalho, e no meio disputaria com o número.
 func _draw_notice() -> void:
@@ -2146,11 +1757,6 @@ func _cartao(rect: Rect2, fundo_c: Color, borda: Color, alpha := 1.0, largura_bo
 	if largura_borda > 0.0:
 		draw_rect(rect, Color(borda, borda.a * alpha), false, largura_borda)
 
-func _pill(rect: Rect2, texto: String, cor: Color) -> void:
-	draw_rect(Rect2(rect.position + Vector2(0, 3.0), rect.size), Paleta.SOMBRA)
-	draw_rect(rect, cor)
-	_texto_cabendo(texto, rect.position.y + rect.size.y * 0.66, 18, Paleta.CARTAO, rect.size.x - 20.0, rect.position.x + 10.0)
-
 ## Botão: colorido e cheio quando ativo, branco com borda colorida quando
 ## não. Num tema claro é o PREENCHIMENTO que marca o estado ligado —
 ## borda mais grossa sozinha não se lê de longe.
@@ -2164,17 +1770,6 @@ func _botao(rect: Rect2, texto: String, ativo: bool, accent: Color, tamanho: int
 		texto, rect.position.y + rect.size.y * 0.68, tamanho, tinta,
 		rect.size.x - 20.0, rect.position.x + 10.0
 	)
-
-## Cartão de número, com ícone. O ícone é o que deixa o cartão legível de
-## relance: a três metros, a pessoa reconhece o troféu antes de conseguir
-## ler "RECORDE".
-func _stat_card(rect: Rect2, rotulo: String, valor: String, accent: Color, icone: String, alpha: float) -> void:
-	_cartao(rect, Paleta.CARTAO, Paleta.CARTAO_BORDA, alpha, 2.0)
-	# Tarja colorida no topo: identifica o cartão sem pintá-lo inteiro.
-	draw_rect(Rect2(rect.position, Vector2(rect.size.x, 6.0)), Color(accent, alpha))
-	_icone(icone, rect.position + Vector2(rect.size.x * 0.5, 42.0), 17.0, Color(Paleta.para_texto(accent), alpha))
-	_texto(rotulo, rect.position.y + 74.0, 15, Color(Paleta.TINTA_FRACA, alpha), HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x)
-	_texto_cabendo(valor, rect.position.y + 118.0, 38, Color(Paleta.TINTA, alpha), rect.size.x - 24.0, rect.position.x + 12.0)
 
 ## Despacha o ícone pelo nome. Um `match` num lugar só evita que cada
 ## chamada precise saber de qual arquivo o desenho vem.
