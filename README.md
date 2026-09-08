@@ -53,6 +53,30 @@ A referência é máquina de salão de verdade (PUNCH & KICK, KUNG FU): o que
 faz aquilo parecer equipamento caro, e não desenho, são três coisas — e
 as três estão aqui.
 
+**A entrada abre com o selo da casa.** Um quadrado pequeno com o
+logotipo da Lazer & Sport, placa vermelha, borda de ouro e um brilho
+atravessando — e só depois vem o soco que faz nascer o emblema do jogo.
+Antes a máquina abria com o logotipo comprido sobre um fundo azul-marinho
+que não tinha parentesco nenhum com o resto, e a troca para o emblema
+parecia defeito. Agora a tela de arranque do Godot usa o mesmo selo e o
+mesmo chão escuro, então o arranque e a entrada são a mesma coisa
+continuando.
+
+**O que voa não é confete.** Um retângulo girando é festa de
+aniversário; o que sai de uma pancada é brasa, e brasa tem rastro. A
+comemoração é feita de brasas explodindo do ponto do impacto, raios
+girando junto e anéis em sequência — mais um ESTRELÃO de história em
+quadrinhos que abre no lugar do golpe, com rachaduras e riscos
+convergindo. Ele dura quatro décimos de segundo e é o desenho que diz
+"bateu" antes de qualquer número aparecer.
+
+**A tela de jogo tem três papéis de texto, e só três.** Título (letreiro
+com contorno, o mesmo da abertura), rótulo (26 px, o que nomeia um
+número) e apoio (22 px, a letra miúda de quem quiser conferir). Antes
+cada linha escolhia o próprio corpo na hora — 25, 26, 30, 32, 34, 46 — e
+metade era texto cru, sem contorno, sobre um painel que muda de cor a
+cada faixa.
+
 **O visor é UM SÓ, o jogo inteiro.** Uma máquina de fliperama tem um
 painel, e é para ele que a pessoa olha do começo ao fim. Aqui é a mesma
 peça em todos os momentos, e só muda o que está escrito dentro: traços

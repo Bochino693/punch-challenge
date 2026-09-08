@@ -150,6 +150,10 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
+## A ESTRELA DE PANCADA: quanto tempo desde o golpe, e com que força.
+## Negativo quer dizer que não há pancada no ar.
+var pancada_tempo := -1.0
+var pancada_forca := 0.0
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -286,6 +290,10 @@ func _process(delta: float) -> void:
 	fx.atualizar(delta)
 	tremor = maxf(0.0, tremor - delta * 26.0)
 	clarao = maxf(0.0, clarao - delta * 2.6)
+	if pancada_tempo >= 0.0:
+		pancada_tempo += delta
+		if pancada_tempo > PANCADA_DURACAO:
+			pancada_tempo = -1.0
 
 	if notice_left > 0.0:
 		notice_left -= delta
@@ -430,14 +438,16 @@ func _manter_festa(delta: float) -> void:
 	## dela é o da faixa — as mesmas três faixas da régua da Central.
 	match GameDef.faixa_de(result_score, limiar_fraco, limiar_forte):
 		GameDef.Faixa.FORTE:
+			# Estouros pela tela, sempre a partir de um ponto: cada um é
+			# um eco do soco, e não um fogo de artifício solto no ar.
 			if verdict_time < 5.0 and verdict_time >= proximo_fogo:
 				proximo_fogo = verdict_time + 0.55
-				fx.fogos(
-					Vector2(randf_range(180.0, 900.0), randf_range(280.0, 900.0)),
-					CORES_FESTA
-				)
-			if verdict_time < 2.6 and randf() < delta * 26.0:
-				fx.chuva_de_confete(TELA.x, 3, CORES_FESTA)
+				var ponto := Vector2(randf_range(180.0, 900.0), randf_range(280.0, 900.0))
+				fx.onda(ponto, 6.0, randf_range(150.0, 260.0), Color(Paleta.AMBAR, 0.5), 6.0, 0.5)
+				fx.explosao(ponto, 22, CORES_FESTA, 820.0)
+				fx.raios(ponto, 3, Paleta.CREME, 520.0)
+			if verdict_time < 3.0 and randf() < delta * 22.0:
+				fx.chuva_de_brasas(TELA.x, 2, CORES_FESTA)
 		GameDef.Faixa.MEDIA:
 			if verdict_time >= proximo_fogo:
 				proximo_fogo = verdict_time + 0.85
@@ -633,7 +643,14 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	tremor = 10.0 + forca * 22.0
 	clarao = 0.25 + forca * 0.45
 	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
+	fx.onda(alvo, 20.0, 300.0 + forca * 260.0, Color(Paleta.CREME, 0.75), 9.0, 0.38)
 	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
+	fx.explosao(alvo, 18 + int(forca * 26.0), CORES_FESTA, 900.0 + forca * 700.0)
+	# A ESTRELA DE PANCADA precisa saber a hora exata do golpe: ela dura
+	# um terço de segundo e é o desenho que diz "bateu", antes de
+	# qualquer número aparecer.
+	pancada_tempo = 0.0
+	pancada_forca = forca
 	plays += 1
 	var origem := "SIMULAÇÃO" if simulado else "MPU-6050"
 	posicao_no_ranking = _entrar_no_ranking(result_score, result_photo_path, origem)
@@ -667,13 +684,22 @@ func _disparar_veredito() -> void:
 				sons.play("win", 0.5)
 			tremor = 30.0
 			clarao = 0.85
-			fx.confete(Vector2(540, 900), 130, CORES_FESTA, 1250.0)
-			fx.chuva_de_confete(TELA.x, 90, CORES_FESTA)
-			fx.onda(alvo, 60.0, 1100.0, Color(Paleta.AMBAR, 0.6), 18.0, 1.0)
+			# O QUE SAI DE UM SOCO NÃO É CONFETE. Brasas explodindo do
+			# ponto do impacto, raios girando junto e três anéis em
+			# sequência: a comemoração passa a ter a mesma linguagem da
+			# pancada que a provocou, e não a de uma festa de aniversário.
+			fx.explosao(alvo, 120, CORES_FESTA, 1500.0)
+			fx.raios(alvo, 16, Paleta.AMBAR, 900.0)
+			fx.chuva_de_brasas(TELA.x, 70, CORES_FESTA)
+			for i in range(3):
+				fx.onda(alvo, 60.0 + float(i) * 90.0, 900.0 + float(i) * 220.0,
+					Color(Paleta.AMBAR if i != 1 else Paleta.CREME, 0.60 - float(i) * 0.14),
+					18.0 - float(i) * 4.0, 0.9 + float(i) * 0.25)
 		GameDef.Faixa.MEDIA:
 			sons.play("medium")
 			tremor = 14.0
-			fx.faiscas(alvo, 46, Paleta.AMBAR, 700.0)
+			fx.explosao(alvo, 46, CORES_FESTA, 900.0)
+			fx.faiscas(alvo, 40, Paleta.AMBAR, 700.0)
 			fx.onda(alvo, 60.0, 560.0, Color(Paleta.AMBAR, 0.55), 12.0, 0.9)
 		_:
 			sons.play("lose")
@@ -1077,6 +1103,7 @@ func _draw() -> void:
 		_draw_partida()
 
 	fx.desenhar(self)
+	_draw_pancada()
 	_draw_clarao()
 
 	if notice != "" and not central_aberta:
@@ -1085,6 +1112,61 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if central_aberta:
 		_draw_central()
+
+## A ESTRELA DE PANCADA.
+##
+## O desenho que diz "BATEU" antes de qualquer número: um estrelão
+## irregular abrindo no ponto do golpe, com rachaduras saindo dele e um
+## anel de riscos convergindo. É a gramática de história em quadrinhos, e
+## ela existe porque anel e faísca sozinhos dizem "alguma coisa
+## aconteceu" — não dizem "levou um soco".
+##
+## As pontas NÃO são sorteadas por quadro: um estrelão que muda de forma
+## a cada quadro vira ruído. O molde é fixo e só a escala se move.
+const PANCADA_DURACAO := 0.40
+const PANCADA_PONTAS := 14
+func _draw_pancada() -> void:
+	if pancada_tempo < 0.0:
+		return
+	var t := clampf(pancada_tempo / PANCADA_DURACAO, 0.0, 1.0)
+	var centro := _alvo()
+	var escala := lerpf(0.35, 1.0, ease(t, 0.28)) * (0.75 + pancada_forca * 0.55)
+	var some := pow(1.0 - t, 1.6)
+
+	# Riscos convergindo: chegam de fora e morrem no ponto do impacto.
+	for i in range(20):
+		var ang := float(i) * TAU / 20.0 + 0.17
+		var de := 420.0 + (1.0 - t) * 420.0
+		var ate := de - lerpf(220.0, 40.0, t)
+		draw_line(
+			centro + Vector2.from_angle(ang) * de, centro + Vector2.from_angle(ang) * ate,
+			Color(Paleta.AMBAR, some * 0.55), lerpf(8.0, 2.0, t), true
+		)
+
+	var fora := PackedVector2Array()
+	var dentro := PackedVector2Array()
+	for i in range(PANCADA_PONTAS * 2):
+		var ang := float(i) * TAU / float(PANCADA_PONTAS * 2) - PI * 0.5
+		# O denteado alterna longo/curto e ainda varia de ponta a ponta,
+		# porque um estrelão perfeitamente regular lê como engrenagem.
+		var longo := i % 2 == 0
+		var variacao := 0.82 + 0.18 * sin(float(i) * 2.7)
+		var raio := (330.0 if longo else 170.0) * variacao * escala
+		fora.append(centro + Vector2.from_angle(ang) * raio)
+		dentro.append(centro + Vector2.from_angle(ang) * raio * 0.72)
+	draw_colored_polygon(fora, Color(Paleta.VERMELHO, some * 0.85))
+	draw_colored_polygon(dentro, Color(Paleta.AMBAR, some * 0.95))
+	draw_polyline(fora + PackedVector2Array([fora[0]]), Color(Paleta.CREME, some), 5.0, true)
+
+	# Rachaduras: três traços quebrados saindo do miolo.
+	for i in range(3):
+		var ang := float(i) * TAU / 3.0 + 0.6
+		var ponta := centro
+		var caminho := PackedVector2Array([centro])
+		for k in range(3):
+			ponta += Vector2.from_angle(ang + sin(float(k) * 2.1 + float(i)) * 0.45) * (110.0 * escala)
+			caminho.append(ponta)
+		draw_polyline(caminho, Color(Paleta.CREME, some * 0.8), lerpf(9.0, 2.0, t), true)
 
 ## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
 ## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
@@ -1182,7 +1264,10 @@ func _pagina_como_jogar(alpha: float) -> void:
 ## Todos os momentos da partida compartilham o mesmo visor. O que muda é
 ## o que está escrito nele, a cor do anel e quanto do anel está aceso.
 func _draw_partida() -> void:
-	_texto("PUNCH CHALLENGE", 145.0, 34, Color("ffffff"))
+	# O cabeçalho da rodada é o MESMO letreiro do cabeçalho da abertura,
+	# no mesmo corpo: são a mesma máquina, e a pessoa não deve sentir que
+	# trocou de programa ao apertar START.
+	_letreiro_centrado("PUNCH CHALLENGE", 145.0, 32, Paleta.CREME)
 	match state:
 		GameDef.State.COUNTDOWN:
 			_texto_arcade("FAÇA SUA POSE", 340.0, 72, Paleta.CIANO, LARGURA_UTIL)
@@ -1195,11 +1280,14 @@ func _draw_partida() -> void:
 			else:
 				_draw_avatar(rect, 1.0)
 			if not pose_finished:
-				_texto(str(clampi(int(ceil(countdown_left)), 1, 3)), 1400.0, 150, Color.WHITE)
-				_texto("OLHE PARA A CÂMERA", 1510.0, 30, Paleta.CIANO)
+				_texto_arcade(str(clampi(int(ceil(countdown_left)), 1, 3)), 1400.0, 150, Color.WHITE, LARGURA_UTIL)
+				_rotulo("OLHE PARA A CÂMERA", 1490.0, Paleta.AMBAR)
 			else:
-				_texto("FOTO PRONTA" if not result_photo_path.is_empty() else "SEM CÂMERA • VAMOS JOGAR", 1390.0, 32, Paleta.CIANO)
-				_texto("PREPARE O SOCO", 1500.0, 46, Color.WHITE)
+				_rotulo(
+					"FOTO PRONTA" if not result_photo_path.is_empty() else "SEM CÂMERA • VAMOS JOGAR",
+					1390.0, Paleta.AMBAR
+				)
+				_texto_arcade("PREPARE O SOCO", 1480.0, 56, Color.WHITE, LARGURA_UTIL)
 		GameDef.State.ARMED:
 			_draw_espera_do_soco()
 		GameDef.State.MEASURING, GameDef.State.RESULT:
@@ -1233,23 +1321,23 @@ func _draw_espera_do_soco() -> void:
 		# soltar agora, no mesmo visor e no mesmo formato em que ele vai
 		# aparecer no resultado. Quem carrega não adivinha quanto vale
 		# quanto: solta quando o número que está vendo serve.
-		_texto("PONTOS SE SOLTAR AGORA", 785.0, 25, cor)
+		_rotulo("PONTOS SE SOLTAR AGORA", 785.0, cor)
 		VisorLed.desenhar(self, "%03d" % carga_pontos, ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, Color.WHITE)
 		var piscada := 0.6 + 0.4 * sin(animation_time * 9.0)
 		_texto_arcade("SOLTE!", 1430.0, 72, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
 	else:
-		_texto("ESTOU PRONTO", 785.0, 25, cor)
+		_rotulo("ESTOU PRONTO", 785.0, cor)
 		VisorLed.desenhar(self, "---", ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, cor)
 		var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
 		_texto_arcade("SOQUE AGORA!", 1400.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
 		var dica := "ACERTE O ALVO COM TODA A FORÇA" if _sensor_ligado() \
 			else "SEGURE E SOLTE ESPAÇO PARA SIMULAR"
-		_texto(dica, 1468.0, 26, Color.WHITE)
+		_rotulo(dica, 1468.0, Color.WHITE)
 		# A MARCA A BATER FICA DENTRO DO VISOR, não embaixo dele: a faixa
 		# vermelha do fundo começa perto de 1500 px e engole qualquer
 		# texto miúdo que caia ali. Dentro do vidro escuro ela é legível
 		# e, de quebra, fica ao lado do número que vai substituí-la.
-		_texto("RECORDE DA CASA  %03d" % _melhor(), 1105.0, 26, Paleta.AMBAR)
+		_rotulo("RECORDE DA CASA  %03d" % _melhor(), 1105.0, Paleta.AMBAR)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
@@ -1259,7 +1347,7 @@ func _draw_espera_do_soco() -> void:
 	# senão o aviso vira ameaça.
 	if espera_left <= GameDef.AVISO_DE_VOLTA:
 		var segundos := maxi(0, int(ceil(espera_left)))
-		_texto("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1660.0, 24, Color.WHITE)
+		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1660.0, Color.WHITE)
 
 ## O FAROL: anéis saindo do alvo, em batidas.
 ##
@@ -1379,7 +1467,7 @@ func _draw_score_hero() -> void:
 		var lit := float(i) / 60.0 <= progress
 		draw_arc(center, 347, angle, angle + 0.065, 5, color if lit else Color("57212c"), 14.0, true)
 	draw_arc(center, 302, animation_time * 0.5, animation_time * 0.5 + 1.2, 64, Color(color, 0.55), 2.0, true)
-	_texto("IMPACTO" if measuring else ("SUA PONTUAÇÃO" if verdict_time >= 0.0 else "CALCULANDO"), 785.0, 25, color)
+	_rotulo("IMPACTO" if measuring else ("SUA PONTUAÇÃO" if verdict_time >= 0.0 else "CALCULANDO"), 785.0, color)
 	# VISOR DE SETE SEGMENTOS, e não texto. Numa máquina de fliperama o
 	# placar é um painel de LED atrás de um vidro, e o que o olho
 	# reconhece não é o formato do algarismo: é o SEGMENTO APAGADO, que
@@ -1389,12 +1477,12 @@ func _draw_score_hero() -> void:
 		center + Vector2(0.0, 20.0), 168.0, Color.WHITE if not measuring else color
 	)
 	if verdict_time >= 0.0:
-		_texto("PONTOS", 1110.0, 26, color)
+		_rotulo("PONTOS", 1110.0, color)
 		# A VELOCIDADE MEDIDA, ao lado dos pontos. Os pontos são uma nota
 		# que a máquina inventou a partir de uma curva ajustável; a
 		# velocidade é o que o sensor de fato viu. Quem duvida do placar
 		# ("essa máquina está roubando") tem aqui o número cru.
-		_texto("%.1f m/s no sensor" % result_speed, 1330.0, 22, Paleta.TINTA_LEVE)
+		_apoio("%.1f m/s no sensor" % result_speed, 1330.0, Paleta.TINTA_FRACA)
 		var title := "%dº LUGAR" % posicao_no_ranking if posicao_no_ranking > 0 else "BOM SOCO!"
 		_texto_arcade(title, 1430.0, 64, color, LARGURA_UTIL)
 
@@ -1497,9 +1585,9 @@ func _draw_ranking_reveal() -> void:
 		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
 		_texto("VOCÊ" if selected else "JOGADOR", y + 64.0, 26, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
 		_texto("%03d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
-	_texto("SEU SOCO", 1400.0, 25, Paleta.TINTA_FRACA)
-	_texto("%03d" % result_score, 1520.0, 100, Paleta.TINTA)
-	_texto("START • JOGAR NOVAMENTE", 1710.0, 32, Paleta.CIANO)
+	_rotulo("SEU SOCO", 1400.0, Paleta.TINTA_FRACA)
+	_texto_arcade("%03d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
+	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
@@ -1834,6 +1922,41 @@ func _letreiro(texto: String, pos: Vector2, tamanho: int, cor: Color, halo := Co
 	var realce := Color(cor.lightened(0.42), cor.a)
 	draw_string(fonte, pos - Vector2(0.0, tamanho * 0.055), texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, realce)
 	draw_string(fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, cor)
+
+## OS TRÊS PAPÉIS DE TEXTO DA TELA DE JOGO.
+##
+## Antes cada linha escolhia o seu corpo na hora — 25, 26, 30, 32, 34, 46
+## — e metade delas era `draw_string` cru, sem contorno, sobre um painel
+## que muda de cor a cada faixa. O resultado era uma tela com sete
+## tamanhos e dois acabamentos diferentes, e é isso que faz uma tela
+## parecer amadora, mesmo quando cada peça sozinha está certa.
+##
+## Agora há três papéis e nada mais:
+##
+##   TÍTULO  o que a pessoa lê de longe. Letreiro com contorno e halo,
+##           igual ao da abertura — é a mesma tipografia do cartaz.
+##   RÓTULO  o que nomeia um número: "CALCULANDO", "PONTOS". Sempre 26,
+##           sempre com contorno, porque ele cai sobre o painel escuro,
+##           sobre a faixa vermelha e sobre o clarão do soco.
+##   APOIO   a letra miúda de quem quiser conferir. Sempre 22.
+##
+## Todos com o mesmo contorno da abertura: é isso que "uniformiza com as
+## iniciais" de verdade, e não só igualar o corpo da letra.
+const CORPO_ROTULO := 26
+const CORPO_APOIO := 22
+
+func _rotulo(texto: String, y: float, cor: Color) -> void:
+	_letreiro_centrado(texto, y, CORPO_ROTULO, cor)
+
+func _apoio(texto: String, y: float, cor: Color) -> void:
+	_letreiro_centrado(texto, y, CORPO_APOIO, cor)
+
+## Letreiro centrado na largura útil, sem encolher: o corpo dos rótulos é
+## fixo de propósito, e um rótulo que não cabe é um rótulo comprido
+## demais, não um rótulo que precisa diminuir.
+func _letreiro_centrado(texto: String, y: float, tamanho: int, cor: Color) -> void:
+	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
+	_letreiro(texto, Vector2(540.0 - medida.x * 0.5, y), tamanho, cor)
 
 ## Letreiro centrado numa largura, encolhendo até caber.
 func _texto_arcade(texto: String, y: float, tamanho_max: int, cor: Color, largura: float, x := MARGEM) -> void:

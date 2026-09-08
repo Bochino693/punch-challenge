@@ -2,6 +2,14 @@ extends RefCounted
 ## Cenografia e abertura. Não controla créditos, câmera ou pontuação.
 const EMBLEM = preload("res://assets/branding/punch_emblem.svg")
 const Icones = preload("res://scripts/icones.gd")
+## O SELO DA LAZER & SPORT: o logotipo inteiro numa tela quadrada.
+##
+## Recortar só o alvo saía com a base cortada — no logotipo original a
+## parte de baixo do círculo fica escondida atrás da placa do nome, e sem
+## a placa o corte aparece. Redesenhar essa base seria inventar a marca do
+## cliente. Com o logotipo completo dentro de um quadrado, o selo fica
+## quadrado e pequeno como se pediu, e continua sendo a marca de verdade.
+const SELO_LAZER = preload("res://assets/branding/selo_lazer.png")
 const RED := Color("ff1934")
 const GOLD := Color("ffdc27")
 const WHITE := Color("fff9ef")
@@ -13,16 +21,24 @@ const PANEL := Color("330c16")
 ## juntos e nomeados, porque a entrada é a única parte do jogo em que
 ## imagem, som e tremor precisam cair no mesmo quadro: com os números
 ## espalhados pelo código, acertar isso vira tentativa e erro.
-const T_VARRER := 0.00   ## dois facões de luz cruzam o escuro
-const T_VOO := 0.35      ## a luva entra voando, deixando rastro
-const T_SOCO := 1.05     ## o impacto: clarão, ondas e tremor
-const T_EMBLEMA := 1.10  ## o emblema nasce do ponto do soco
-const T_TITULO := 1.80   ## PUNCH desce batendo
-const T_SUBTITULO := 2.15
-const T_ASSINATURA := 2.60
-const T_BRILHO := 2.75    ## a luz que varre o letreiro no trecho parado
-const T_MORPH := 3.90    ## a cena vira, sem corte, a tela de abertura
-const INTRO_SECONDS := 5.10
+const T_SELO := 0.00     ## o selo da casa, quadrado, apresenta a máquina
+const T_VARRER := 0.95   ## dois facões de luz cruzam o escuro
+const T_VOO := 1.25      ## a luva entra voando, deixando rastro
+const T_SOCO := 1.90     ## o impacto: clarão, ondas e tremor
+const T_EMBLEMA := 1.95  ## o emblema nasce do ponto do soco
+const T_TITULO := 2.60   ## PUNCH desce batendo
+const T_SUBTITULO := 2.90
+const T_ASSINATURA := 3.35
+const T_BRILHO := 3.50    ## a luz que varre o letreiro no trecho parado
+const T_MORPH := 4.65    ## a cena vira, sem corte, a tela de abertura
+const INTRO_SECONDS := 5.85
+
+## O selo fica quadrado e PEQUENO: 300 px de lado no meio de uma tela de
+## 1080, na altura do olhar. Um selo grande no início rouba o lugar do
+## emblema do jogo, que é quem tem de ficar; este só apresenta a casa e
+## sai, como o selo da fabricante antes da vinheta.
+const SELO_LADO := 360.0
+const SELO_CENTRO := Vector2(540.0, 780.0)
 
 ## O ponto onde a luva bate e de onde tudo nasce.
 const SOCO := Vector2(540.0, 760.0)
@@ -43,6 +59,7 @@ const POUSO_CHALLENGE_TAM := 80
 ## AudioBank, e não deve conhecer — quem sabe silenciar a máquina é o
 ## jogo, não a cenografia.
 const TRILHA := [
+	{"t": T_SELO, "cue": "credit", "db": -12.0},
 	{"t": T_VARRER, "cue": "menu", "db": -10.0},
 	{"t": T_VOO, "cue": "charge", "db": -14.0},
 	{"t": T_SOCO, "cue": "hit", "db": -2.0},
@@ -109,6 +126,7 @@ static func emblem(canvas: CanvasItem, center: Vector2, size: float, alpha := 1.
 ## com fita de LED — só que aqui em pixels.
 static func intro(canvas: Control, time: float) -> void:
 	_intro_veu(canvas, time)
+	_intro_selo(canvas, time)
 	_intro_varredura(canvas, time)
 	_intro_voo(canvas, time)
 	_intro_impacto(canvas, time)
@@ -322,3 +340,130 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 			Vector2(540.0, 760.0), lerpf(300.0, 640.0, ease(batida, 0.35)),
 			0.0, TAU, 96, Color(GOLD, (1.0 - batida) * 0.5), 5.0, true
 		)
+
+## O SELO DA CASA, QUADRADO, ABRINDO A ENTRADA.
+##
+## A máquina abria com o logotipo comprido da Lazer & Sport numa tela de
+## fundo azul-marinho — nem a forma nem a cor tinham parentesco com o
+## jogo que vinha logo depois, e a troca para o emblema do Punch parecia
+## defeito. Agora quem apresenta é o SÍMBOLO sozinho, recortado quadrado,
+## pequeno, dentro de uma placa no mesmo vermelho e no mesmo ouro do
+## resto — e o brilho que passa por cima é o mesmo que varre o letreiro
+## mais adiante. Continua sendo a marca da casa; deixou de ser um
+## estranho na porta.
+static func _intro_selo(canvas: Control, time: float) -> void:
+	# A TINTA CHEGA ANTES DA FORMA: o selo fica opaco em pouco mais de um
+	# quinto de segundo, e só a escala continua assentando. Uma marca
+	# entrando semitransparente sai desbotada, e desbotado é o contrário
+	# do que um selo de fabricante precisa parecer.
+	var entra := _janela(time, T_SELO, 0.22)
+	var forma := _janela(time, T_SELO, 0.45)
+	# E SAI ANTES de os facões de luz entrarem: sobrepostos, a linha do
+	# horizonte cruzava o selo e parecia uma barra solta na tela.
+	var sai := _janela(time, T_VARRER - 0.22, 0.20)
+	var alpha := entra * (1.0 - sai)
+	if alpha <= 0.01:
+		return
+	var lado := SELO_LADO * lerpf(0.86, 1.0, _passar_do_ponto(forma, 1.6) if forma < 1.0 else 1.0)
+	var placa := Rect2(SELO_CENTRO - Vector2.ONE * lado * 0.5, Vector2.ONE * lado)
+	var raio := lado * 0.19
+
+	# Halo por trás: separa a placa do preto sem precisar de sombra.
+	for i in range(5):
+		canvas.draw_circle(SELO_CENTRO, lado * (0.62 + float(i) * 0.10), Color(GOLD, 0.030 * alpha))
+
+	_placa_redonda(canvas, placa, raio, Color(Color("2a0a12"), alpha))
+	_contorno_redondo(canvas, placa, raio, Color(GOLD, alpha), 4.0)
+	# Bisel: um fio claro em cima e um escuro embaixo, que é o que faz
+	# uma placa lisa parecer uma peça e não um retângulo pintado.
+	canvas.draw_line(
+		placa.position + Vector2(raio, 5.0), placa.position + Vector2(placa.size.x - raio, 5.0),
+		Color(WHITE, alpha * 0.22), 3.0, true
+	)
+
+	var dentro := lado * 0.86
+	canvas.draw_texture_rect(
+		SELO_LAZER, Rect2(SELO_CENTRO - Vector2.ONE * dentro * 0.5, Vector2.ONE * dentro),
+		false, Color(1, 1, 1, alpha)
+	)
+
+	# O BRILHO QUE ATRAVESSA. Uma faixa inclinada recortada na placa —
+	# recortada de verdade, e não só desenhada por cima: sem o recorte ela
+	# vazaria pelos cantos e a placa deixaria de parecer sólida.
+	var brilho := _janela(time, T_SELO + 0.26, 0.45)
+	if brilho > 0.0 and brilho < 1.0:
+		var x := lerpf(placa.position.x - lado * 0.6, placa.end.x + lado * 0.6, ease(brilho, 0.5))
+		for camada in range(2):
+			var meia := 16.0 + float(camada) * 30.0
+			var faixa := PackedVector2Array([
+				Vector2(x - meia + lado * 0.22, placa.position.y),
+				Vector2(x + meia + lado * 0.22, placa.position.y),
+				Vector2(x + meia - lado * 0.22, placa.end.y),
+				Vector2(x - meia - lado * 0.22, placa.end.y),
+			])
+			var recortada := _recortar_no_retangulo(faixa, placa.grow(-4.0))
+			if recortada.size() >= 3:
+				canvas.draw_colored_polygon(recortada, Color(WHITE, (0.30 - float(camada) * 0.16) * alpha))
+
+	# Só "APRESENTA": o nome da casa já está escrito dentro do selo, e
+	# repeti-lo logo abaixo era dizer a mesma coisa duas vezes.
+	canvas._texto("APRESENTA", SELO_CENTRO.y + lado * 0.80, 24, Color(GOLD, alpha * 0.85))
+
+static func _placa_redonda(canvas: CanvasItem, rect: Rect2, raio: float, cor: Color) -> void:
+	canvas.draw_rect(Rect2(rect.position + Vector2(raio, 0.0), rect.size - Vector2(raio * 2.0, 0.0)), cor)
+	canvas.draw_rect(Rect2(rect.position + Vector2(0.0, raio), Vector2(rect.size.x, rect.size.y - raio * 2.0)), cor)
+	for canto in _cantos(rect, raio):
+		canvas.draw_circle(canto, raio, cor)
+
+static func _contorno_redondo(canvas: CanvasItem, rect: Rect2, raio: float, cor: Color, largura: float) -> void:
+	canvas.draw_line(rect.position + Vector2(raio, 0.0), Vector2(rect.end.x - raio, rect.position.y), cor, largura, true)
+	canvas.draw_line(Vector2(rect.position.x, rect.position.y + raio), Vector2(rect.position.x, rect.end.y - raio), cor, largura, true)
+	canvas.draw_line(Vector2(rect.end.x, rect.position.y + raio), Vector2(rect.end.x, rect.end.y - raio), cor, largura, true)
+	canvas.draw_line(Vector2(rect.position.x + raio, rect.end.y), Vector2(rect.end.x - raio, rect.end.y), cor, largura, true)
+	var quartos := [PI, -PI * 0.5, 0.0, PI * 0.5]
+	var i := 0
+	for canto in _cantos(rect, raio):
+		canvas.draw_arc(canto, raio, quartos[i], quartos[i] + PI * 0.5, 16, cor, largura, true)
+		i += 1
+
+static func _cantos(rect: Rect2, raio: float) -> Array:
+	return [
+		rect.position + Vector2(raio, raio),
+		Vector2(rect.end.x - raio, rect.position.y + raio),
+		rect.end - Vector2(raio, raio),
+		Vector2(rect.position.x + raio, rect.end.y - raio),
+	]
+
+## Sutherland–Hodgman contra as quatro bordas de um retângulo.
+##
+## Existe porque o desenho imediato do Godot não tem recorte: sem isto, a
+## única saída seria clarear a faixa até ela sumir, e um brilho que não se
+## vê não é brilho.
+static func _recortar_no_retangulo(poligono: PackedVector2Array, rect: Rect2) -> PackedVector2Array:
+	var atual := poligono
+	var bordas := [
+		["x", 1.0, rect.position.x],   ## dentro é x >= esquerda
+		["x", -1.0, rect.end.x],       ## dentro é x <= direita
+		["y", 1.0, rect.position.y],
+		["y", -1.0, rect.end.y],
+	]
+	for borda in bordas:
+		if atual.is_empty():
+			return atual
+		var eixo: String = borda[0]
+		var sinal: float = borda[1]
+		var limite: float = borda[2]
+		var saida := PackedVector2Array()
+		var anterior: Vector2 = atual[atual.size() - 1]
+		for ponto in atual:
+			var d_ponto := (ponto.x if eixo == "x" else ponto.y) * sinal - limite * sinal
+			var d_ant := (anterior.x if eixo == "x" else anterior.y) * sinal - limite * sinal
+			if d_ponto >= 0.0:
+				if d_ant < 0.0:
+					saida.append(anterior.lerp(ponto, d_ant / (d_ant - d_ponto)))
+				saida.append(ponto)
+			elif d_ant >= 0.0:
+				saida.append(anterior.lerp(ponto, d_ant / (d_ant - d_ponto)))
+			anterior = ponto
+		atual = saida
+	return atual

@@ -1,7 +1,7 @@
 class_name PunchFX
 extends RefCounted
 
-## Partículas e ondas da tela — confete, faíscas, estilhaços e anéis.
+## Partículas e ondas da tela — brasas, raios, faíscas, estilhaços e anéis.
 ##
 ## POR QUE FICA FORA DE `main.gd`. A tela desenha tudo à mão, num `_draw`
 ## só, e o resultado de um soco acende três coisas ao mesmo tempo: o que
@@ -80,6 +80,23 @@ func desenhar(tela: CanvasItem) -> void:
 					p.posicao + Vector2(-largura, p.tamanho * 1.6).rotated(p.giro * 0.35),
 				])
 				tela.draw_colored_polygon(pontos, cor)
+			"brasa":
+				# BRASA: um risco na direção do voo, com a cabeça mais
+				# quente. É o que substituiu o confete — um retângulo
+				# girando é festa de aniversário; o que sai de uma
+				# pancada é fagulha em brasa, e fagulha tem RASTRO.
+				var vel: Vector2 = p.velocidade
+				var comprimento: float = clampf(vel.length() * 0.045, 10.0, 90.0)
+				var atras: Vector2 = p.posicao - vel.normalized() * comprimento
+				var frio := cor
+				frio.a *= 0.25
+				tela.draw_line(atras, p.posicao, frio, p.tamanho * 0.7, true)
+				tela.draw_line(p.posicao - vel.normalized() * comprimento * 0.35, p.posicao, cor, p.tamanho, true)
+				tela.draw_circle(p.posicao, p.tamanho * 0.7, Color(1, 1, 1, cor.a * 0.85))
+			"raio":
+				# RAIO: o mesmo símbolo que está no emblema, girando. Dá
+				# à festa a linguagem da máquina em vez da de carnaval.
+				tela.draw_colored_polygon(_forma_de_raio(p.posicao, p.tamanho, p.giro), cor)
 			"faisca":
 				var rastro: Vector2 = p.velocidade.normalized() * p.tamanho * 3.5
 				tela.draw_line(p.posicao - rastro, p.posicao, cor, maxf(1.5, p.tamanho * 0.6), true)
@@ -92,6 +109,18 @@ func desenhar(tela: CanvasItem) -> void:
 				tela.draw_colored_polygon(pontos_e, cor)
 			_:
 				tela.draw_circle(p.posicao, p.tamanho, cor)
+
+
+## O contorno de um raio de seis pontas, na escala e no giro pedidos.
+static func _forma_de_raio(centro: Vector2, tamanho: float, giro: float) -> PackedVector2Array:
+	const MOLDE := [
+		Vector2(0.10, -1.00), Vector2(-0.55, 0.10), Vector2(-0.10, 0.10),
+		Vector2(-0.20, 1.00), Vector2(0.55, -0.15), Vector2(0.08, -0.15),
+	]
+	var pontos := PackedVector2Array()
+	for ponto in MOLDE:
+		pontos.append(centro + (ponto as Vector2).rotated(giro) * tamanho)
+	return pontos
 
 
 func _nascer(dados: Dictionary) -> void:
@@ -131,19 +160,66 @@ func confete(centro: Vector2, quantidade: int, cores: Array, forca: float = 900.
 		})
 
 
-func chuva_de_confete(largura: float, quantidade: int, cores: Array) -> void:
+## A CHUVA DE BRASAS, no lugar da chuva de confete.
+##
+## Cai mais rápido e mais reta do que o confete caía: confete plana no ar,
+## e planar é o gesto de uma festa de aniversário. Brasa despenca.
+func chuva_de_brasas(largura: float, quantidade: int, cores: Array) -> void:
 	for i in range(quantidade):
 		_nascer({
-			"tipo": "confete",
-			"posicao": Vector2(randf_range(0.0, largura), randf_range(-260.0, -20.0)),
-			"velocidade": Vector2(randf_range(-70.0, 70.0), randf_range(160.0, 420.0)),
-			"gravidade": randf_range(180.0, 340.0),
-			"arrasto": 0.5,
-			"tamanho": randf_range(5.0, 10.0),
+			"tipo": "brasa",
+			"posicao": Vector2(randf_range(0.0, largura), randf_range(-300.0, -20.0)),
+			"velocidade": Vector2(randf_range(-40.0, 40.0), randf_range(520.0, 980.0)),
+			"gravidade": randf_range(420.0, 720.0),
+			"arrasto": 0.25,
+			"tamanho": randf_range(3.0, 6.5),
+			"giro": 0.0,
+			"giro_velocidade": 0.0,
+			"cor": cores[randi() % cores.size()],
+			"vida": randf_range(1.6, 2.8),
+		})
+
+
+## A EXPLOSÃO DO GOLPE: brasas para todo lado e alguns raios girando.
+##
+## Sai do ponto do impacto, e não do alto da tela, porque quem manda na
+## comemoração é o soco — a origem tem de ser o lugar onde ele aterrissou.
+func explosao(centro: Vector2, quantidade: int, cores: Array, forca: float = 1100.0) -> void:
+	for i in range(quantidade):
+		var angulo := randf_range(0.0, TAU)
+		var direcao := Vector2(cos(angulo), sin(angulo))
+		# Achatada na vertical: uma explosão redonda em tela alta some
+		# pelas laterais antes de a pessoa ver.
+		direcao.y *= 0.75
+		_nascer({
+			"tipo": "brasa",
+			"posicao": centro + direcao * randf_range(0.0, 70.0),
+			"velocidade": direcao * randf_range(forca * 0.30, forca),
+			"gravidade": randf_range(520.0, 900.0),
+			"arrasto": 1.1,
+			"tamanho": randf_range(3.0, 7.0),
+			"giro": 0.0,
+			"giro_velocidade": 0.0,
+			"cor": cores[randi() % cores.size()],
+			"vida": randf_range(0.9, 1.9),
+		})
+
+
+## Raios saindo do ponto do soco, girando enquanto voam.
+func raios(centro: Vector2, quantidade: int, cor: Color, forca: float = 780.0) -> void:
+	for i in range(quantidade):
+		var angulo := randf_range(0.0, TAU)
+		_nascer({
+			"tipo": "raio",
+			"posicao": centro,
+			"velocidade": Vector2(cos(angulo), sin(angulo) * 0.8) * randf_range(forca * 0.4, forca),
+			"gravidade": randf_range(420.0, 760.0),
+			"arrasto": 1.3,
+			"tamanho": randf_range(16.0, 34.0),
 			"giro": randf_range(0.0, TAU),
 			"giro_velocidade": randf_range(-7.0, 7.0),
-			"cor": cores[randi() % cores.size()],
-			"vida": randf_range(2.6, 4.4),
+			"cor": cor,
+			"vida": randf_range(0.8, 1.6),
 		})
 
 
