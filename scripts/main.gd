@@ -48,10 +48,9 @@ const RODAPE_Y := 1876.0
 const MARGEM := 60.0
 const LARGURA_UTIL := TELA.x - MARGEM * 2.0
 
-const CORES_FESTA := [
-	Color("ff2d78"), Color("ffd23f"), Color("4beaff"),
-	Color("8d62ff"), Color("52f2a4"), Color("ffffff"),
-]
+## As cores que voam. Saem da paleta porque confete branco, que num
+## fundo preto era o mais vistoso, é justamente o que some num fundo claro.
+const CORES_FESTA := Paleta.FESTA
 
 # ======================================================================
 # A CENTRAL TÉCNICA, DESCRITA UMA VEZ SÓ
@@ -127,6 +126,11 @@ var notice_left := 0.0
 
 ## Carga da simulação: >= 0 enquanto a barra de espaço está pressionada.
 var carga_tempo := -1.0
+## Quanto a carga VALE agora, em pontos. É o mesmo número que
+## `GameDef.pontos_da_carga` vai devolver se a barra for solta neste
+## instante — o visor não mostra "quanto tempo você segurou", mostra o
+## placar que você leva.
+var carga_pontos := 0
 
 ## Serial.
 var link: SerialLink
@@ -216,7 +220,7 @@ func _processar_abertura(delta: float) -> void:
 	if randf() < delta * 4.0:
 		fx.poeira(
 			Vector2(randf_range(120.0, 960.0), TELA.y + 40.0),
-			1, Color(0.35, 0.85, 1.0, 0.35), 120.0
+			1, Color(Paleta.AMBAR, 0.30), 120.0
 		)
 
 func _processar_contagem(delta: float) -> void:
@@ -225,7 +229,7 @@ func _processar_contagem(delta: float) -> void:
 	if atual > 0 and atual < last_count:
 		last_count = atual
 		sons.play("count")
-		fx.onda(_alvo(), 60.0, 340.0, Color(0.35, 0.9, 1.0, 0.5), 6.0, 0.6)
+		fx.onda(_alvo(), 60.0, 340.0, Color(Paleta.CIANO, 0.5), 6.0, 0.6)
 	if countdown_left <= 0.0:
 		state = GameDef.State.ARMED
 		state_time = 0.0
@@ -234,17 +238,22 @@ func _processar_contagem(delta: float) -> void:
 		sons.play("go")
 		moldura.set_estado(LedFrame.ARMADA)
 		saco.set_alvo(true)
-		fx.onda(_alvo(), 40.0, 560.0, Color(1.0, 0.25, 0.55, 0.55), 10.0, 0.8)
+		fx.onda(_alvo(), 40.0, 560.0, Color(Paleta.VERMELHO, 0.55), 10.0, 0.8)
 		_show_notice("SENSOR ARMADO")
 
 func _processar_armado(delta: float) -> void:
 	armed_left -= delta
 	if carga_tempo >= 0.0:
-		# Simulação carregando: a barra de espaço está pressionada.
+		# Simulação carregando. O MEDIDOR RECEBE O VALOR EXATO, não a
+		# fração do tempo: a conversão tempo → pontos é uma curva, então
+		# uma barra proporcional ao tempo mostraria 60 % quando o golpe
+		# valeria 640. Quem carrega vê o número que vai tirar.
 		carga_tempo = minf(carga_tempo + delta, GameDef.CARGA_MAX_S)
-		var frac := carga_tempo / GameDef.CARGA_MAX_S
-		medidor.set_carga(frac)
-		saco.set_carga(frac)
+		carga_pontos = GameDef.pontos_da_carga(carga_tempo)
+		medidor.set_carga(float(carga_pontos) / float(GameDef.SCORE_MAX))
+		# O saco, esse sim, tensiona conforme o tempo: é o gesto de tomar
+		# distância, e não a nota.
+		saco.set_carga(carga_tempo / GameDef.CARGA_MAX_S)
 	if armed_left <= 0.0:
 		_cancelar_carga()
 		_entrar_em_abertura()
@@ -296,10 +305,10 @@ func _manter_festa(delta: float) -> void:
 		GameDef.Faixa.MEDIA:
 			if verdict_time >= proximo_fogo:
 				proximo_fogo = verdict_time + 0.85
-				fx.onda(_alvo(), 90.0, 450.0, Color(1.0, 0.72, 0.2, 0.4), 7.0, 0.85)
+				fx.onda(_alvo(), 90.0, 450.0, Color(Paleta.AMBAR, 0.45), 7.0, 0.85)
 		_:
 			if verdict_time < 2.2 and randf() < delta * 9.0:
-				fx.estilhacos(Vector2(randf_range(180.0, 900.0), 420.0), 2, Color("2a3350"))
+				fx.estilhacos(Vector2(randf_range(180.0, 900.0), 420.0), 2, Color("6b7b98"))
 
 # ======================================================================
 # ENTRADA DE COMANDOS
@@ -367,6 +376,8 @@ func _soltou_espaco() -> void:
 		return
 	var tempo_carga := carga_tempo
 	_cancelar_carga()
+	# A MESMA conta que o visor vinha mostrando. Um segundo caminho aqui
+	# faria o número prometido e o número pago divergirem.
 	var pontos := GameDef.pontos_da_carga(tempo_carga)
 	# Velocidade equivalente, só para o visor do resultado.
 	var frac := float(pontos) / float(GameDef.SCORE_MAX)
@@ -376,6 +387,7 @@ func _cancelar_carga() -> void:
 	if carga_tempo >= 0.0:
 		sons.stop("charge")
 	carga_tempo = -1.0
+	carga_pontos = 0
 	medidor.set_carga(-1.0)
 	saco.set_carga(-1.0)
 
@@ -414,7 +426,7 @@ func _iniciar_rodada() -> void:
 	sons.play("start")
 	moldura.set_estado(LedFrame.CONTAGEM)
 	fundo.matiz = Color(0, 0, 0, 0)
-	fx.onda(TELA * 0.5, 40.0, 1100.0, Color(0.35, 0.92, 1.0, 0.6), 14.0, 0.85)
+	fx.onda(TELA * 0.5, 40.0, 1100.0, Color(Paleta.CIANO, 0.55), 14.0, 0.85)
 	_salvar()
 
 func _entrar_em_abertura() -> void:
@@ -435,7 +447,7 @@ func _entrar_em_abertura() -> void:
 func _add_credit() -> void:
 	credits = mini(credits + 1, GameDef.CREDITOS_MAX)
 	sons.play("credit")
-	fx.faiscas(Vector2(540, 1300), 22, Color("52f2a4"), 420.0)
+	fx.faiscas(Vector2(540, 1300), 22, Paleta.VERDE, 420.0)
 	_show_notice("CRÉDITO ADICIONADO  •  SALDO %02d" % credits)
 	_salvar()
 
@@ -459,8 +471,8 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	sons.play("hit", 1.5)
 	tremor = 10.0 + forca * 22.0
 	clarao = 0.25 + forca * 0.45
-	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(1.0, 0.3, 0.55, 0.6), 16.0, 0.7)
-	fx.faiscas(alvo, 30 + int(forca * 50.0), Color("ffd23f"), 700.0 + forca * 600.0)
+	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
+	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
 	plays += 1
 	novo_recorde = result_score > best_score
 	if novo_recorde:
@@ -476,7 +488,7 @@ func _disparar_veredito() -> void:
 	moldura.set_estado(LedFrame.RESULTADO, cor)
 	# A tela inteira toma a cor da faixa, de leve: o veredito chega ao
 	# canto do olho antes de a pessoa terminar de ler a palavra.
-	fundo.matiz = Color(cor.r, cor.g, cor.b, 0.07)
+	fundo.matiz = Color(cor, 0.10)
 	var alvo := _alvo()
 
 	match classe["faixa"] as GameDef.Faixa:
@@ -489,17 +501,17 @@ func _disparar_veredito() -> void:
 			clarao = 0.85
 			fx.confete(Vector2(540, 900), 130, CORES_FESTA, 1250.0)
 			fx.chuva_de_confete(TELA.x, 90, CORES_FESTA)
-			fx.onda(alvo, 60.0, 1100.0, Color(1.0, 0.85, 0.25, 0.55), 18.0, 1.0)
+			fx.onda(alvo, 60.0, 1100.0, Color(Paleta.AMBAR, 0.6), 18.0, 1.0)
 		GameDef.Faixa.MEDIA:
 			sons.play("medium")
 			tremor = 14.0
-			fx.faiscas(alvo, 46, Color("ffb648"), 700.0)
-			fx.onda(alvo, 60.0, 560.0, Color(1.0, 0.72, 0.25, 0.5), 12.0, 0.9)
+			fx.faiscas(alvo, 46, Paleta.AMBAR, 700.0)
+			fx.onda(alvo, 60.0, 560.0, Color(Paleta.AMBAR, 0.55), 12.0, 0.9)
 		_:
 			sons.play("lose")
 			tremor = 9.0
-			fx.estilhacos(alvo, 34, Color("222b47"))
-			fx.poeira(alvo + Vector2(0, 240.0), 26, Color(0.55, 0.16, 0.26, 0.5), 260.0)
+			fx.estilhacos(alvo, 34, Color("6b7b98"))
+			fx.poeira(alvo + Vector2(0, 240.0), 26, Color(0.45, 0.50, 0.62, 0.45), 260.0)
 
 	if novo_recorde:
 		sons.play("record", 2.0)
@@ -824,9 +836,8 @@ func _draw() -> void:
 		_draw_partida()
 
 	fx.desenhar(self)
+	_draw_clarao()
 
-	if clarao > 0.01:
-		draw_rect(Rect2(Vector2.ZERO, TELA), Color(1, 1, 1, clarao * 0.55))
 	if notice != "" and not central_aberta:
 		_draw_notice()
 
@@ -834,19 +845,36 @@ func _draw() -> void:
 	if central_aberta:
 		_draw_central()
 
+## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
+## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
+## em ÂMBAR e escurece as bordas ao mesmo tempo: é o contraste que o olho
+## lê como flash, não o brilho absoluto.
+func _draw_clarao() -> void:
+	if clarao <= 0.01:
+		return
+	draw_rect(Rect2(Vector2.ZERO, TELA), Color(Paleta.LUZ, clarao * 0.70))
+	var borda := 150.0 * clarao
+	var escuro := Color(Paleta.MARINHO, clarao * 0.30)
+	draw_rect(Rect2(0.0, 0.0, TELA.x, borda), escuro)
+	draw_rect(Rect2(0.0, TELA.y - borda, TELA.x, borda), escuro)
+	draw_rect(Rect2(0.0, 0.0, borda, TELA.y), escuro)
+	draw_rect(Rect2(TELA.x - borda, 0.0, borda, TELA.y), escuro)
+
 # ---------------------------------------------------------------- abertura
 func _draw_abertura() -> void:
 	var entrada := clampf(state_time / 1.05, 0.0, 1.0)
 	var suave := ease(entrada, 0.35)
 	var centro := Vector2(540, 470)
 
-	# Raios girando atrás da marca: movimento sem competir com ela.
+	# Raios girando atrás da marca: movimento sem competir com ela. Num
+	# fundo claro os raios são MAIS ESCUROS que o céu, não mais claros —
+	# a leitura é a mesma, a conta é a inversa.
 	for i in range(16):
 		var angulo := animation_time * 0.22 + i * TAU / 16.0
 		var comprimento := 900.0 + sin(animation_time * 1.4 + i) * 50.0
-		var cor := Color(0.22, 0.72, 1.0, 0.05 * suave)
+		var cor := Color(Paleta.CIANO, 0.055 * suave)
 		if i % 2 == 0:
-			cor = Color(1.0, 0.2, 0.45, 0.045 * suave)
+			cor = Color(Paleta.VERMELHO, 0.045 * suave)
 		draw_colored_polygon(
 			PackedVector2Array([
 				centro,
@@ -857,31 +885,34 @@ func _draw_abertura() -> void:
 		)
 	for i in range(3):
 		var raio := 300.0 + i * 78.0 + sin(animation_time * 1.1 + i * 0.7) * 14.0
-		draw_arc(centro, raio * suave, 0.0, TAU, 120, Color(0.3, 0.8, 1.0, 0.12 * suave), 2.0)
+		draw_arc(centro, raio * suave, 0.0, TAU, 120, Color(Paleta.MARINHO, 0.09 * suave), 2.0)
 
 	var flutuar := sin(animation_time * 1.6) * 12.0
-	_draw_marca(centro + Vector2(0, flutuar), 740.0 * lerpf(0.86, 1.0, suave), suave)
+	_draw_marca(centro + Vector2(0, flutuar), 720.0 * lerpf(0.86, 1.0, suave), suave)
 
-	# Título em néon: sombra rosa e sombra ciano abrindo o branco.
-	_texto("PUNCH CHALLENGE", 873.0, 80, Color(1.0, 0.17, 0.45, 0.55 * suave), HORIZONTAL_ALIGNMENT_CENTER, MARGEM - 4.0)
-	_texto("PUNCH CHALLENGE", 867.0, 80, Color(0.25, 0.85, 1.0, 0.55 * suave), HORIZONTAL_ALIGNMENT_CENTER, MARGEM + 4.0)
-	_texto("PUNCH CHALLENGE", 870.0, 80, Color(1, 1, 1, suave))
+	_texto("PUNCH CHALLENGE", 906.0, 82, Color(Paleta.MARINHO, 0.16 * suave), HORIZONTAL_ALIGNMENT_CENTER, MARGEM + 5.0)
+	_texto("PUNCH CHALLENGE", 900.0, 82, Color(Paleta.TINTA, suave))
 	# A segunda linha não repete a marca (a logo acima já a diz): ela faz
 	# a pergunta que traz alguém do outro lado do salão até aqui.
-	_texto("QUAL É A FORÇA DO SEU SOCO?", 918.0, 26, Color(0.52, 0.64, 0.86, suave))
-	_texto("MEDIDOR DE POTÊNCIA  •  0 A 999 PONTOS", 954.0, 18, Color(0.34, 0.44, 0.64, suave))
+	_texto("QUAL É A FORÇA DO SEU SOCO?", 948.0, 27, Color(Paleta.VERMELHO, suave))
+	_texto("MEDIDOR DE POTÊNCIA  •  0 A 999 PONTOS", 984.0, 18, Color(Paleta.TINTA_FRACA, suave))
 
 	# O convite pisca; sem crédito, troca de texto em vez de sumir. Quem
 	# atravessou o salão precisa saber o que fazer, não ver a frase sumir.
-	var piscada := 0.55 + 0.45 * sin(animation_time * 4.2)
+	var piscada := 0.6 + 0.4 * sin(animation_time * 4.2)
 	var convite := "PRESSIONE  START"
-	var cor_convite := Color(1.0, 0.85, 0.25)
+	var cor_convite := Paleta.VERDE
 	if game_mode == "credit" and credits <= 0:
 		convite = "INSIRA 1 FICHA"
-		cor_convite = Color(0.35, 0.92, 1.0)
-	var caixa := Rect2(MARGEM + 80.0, 1020, LARGURA_UTIL - 160.0, 118.0)
-	_panel(caixa, Color(0.05, 0.09, 0.2, 0.85 * suave), Color(cor_convite.r, cor_convite.g, cor_convite.b, 0.5 * piscada * suave))
-	_texto_cabendo(convite, 1094.0, 42, Color(cor_convite.r, cor_convite.g, cor_convite.b, piscada * suave), caixa.size.x - 60.0, caixa.position.x + 30.0)
+		cor_convite = Paleta.CIANO
+	# BOTÃO CHEIO, e não caixa clarinha com texto colorido: num fundo
+	# claro é o bloco de cor que se vê do outro lado do salão, e este é o
+	# único chamado da tela que precisa ser visto de lá.
+	var caixa := Rect2(MARGEM + 80.0, 1024, LARGURA_UTIL - 160.0, 116.0)
+	_placa(Rect2(caixa.position + Vector2(0.0, 7.0), caixa.size), 22.0, Color(Paleta.SOMBRA, suave))
+	_placa(caixa, 22.0, Color(cor_convite.darkened(0.22), suave))
+	_placa(Rect2(caixa.position, caixa.size - Vector2(0.0, 7.0)), 22.0, Color(cor_convite, suave))
+	_texto_cabendo(convite, 1098.0, 44, Color(Paleta.CARTAO, suave * piscada), caixa.size.x - 60.0, caixa.position.x + 30.0)
 
 	_draw_placar_abertura(suave)
 	_draw_como_jogar(suave)
@@ -892,35 +923,38 @@ func _draw_abertura() -> void:
 ## está longe varre a tela em linha.
 func _draw_placar_abertura(alpha: float) -> void:
 	var itens := [
-		["RECORDE", "%03d" % best_score, Color("58e8ff")],
-		["PARTIDAS", str(plays), Color("a978ff")],
-		["CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Color("ff4c9b")],
-		["MODO", "LIVRE" if game_mode == "free" else "FICHA", Color("52f2a4")],
+		["RECORDE", "%03d" % best_score, Paleta.AMBAR, "trofeu"],
+		["PARTIDAS", str(plays), Paleta.ROXO, "luva"],
+		["CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Paleta.ROSA, "ficha"],
+		["MODO", "LIVRE" if game_mode == "free" else "FICHA", Paleta.VERDE, "raio"],
 	]
 	var largura := (LARGURA_UTIL - 3.0 * 16.0) / 4.0
 	for i in range(itens.size()):
 		_stat_card(
-			Rect2(MARGEM + i * (largura + 16.0), 1230.0, largura, 130.0),
-			str(itens[i][0]), str(itens[i][1]), itens[i][2] as Color, alpha
+			Rect2(MARGEM + i * (largura + 16.0), 1230.0, largura, 134.0),
+			str(itens[i][0]), str(itens[i][1]), itens[i][2] as Color, str(itens[i][3]), alpha
 		)
 
-## Três passos, numerados, do tamanho de quem lê de longe. É o que
+## Três passos, com ícone, do tamanho de quem lê de longe. É o que
 ## transforma alguém parado na frente da máquina em alguém jogando.
 func _draw_como_jogar(alpha: float) -> void:
-	_texto("COMO JOGAR", 1432.0, 22, Color(0.44, 0.55, 0.76, alpha))
+	_texto("COMO JOGAR", 1436.0, 22, Color(Paleta.TINTA_FRACA, alpha))
 	var passos := [
-		["1", "INSIRA A FICHA" if game_mode == "credit" else "MÁQUINA LIBERADA", Color("52f2a4")],
-		["2", "APERTE START", Color("ffd23f")],
-		["3", "SOQUE O ALVO COM FORÇA", Color("ff4c9b")],
+		["ficha", "INSIRA A FICHA" if game_mode == "credit" else "MÁQUINA LIBERADA", Paleta.ROSA],
+		["botao", "APERTE START", Paleta.VERDE],
+		["alvo", "SOQUE O ALVO COM FORÇA", Paleta.VERMELHO],
 	]
 	for i in range(passos.size()):
-		var y := 1466.0 + i * 86.0
+		var y := 1470.0 + i * 86.0
 		var cor: Color = passos[i][2]
-		var centro := Vector2(MARGEM + 46.0, y + 32.0)
-		draw_circle(centro, 27.0, Color(cor.r, cor.g, cor.b, 0.16 * alpha))
-		draw_arc(centro, 27.0, 0.0, TAU, 40, Color(cor.r, cor.g, cor.b, 0.75 * alpha), 2.5)
-		_texto(str(passos[i][0]), centro.y + 10.0, 26, Color(cor.r, cor.g, cor.b, alpha), HORIZONTAL_ALIGNMENT_CENTER, centro.x - 40.0, 80.0)
-		_texto(str(passos[i][1]), centro.y + 11.0, 30, Color(0.82, 0.88, 0.98, alpha), HORIZONTAL_ALIGNMENT_LEFT, MARGEM + 108.0, LARGURA_UTIL - 108.0)
+		var centro := Vector2(MARGEM + 48.0, y + 32.0)
+		draw_circle(centro, 30.0, Paleta.tinta_clara(cor, 0.20))
+		draw_arc(centro, 30.0, 0.0, TAU, 44, Color(cor, 0.55 * alpha), 2.5)
+		_icone(str(passos[i][0]), centro, 19.0, Color(Paleta.para_texto(cor), alpha))
+		_texto(
+			"%d.  %s" % [i + 1, str(passos[i][1])], centro.y + 11.0, 30,
+			Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_LEFT, MARGEM + 110.0, LARGURA_UTIL - 110.0
+		)
 
 # ---------------------------------------------------------------- partida
 func _draw_partida() -> void:
@@ -932,7 +966,7 @@ func _draw_partida() -> void:
 		GameDef.State.ARMED:
 			_draw_armado()
 		GameDef.State.MEASURING:
-			_texto_cabendo("IMPACTO!", 1320.0, 116, Color("ffd23f"), LARGURA_UTIL)
+			_texto_cabendo("IMPACTO!", 1320.0, 116, Paleta.VERMELHO, LARGURA_UTIL)
 		GameDef.State.RESULT:
 			_draw_resultado()
 
@@ -944,29 +978,44 @@ func _draw_contagem() -> void:
 	var fracao := fmod(countdown_left, 1.0)
 	var centro := Vector2(540, 1300)
 	# O anel esvazia junto com o segundo: o tempo é visto, não lido.
-	draw_arc(centro, 148.0, 0.0, TAU, 96, Color(0.20, 0.42, 0.70, 0.30), 9.0)
-	draw_arc(centro, 148.0, -PI * 0.5, -PI * 0.5 + TAU * fracao, 96, Color("4beaff"), 9.0, true)
+	draw_arc(centro, 150.0, 0.0, TAU, 96, Paleta.CARTAO_BORDA, 12.0)
+	draw_arc(centro, 150.0, -PI * 0.5, -PI * 0.5 + TAU * fracao, 96, Paleta.CIANO, 12.0, true)
 	var pulso := 1.0 + fracao * 0.14
-	_texto(str(count), 1362.0, int(190 * pulso), Color("ffffff"))
-	_texto("PREPARE-SE", 1540.0, 34, Color("63e9ff"))
+	_texto(str(count), 1362.0, int(190 * pulso), Paleta.TINTA)
+	_texto("PREPARE-SE", 1540.0, 34, Paleta.para_texto(Paleta.CIANO))
 
+## A JANELA DO SOCO, E O VALOR EXATO DA CARGA.
+##
+## Enquanto a barra de espaço está pressionada, a linha grande deixa de
+## ser um aviso e passa a ser O NÚMERO — o mesmo `%03d`, no mesmo lugar e
+## do mesmo jeito que ele vai aparecer no resultado. Quem carrega não
+## precisa adivinhar quanto tempo vale quanto: solta quando o número que
+## está vendo serve.
 func _draw_armado() -> void:
-	_texto_cabendo("SOQUE AGORA!", 1268.0, 88, Color("ffffff"), LARGURA_UTIL)
+	var carregando := carga_tempo >= 0.0
+	if carregando:
+		var cor := GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+		_texto("%03d" % carga_pontos, 1304.0, 152, Color(Paleta.MARINHO, 0.14), HORIZONTAL_ALIGNMENT_CENTER, MARGEM + 5.0)
+		_texto("%03d" % carga_pontos, 1300.0, 152, Paleta.para_texto(cor))
+		_texto("PONTOS SE SOLTAR AGORA", 1348.0, 24, Paleta.TINTA_FRACA)
+	else:
+		_texto_cabendo("SOQUE AGORA!", 1300.0, 90, Paleta.TINTA, LARGURA_UTIL)
+		var dica := "O SENSOR ESTÁ ESPERANDO O SEU GOLPE" if _sensor_ligado() \
+			else "SEGURE ESPAÇO PARA CARREGAR O GOLPE"
+		_texto(dica, 1348.0, 24, Paleta.TINTA_FRACA)
+
 	# Barra do tempo restante: some da direita para a esquerda e fica
 	# vermelha no fim, sem número para ninguém precisar ler.
-	var trilho := Rect2(MARGEM + 120.0, 1306.0, LARGURA_UTIL - 240.0, 22.0)
+	var trilho := Rect2(MARGEM + 120.0, 1396.0, LARGURA_UTIL - 240.0, 24.0)
 	var restante := clampf(armed_left / GameDef.JANELA_DO_SOCO, 0.0, 1.0)
-	draw_rect(trilho, Color(0.05, 0.09, 0.18, 0.9))
-	draw_rect(trilho, Color(0.25, 0.45, 0.75, 0.35), false, 2.0)
-	var cor := Color("4beaff") if restante > 0.35 else Color("ff4c6a")
-	draw_rect(Rect2(trilho.position, Vector2(trilho.size.x * restante, trilho.size.y)), cor)
+	draw_rect(trilho, Paleta.VAZIO)
+	draw_rect(trilho, Paleta.CARTAO_BORDA, false, 2.0)
+	var cor_tempo := Paleta.CIANO if restante > 0.35 else Paleta.VERMELHO
+	draw_rect(Rect2(trilho.position, Vector2(trilho.size.x * restante, trilho.size.y)), cor_tempo)
 
-	if carga_tempo >= 0.0:
-		_texto("SOLTE PARA SOCAR", 1382.0, 28, Color("ffd23f"))
-	elif _sensor_ligado():
-		_texto("O SENSOR ESTÁ ESPERANDO O SEU GOLPE", 1382.0, 24, Color("63e9ff"))
-	else:
-		_texto("SEGURE ESPAÇO PARA SIMULAR O GOLPE", 1382.0, 24, Color("63e9ff"))
+	if carregando:
+		var piscada := 0.65 + 0.35 * sin(animation_time * 8.0)
+		_texto("SOLTE PARA SOCAR", 1478.0, 30, Color(Paleta.para_texto(Paleta.AMBAR), piscada))
 
 func _draw_resultado() -> void:
 	# LINHA 1: o número. Sozinho na sua altura, do tamanho que der.
@@ -974,39 +1023,42 @@ func _draw_resultado() -> void:
 	if verdict_time < 0.0:
 		vibra = 1.0 + 0.05 * sin(animation_time * 26.0)
 	var numero := "%03d" % int(round(displayed_score))
-	_texto(numero, 1304.0, int(196 * vibra), Color(0.05, 0.1, 0.2, 0.8), HORIZONTAL_ALIGNMENT_CENTER, MARGEM + 6.0)
-	_texto(numero, 1300.0, int(196 * vibra), Color("ffffff"))
-	_texto("PONTOS DE POTÊNCIA", 1344.0, 23, Color("63e9ff"))
+	_texto(numero, 1306.0, int(196 * vibra), Color(Paleta.MARINHO, 0.16), HORIZONTAL_ALIGNMENT_CENTER, MARGEM + 6.0)
+	_texto(numero, 1300.0, int(196 * vibra), Paleta.TINTA)
+	_texto("PONTOS DE POTÊNCIA", 1344.0, 23, Paleta.TINTA_FRACA)
 
 	# LINHA 2: enquanto conta, só a promessa; depois, o veredito.
 	if verdict_time < 0.0:
-		_texto("MEDINDO O IMPACTO…", 1462.0, 26, Color("8092b9"))
+		_texto("MEDINDO O IMPACTO…", 1462.0, 26, Paleta.TINTA_LEVE)
 		return
 
 	var classe := GameDef.classificar(result_score, limiar_fraco, limiar_forte)
-	_draw_carimbo(str(classe["label"]), classe["color"] as Color)
+	_draw_carimbo(str(classe["label"]), Paleta.para_texto(classe["color"] as Color))
 
 	# LINHA 3: o detalhe do golpe. O recorde entra AQUI, e não por cima
 	# do veredito — foi assim que a palavra ficava ilegível justamente
 	# quando havia mais motivo para lê-la.
 	var origem := "SIMULAÇÃO" if result_simulado else "SENSOR"
 	var detalhe := "%s  •  %.2f m/s" % [origem, result_speed]
-	var cor_detalhe := Color("8092b9")
 	if novo_recorde:
-		detalhe = "★ NOVO RECORDE DA CASA  •  %s" % detalhe
-		cor_detalhe = Color(0.35, 0.95, 0.65, 0.6 + 0.4 * sin(animation_time * 6.0))
-	_texto_cabendo(detalhe, 1514.0, 22, cor_detalhe, LARGURA_UTIL)
-
-	# LINHA 4: o convite para a próxima ficha, depois de o veredito assentar.
-	if verdict_time > 1.0:
-		var piscada := 0.55 + 0.45 * sin(animation_time * 3.6)
-		_texto("START PARA JOGAR NOVAMENTE", 1562.0, 21, Color(0.73, 0.77, 0.87, piscada))
+		var brilho := 0.65 + 0.35 * sin(animation_time * 6.0)
+		var faixa := Rect2(MARGEM + 210.0, 1486.0, LARGURA_UTIL - 420.0, 46.0)
+		_cartao(faixa, Paleta.tinta_clara(Paleta.AMBAR, 0.22), Color(Paleta.AMBAR, brilho), 1.0, 3.0)
+		Icones.estrela(self, Vector2(faixa.position.x + 30.0, faixa.position.y + 23.0), 13.0, Paleta.AMBAR)
+		Icones.estrela(self, Vector2(faixa.end.x - 30.0, faixa.position.y + 23.0), 13.0, Paleta.AMBAR)
+		_texto_cabendo("NOVO RECORDE DA CASA", 1517.0, 24, Paleta.para_texto(Paleta.AMBAR), faixa.size.x - 90.0, faixa.position.x + 45.0)
+		_texto(detalhe, 1560.0, 19, Paleta.TINTA_LEVE)
+	else:
+		_texto_cabendo(detalhe, 1508.0, 22, Paleta.TINTA_LEVE, LARGURA_UTIL)
+		if verdict_time > 1.0:
+			var piscada := 0.55 + 0.45 * sin(animation_time * 3.6)
+			_texto("START PARA JOGAR NOVAMENTE", 1560.0, 21, Color(Paleta.TINTA_FRACA, piscada))
 
 func _draw_carimbo(titulo: String, cor: Color) -> void:
 	## O CARIMBO CAI NA TELA, não aparece: entra grande, passa do lugar e
 	## volta — o gesto de um carimbo batendo no papel. O tamanho final
-	## sai de `_texto_cabendo`, então "PESO-PESADO" não estoura a tela do
-	## mesmo jeito que "FRACO!" não fica pequeno.
+	## sai de `_tamanho_que_cabe`, então "PESO-PESADO" não estoura a tela
+	## do mesmo jeito que "FRACO!" não fica pequeno.
 	var t := clampf(verdict_time / 0.45, 0.0, 1.0)
 	var escala := 1.0
 	if t < 1.0:
@@ -1017,31 +1069,30 @@ func _draw_carimbo(titulo: String, cor: Color) -> void:
 	# Sem largura de caixa: durante a entrada o carimbo é MAIOR que a
 	# tela de propósito, e uma caixa o cortaria em vez de deixá-lo passar.
 	var medida := fonte.get_string_size(titulo, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
-	draw_string(
-		fonte, Vector2((TELA.x - medida.x) * 0.5, 1468.0), titulo,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, Color(cor.r, cor.g, cor.b, alpha)
-	)
+	var x := (TELA.x - medida.x) * 0.5
+	draw_string(fonte, Vector2(x + 4.0, 1452.0), titulo, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, Color(Paleta.MARINHO, alpha * 0.16))
+	draw_string(fonte, Vector2(x, 1448.0), titulo, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, Color(cor, alpha))
 
 ## Cabeçalho: só a marca do jogo e o modo. O estado da serial é assunto
 ## do técnico, e vive na Central Técnica — na tela do cliente ele vira,
 ## no máximo, um ponto âmbar quando há problema.
 func _draw_header() -> void:
-	draw_rect(Rect2(MARGEM, BANDA_TOPO, LARGURA_UTIL, 1.0), Color(0.3, 0.75, 1.0, 0.18))
-	_texto("PUNCH", 92.0, 32, Color("f4f7ff"), HORIZONTAL_ALIGNMENT_LEFT, MARGEM)
+	draw_rect(Rect2(MARGEM, BANDA_TOPO, LARGURA_UTIL, 2.0), Paleta.CARTAO_BORDA)
+	_texto("PUNCH", 92.0, 32, Paleta.TINTA, HORIZONTAL_ALIGNMENT_LEFT, MARGEM)
 	var largura_punch := fonte.get_string_size("PUNCH ", HORIZONTAL_ALIGNMENT_LEFT, -1, 32).x
-	_texto("CHALLENGE", 92.0, 32, Color("55e7ff"), HORIZONTAL_ALIGNMENT_LEFT, MARGEM + largura_punch)
+	_texto("CHALLENGE", 92.0, 32, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, MARGEM + largura_punch)
 	if not _sensor_ligado() and link != null and link.available():
-		draw_circle(Vector2(MARGEM + 500.0, 82.0), 8.0, Color("ffbd4a"))
+		draw_circle(Vector2(MARGEM + 500.0, 82.0), 8.0, Paleta.AMBAR)
 	var mode_text := "MODO LIVRE" if game_mode == "free" else "MODO FICHA"
-	_pill(Rect2(TELA.x - MARGEM - 176.0, 56.0, 176.0, 50.0), mode_text, Color("1b2b52"), Color("69e9ff"))
+	_pill(Rect2(TELA.x - MARGEM - 180.0, 54.0, 180.0, 52.0), mode_text, Paleta.MARINHO)
 
 func _draw_cartoes() -> void:
 	var largura := (LARGURA_UTIL - 2.0 * 16.0) / 3.0
-	_stat_card(Rect2(MARGEM, CARTOES_Y, largura, CARTOES_ALTURA), "RECORDE", "%03d" % best_score, Color("58e8ff"), 1.0)
-	_stat_card(Rect2(MARGEM + largura + 16.0, CARTOES_Y, largura, CARTOES_ALTURA), "PARTIDAS", str(plays), Color("a978ff"), 1.0)
+	_stat_card(Rect2(MARGEM, CARTOES_Y, largura, CARTOES_ALTURA), "RECORDE", "%03d" % best_score, Paleta.AMBAR, "trofeu", 1.0)
+	_stat_card(Rect2(MARGEM + largura + 16.0, CARTOES_Y, largura, CARTOES_ALTURA), "PARTIDAS", str(plays), Paleta.ROXO, "luva", 1.0)
 	_stat_card(
 		Rect2(MARGEM + (largura + 16.0) * 2.0, CARTOES_Y, largura, CARTOES_ALTURA),
-		"CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Color("ff4c9b"), 1.0
+		"CRÉDITOS", "∞" if game_mode == "free" else "%02d" % credits, Paleta.ROSA, "ficha", 1.0
 	)
 
 ## Rodapé: a assinatura da casa. As teclas só aparecem quando o sensor
@@ -1053,83 +1104,86 @@ func _draw_rodape(alpha: float) -> void:
 	if not _sensor_ligado():
 		_texto(
 			"BANCADA  •  ESPAÇO: START / GOLPE   C: CRÉDITO   F9: CENTRAL TÉCNICA",
-			1812.0, 17, Color(0.36, 0.44, 0.60, alpha)
+			1812.0, 17, Color(Paleta.TINTA_LEVE, alpha)
 		)
-	_texto("LAZER & SPORT BRINQUEDOS", RODAPE_Y, 16, Color(0.33, 0.40, 0.53, alpha))
+	_texto("LAZER & SPORT BRINQUEDOS", RODAPE_Y, 16, Color(Paleta.TINTA_FRACA, alpha))
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
-	draw_rect(Rect2(Vector2.ZERO, TELA), Color(0.005, 0.009, 0.025, 0.97))
-	_panel(Rect2(40, 96, 1000, 1790), Color("0d142c"), Color(0.22, 0.55, 0.95, 0.52))
-	_texto("CENTRAL TÉCNICA", 196.0, 38, Color("ffffff"), HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	_texto("Configuração, diagnóstico e calibração", 234.0, 18, Color("7e90b8"), HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	_botao(BOTOES_SIMPLES["fechar"], "×", false, Color("ff568f"), 32)
+	# Véu claro sobre o jogo: a Central cobre a tela, mas o técnico
+	# continua vendo que a máquina está ligada por trás.
+	draw_rect(Rect2(Vector2.ZERO, TELA), Color(Paleta.CEU_TOPO, 0.95))
+	_cartao(Rect2(40, 96, 1000, 1790), Paleta.CARTAO, Paleta.CARTAO_BORDA, 1.0, 2.0)
+	_texto("CENTRAL TÉCNICA", 196.0, 38, Paleta.TINTA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
+	_texto("Configuração, diagnóstico e calibração", 234.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
+	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
 
 	# ---- modo de operação
 	_secao(Rect2(80, 262, 920, 150), "MODO DE OPERAÇÃO")
-	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Color("55e7ff"), 22)
-	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Color("ff4c9b"), 22)
+	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
+	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
 
 	# ---- faixas do placar
 	_secao(Rect2(80, 432, 920, 250), "FAIXAS DO PLACAR (0 – 999)")
-	_regua_das_faixas(Rect2(110, 482, 860, 30))
-	_stepper("limiar_fraco", "%03d" % limiar_fraco, "ATÉ AQUI É FRACO", Color("7c88a8"))
-	_stepper("limiar_forte", "%03d" % limiar_forte, "DAQUI É FORTE", Color("ff2d55"))
+	_regua_das_faixas(Rect2(110, 482, 860, 32))
+	_stepper("limiar_fraco", "%03d" % limiar_fraco, "ATÉ AQUI É FRACO", GameDef.COR_FRACA)
+	_stepper("limiar_forte", "%03d" % limiar_forte, "DAQUI É FORTE", GameDef.COR_FORTE)
 
 	# ---- faixa de velocidade
 	_secao(Rect2(80, 702, 920, 210), "VELOCIDADE QUE VIRA PONTO (m/s)")
-	_stepper("vmin", "%.1f" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Color("55e7ff"))
-	_stepper("vmax", "%.1f" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Color("55e7ff"))
+	_stepper("vmin", "%.1f" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
+	_stepper("vmax", "%.1f" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
 
 	# ---- sensor e firmware
 	_secao(Rect2(80, 932, 920, 330), "SENSOR E FIRMWARE (MPU-6050)")
-	var dot := Color("4ff0a2") if _sensor_ligado() else Color("ffba46")
+	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
 	draw_circle(Vector2(560, 968.0), 7.0, dot)
-	_texto(serial_status, 974.0, 15, dot, HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
-	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Color("55e7ff"))
-	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Color("b45cff"), 20)
-	_texto("EIXO DO GOLPE", 1112.0, 15, Color("7e90b8"), HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
-	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Color("55e7ff"))
-	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Color("55e7ff"))
+	_texto(serial_status, 974.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
+	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
+	_texto("EIXO DO GOLPE", 1112.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
+	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
 
 	# ---- ações no firmware
 	_secao(Rect2(80, 1282, 920, 190), "AÇÕES NO FIRMWARE")
-	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Color("52f2a4"), 19)
-	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Color("ffd23f"), 19)
+	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
+	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
 
 	# ---- diagnóstico
 	_secao(Rect2(80, 1492, 920, 230), "DIAGNÓSTICO")
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
-		1566.0, 15, Color("7e90b8"), HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1566.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
 		"recorde %03d  •  %d partidas  •  %02d créditos" % [best_score, plays, credits],
-		1594.0, 15, Color("5f7099"), HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1594.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	_botao(BOTOES_SIMPLES["zerar"], "ZERAR CONTADORES", false, Color("ff568f"), 17)
-	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Color("55e7ff"), 17)
+	_botao(BOTOES_SIMPLES["zerar"], "ZERAR CONTADORES", false, Paleta.VERMELHO, 17)
+	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 17)
 
-	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Color("ffba46"), 19)
-	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Color("52f2a4"), 21)
-	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1856.0, 15, Color("6a7ba3"))
+	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
+	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
+	_texto("Tecla T: golpe de teste  •  ESC: fechar sem sair da rodada", 1856.0, 15, Paleta.TINTA_LEVE)
 
 ## Uma seção da Central: moldura e título, sempre no mesmo lugar em
 ## relação à caixa. Nenhuma seção precisa saber onde fica o seu rótulo.
 func _secao(rect: Rect2, titulo: String) -> void:
-	_panel(rect, Color("111d3b"), Color(0.19, 0.42, 0.78, 0.4))
-	_texto(titulo, rect.position.y + 40.0, 16, Color("8094bd"), HORIZONTAL_ALIGNMENT_LEFT, rect.position.x + 40.0, rect.size.x - 80.0)
+	_cartao(rect, Paleta.tinta_clara(Paleta.MARINHO, 0.045), Paleta.CARTAO_BORDA, 1.0, 0.0)
+	_texto(titulo, rect.position.y + 40.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, rect.position.x + 40.0, rect.size.x - 80.0)
 
 ## Um par − / + com o valor no meio e a legenda embaixo. Os retângulos
 ## saem de `PASSOS`, os mesmos que o clique consulta — texto e área de
 ## toque não têm como divergir.
 func _stepper(chave: String, valor: String, legenda: String, accent: Color) -> void:
 	var visor := _passo_visor(chave)
+	_cartao(visor, Paleta.CARTAO, Paleta.CARTAO_BORDA, 1.0, 0.0)
 	_botao(_passo_menos(chave), "−", false, accent, 26)
 	_botao(_passo_mais(chave), "+", false, accent, 26)
-	_texto_cabendo(valor, visor.position.y + visor.size.y * 0.68, 30, Color("ffffff"), visor.size.x, visor.position.x)
+	_texto_cabendo(valor, visor.position.y + visor.size.y * 0.68, 30, Paleta.TINTA, visor.size.x - 12.0, visor.position.x + 6.0)
 	var r: Rect2 = PASSOS[chave]
-	_texto(legenda, r.end.y + 28.0, 15, Color("7e90b8"), HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x)
+	_texto(legenda, r.end.y + 28.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x)
 
 ## A régua das três faixas, do jeito que o cliente vai ver no medidor.
 ## Mexer num limite muda esta barra na hora: o técnico regula olhando o
@@ -1145,56 +1199,175 @@ func _regua_das_faixas(rect: Rect2) -> void:
 		var x0 := rect.position.x + rect.size.x * float(f[0])
 		var x1 := rect.position.x + rect.size.x * float(f[1])
 		var cor: Color = f[2]
-		draw_rect(Rect2(x0, rect.position.y, x1 - x0, rect.size.y), Color(cor.r, cor.g, cor.b, 0.55))
+		draw_rect(Rect2(x0, rect.position.y, x1 - x0, rect.size.y), cor)
 		if x1 - x0 > 90.0:
-			_texto(str(f[3]), rect.position.y + rect.size.y * 0.72, 15, Color(0.03, 0.05, 0.1), HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0)
-	draw_rect(rect, Color(0.35, 0.55, 0.85, 0.5), false, 2.0)
+			_texto(str(f[3]), rect.position.y + rect.size.y * 0.70, 15, Color(1, 1, 1, 0.95), HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0)
+	draw_rect(rect, Paleta.CARTAO_BORDA, false, 2.0)
 
 # ---------------------------------------------------------------- peças
+## A MARCA DA CASA COMO LETREIRO DE PARQUE, e não como uma figura solta
+## no meio da tela.
+##
+## POR QUE A PLACA EXISTE. A logo é uma arte clara — plaqueta branca com
+## contorno preto — e num céu claro ela não tem em que se apoiar: fica
+## boiando, do jeito que qualquer figura colada fica. A placa resolve
+## isso do jeito que um parque resolve: miolo creme para a marca
+## descansar, moldura marinho em volta para separá-la do céu, e a fieira
+## de lâmpadas correndo na moldura.
+##
+## AS LÂMPADAS PRECISAM DA MOLDURA. Numa primeira versão elas ficavam
+## direto sobre o céu, e a lâmpada APAGADA sumia — sobrava um pedacinho
+## de luz correndo no vazio, que não lê como letreiro. Sobre o marinho,
+## acesa e apagada aparecem as duas, e é a fieira inteira que dá o
+## desenho.
 func _draw_marca(centro: Vector2, largura: float, alpha: float) -> void:
-	if logo != null:
-		var tamanho := logo.get_size()
-		var escala := largura / tamanho.x
-		var destino := Rect2(
-			centro - Vector2(largura, tamanho.y * escala) * 0.5,
-			Vector2(largura, tamanho.y * escala)
-		)
-		draw_texture_rect(logo, destino, false, Color(1, 1, 1, alpha))
-	else:
-		# Sem a textura, a marca aparece em texto: a máquina nunca fica
-		# em tela preta por causa de um arquivo faltando.
-		_texto_cabendo("LAZER & SPORT", centro.y, 64, Color(1, 1, 1, alpha), LARGURA_UTIL)
+	if logo == null:
+		_texto_cabendo("LAZER & SPORT", centro.y, 64, Color(Paleta.TINTA, alpha), LARGURA_UTIL)
+		return
+
+	var tamanho := logo.get_size()
+	var escala := largura / tamanho.x
+	var altura := tamanho.y * escala
+	var destino := Rect2(centro - Vector2(largura, altura) * 0.5, Vector2(largura, altura))
+
+	var banda := 34.0
+	var placa := destino.grow(46.0)
+	var canto := 46.0
+
+	# Halo quente atrás de tudo: a luz do refletor batendo no letreiro.
+	for i in range(4):
+		draw_circle(centro, largura * (0.66 - i * 0.11), Color(Paleta.LUZ, 0.11 * alpha))
+
+	_placa(Rect2(placa.position + Vector2(0.0, 12.0), placa.size), canto, Color(Paleta.SOMBRA, 0.9 * alpha))
+	_placa(placa, canto, Color(Paleta.MARINHO, alpha))
+	_placa(placa.grow(-banda), canto - banda * 0.55, Color(Paleta.CREME, alpha))
+
+	draw_texture_rect(logo, destino, false, Color(1, 1, 1, alpha))
+
+	_lampadas_do_letreiro(placa.grow(-banda * 0.5), alpha)
+
+## As lâmpadas do letreiro, distribuídas pelo perímetro, com a luz
+## correndo. Mesma ideia da moldura da tela, em escala de marca.
+func _lampadas_do_letreiro(caixa: Rect2, alpha: float) -> void:
+	var passo := 54.0
+	var perimetro := 2.0 * (caixa.size.x + caixa.size.y)
+	var total := maxi(12, int(perimetro / passo))
+	var cabeca := fmod(animation_time * 9.0, float(total))
+	for i in range(total):
+		var p := _ponto_do_retangulo(caixa, float(i) / float(total) * perimetro)
+		var dist := fmod(cabeca - float(i) + total, float(total))
+		var acesa := maxf(0.0, 1.0 - dist / 5.0)
+		# Apagada é creme sobre o marinho: continua sendo um bulbo de
+		# vidro, e não um buraco.
+		var cor: Color = Color("93a4c6").lerp(Paleta.LUZ, acesa)
+		if acesa > 0.05:
+			draw_circle(p, 19.0, Color(Paleta.AMBAR, acesa * 0.45 * alpha))
+		draw_circle(p, 9.5, Color(cor, alpha))
+		draw_circle(p + Vector2(-2.6, -2.6), 3.2, Color(1, 1, 1, 0.65 * alpha))
+
+## Ponto a `d` de distância ao longo do perímetro de um retângulo, no
+## sentido horário a partir do canto superior esquerdo.
+func _ponto_do_retangulo(r: Rect2, d: float) -> Vector2:
+	var w := r.size.x
+	var h := r.size.y
+	if d < w:
+		return r.position + Vector2(d, 0.0)
+	d -= w
+	if d < h:
+		return r.position + Vector2(w, d)
+	d -= h
+	if d < w:
+		return r.position + Vector2(w - d, h)
+	d -= w
+	return r.position + Vector2(0.0, h - d)
+
+## Retângulo de cantos redondos. O Godot só desenha retângulo de canto
+## vivo, e canto vivo em peça grande destoa do resto da tela — a placa,
+## os cartões e os botões todos precisam da mesma família de formas.
+func _placa(rect: Rect2, raio: float, cor: Color) -> void:
+	draw_colored_polygon(_contorno_arredondado(rect, raio), cor)
+
+func _contorno_arredondado(rect: Rect2, raio: float) -> PackedVector2Array:
+	var r := minf(raio, minf(rect.size.x, rect.size.y) * 0.5)
+	var pontos := PackedVector2Array()
+	var cantos := [
+		[Vector2(rect.end.x - r, rect.position.y + r), -PI * 0.5],
+		[Vector2(rect.end.x - r, rect.end.y - r), 0.0],
+		[Vector2(rect.position.x + r, rect.end.y - r), PI * 0.5],
+		[Vector2(rect.position.x + r, rect.position.y + r), PI],
+	]
+	for c in cantos:
+		var meio: Vector2 = c[0]
+		var a0: float = c[1]
+		for i in range(9):
+			var a := a0 + float(i) / 8.0 * PI * 0.5
+			pontos.append(meio + Vector2(cos(a), sin(a)) * r)
+	return pontos
 
 ## O aviso de operação ocupa o rodapé, e não o topo: no topo ele cairia
 ## em cima do cabeçalho, e no meio disputaria com o número.
 func _draw_notice() -> void:
-	var caixa := Rect2(MARGEM + 60.0, 1800.0, LARGURA_UTIL - 120.0, 64.0)
-	draw_rect(caixa, Color(0.02, 0.05, 0.12, 0.92))
-	draw_rect(caixa, Color(0.35, 0.85, 1.0, 0.5), false, 2.0)
-	_texto_cabendo(notice, caixa.position.y + 41.0, 20, Color("cfe6ff"), caixa.size.x - 40.0, caixa.position.x + 20.0)
+	var caixa := Rect2(MARGEM + 60.0, 1798.0, LARGURA_UTIL - 120.0, 66.0)
+	_cartao(caixa, Paleta.CARTAO, Paleta.CIANO, 1.0, 3.0)
+	_texto_cabendo(notice, caixa.position.y + 42.0, 20, Paleta.TINTA, caixa.size.x - 40.0, caixa.position.x + 20.0)
 
-func _panel(rect: Rect2, fundo_c: Color, borda: Color) -> void:
-	draw_rect(rect, fundo_c)
-	draw_rect(rect, borda, false, 2.0)
+## A peça padrão da tela: retângulo branco com sombra e borda. Todo painel
+## do jogo passa por aqui, então a "altura" das peças é a mesma em toda
+## parte — e mudar a sombra do jogo inteiro é mudar uma função.
+func _cartao(rect: Rect2, fundo_c: Color, borda: Color, alpha := 1.0, largura_borda := 2.0) -> void:
+	draw_rect(Rect2(rect.position + Vector2(0, 4.0), rect.size), Color(Paleta.SOMBRA, Paleta.SOMBRA.a * alpha))
+	draw_rect(rect, Color(fundo_c, fundo_c.a * alpha))
+	if largura_borda > 0.0:
+		draw_rect(rect, Color(borda, borda.a * alpha), false, largura_borda)
 
-func _pill(rect: Rect2, texto: String, fundo_c: Color, frente: Color) -> void:
-	draw_rect(rect, fundo_c)
-	draw_rect(rect, Color(frente.r, frente.g, frente.b, 0.5), false, 2.0)
-	_texto_cabendo(texto, rect.position.y + rect.size.y * 0.66, 17, frente, rect.size.x - 20.0, rect.position.x + 10.0)
+func _pill(rect: Rect2, texto: String, cor: Color) -> void:
+	draw_rect(Rect2(rect.position + Vector2(0, 3.0), rect.size), Paleta.SOMBRA)
+	draw_rect(rect, cor)
+	_texto_cabendo(texto, rect.position.y + rect.size.y * 0.66, 18, Paleta.CARTAO, rect.size.x - 20.0, rect.position.x + 10.0)
 
+## Botão: colorido e cheio quando ativo, branco com borda colorida quando
+## não. Num tema claro é o PREENCHIMENTO que marca o estado ligado —
+## borda mais grossa sozinha não se lê de longe.
 func _botao(rect: Rect2, texto: String, ativo: bool, accent: Color, tamanho: int) -> void:
-	var fundo_c := Color(accent.r, accent.g, accent.b, 0.22) if ativo else Color("131f3f")
+	var fundo_c := accent if ativo else Paleta.CARTAO
+	var tinta := Paleta.CARTAO if ativo else Paleta.para_texto(accent)
+	draw_rect(Rect2(rect.position + Vector2(0, 3.0), rect.size), Paleta.SOMBRA)
 	draw_rect(rect, fundo_c)
-	draw_rect(rect, Color(accent.r, accent.g, accent.b, 0.85 if ativo else 0.45), false, 2.0)
+	draw_rect(rect, Color(accent, 0.9), false, 2.0)
 	_texto_cabendo(
-		texto, rect.position.y + rect.size.y * 0.68, tamanho,
-		Color("ffffff") if ativo else accent, rect.size.x - 20.0, rect.position.x + 10.0
+		texto, rect.position.y + rect.size.y * 0.68, tamanho, tinta,
+		rect.size.x - 20.0, rect.position.x + 10.0
 	)
 
-func _stat_card(rect: Rect2, rotulo: String, valor: String, accent: Color, alpha: float) -> void:
-	_panel(rect, Color(0.04, 0.07, 0.16, 0.78 * alpha), Color(accent.r, accent.g, accent.b, 0.3 * alpha))
-	_texto(rotulo, rect.position.y + 46.0, 16, Color(0.56, 0.63, 0.78, alpha), HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x)
-	_texto_cabendo(valor, rect.position.y + 104.0, 40, Color(accent.r, accent.g, accent.b, alpha), rect.size.x - 24.0, rect.position.x + 12.0)
+## Cartão de número, com ícone. O ícone é o que deixa o cartão legível de
+## relance: a três metros, a pessoa reconhece o troféu antes de conseguir
+## ler "RECORDE".
+func _stat_card(rect: Rect2, rotulo: String, valor: String, accent: Color, icone: String, alpha: float) -> void:
+	_cartao(rect, Paleta.CARTAO, Paleta.CARTAO_BORDA, alpha, 2.0)
+	# Tarja colorida no topo: identifica o cartão sem pintá-lo inteiro.
+	draw_rect(Rect2(rect.position, Vector2(rect.size.x, 6.0)), Color(accent, alpha))
+	_icone(icone, rect.position + Vector2(rect.size.x * 0.5, 42.0), 17.0, Color(Paleta.para_texto(accent), alpha))
+	_texto(rotulo, rect.position.y + 74.0, 15, Color(Paleta.TINTA_FRACA, alpha), HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x)
+	_texto_cabendo(valor, rect.position.y + 118.0, 38, Color(Paleta.TINTA, alpha), rect.size.x - 24.0, rect.position.x + 12.0)
+
+## Despacha o ícone pelo nome. Um `match` num lugar só evita que cada
+## chamada precise saber de qual arquivo o desenho vem.
+func _icone(nome: String, centro: Vector2, raio: float, cor: Color) -> void:
+	match nome:
+		"trofeu":
+			Icones.trofeu(self, centro, raio, cor)
+		"luva":
+			Icones.luva(self, centro, raio, cor)
+		"ficha":
+			Icones.ficha(self, centro, raio, cor)
+		"raio":
+			Icones.raio_eletrico(self, centro, raio, cor)
+		"alvo":
+			Icones.alvo(self, centro, raio, cor)
+		"botao":
+			Icones.botao(self, centro, raio, cor)
+		"estrela":
+			Icones.estrela(self, centro, raio, cor)
 
 # ---------------------------------------------------------------- texto
 ## Todo texto da tela passa por aqui. `y` é a LINHA DE BASE, que é como o

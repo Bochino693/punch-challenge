@@ -1,12 +1,22 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="bg" cx="50%" cy="42%" r="70%"><stop stop-color="#172459"/><stop offset="1" stop-color="#050816"/></radialGradient>
-    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#31f6ff"/><stop offset=".52" stop-color="#7957ff"/><stop offset="1" stop-color="#ff2f8b"/></linearGradient>
-    <filter id="glow"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-  </defs>
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)" stroke="#263675" stroke-width="8"/>
-  <circle cx="256" cy="256" r="172" fill="none" stroke="url(#neon)" stroke-width="12" opacity=".8" filter="url(#glow)"/>
-  <path d="M167 292c-18-8-27-25-22-43l15-52c4-14 18-22 32-18l7 2 8-29c4-15 20-23 34-18 9 3 15 11 17 20 7-8 18-11 28-8 12 4 20 15 19 27 8-6 18-8 27-4 14 5 22 20 17 34l-5 16c9-5 20-6 30-1 16 7 22 26 14 42l-42 83c-12 24-37 39-64 39h-38c-21 0-42-9-56-25l-29-32c-13-14-9-37 8-47 13-8 30-6 41 5l17 16 10-35-47-13z" fill="#f5f8ff" stroke="url(#neon)" stroke-width="9" stroke-linejoin="round"/>
-  <path d="M198 320h126" stroke="#111939" stroke-width="13" stroke-linecap="round"/>
+  <!-- Punch Challenge — Lazer & Sport. Tema claro: placa creme com
+       moldura marinho, luva vermelha e raios de impacto em âmbar. -->
+  <rect x="14" y="14" width="484" height="484" rx="112" fill="#1c3566"/>
+  <rect x="34" y="34" width="444" height="444" rx="94" fill="#fff8ec"/>
+  <g stroke="#f2a007" stroke-width="18" stroke-linecap="round">
+    <path d="M311 148l22-42M201 148l-22-42M375 214l43-22M137 214l-43-22M363 330l43 22M149 330l-43 22M311 396l22 42M201 396l-22 42"/>
+  </g>
+  <g>
+    <circle cx="271" cy="223" r="111" fill="#1c3566"/>
+    <circle cx="169" cy="265" r="60" fill="#1c3566"/>
+    <rect x="171" y="202" width="188" height="99" rx="30" fill="#1c3566"/>
+    <rect x="205" y="283" width="135" height="105" rx="30" fill="#1c3566"/>
+    <circle cx="271" cy="223" r="96" fill="#e63950"/>
+    <circle cx="169" cy="265" r="45" fill="#e63950"/>
+    <rect x="186" y="217" width="158" height="69" rx="24" fill="#e63950"/>
+    <rect x="220" y="298" width="105" height="75" rx="24" fill="#e63950"/>
+  </g>
+  <g stroke="#ffffff" stroke-width="17" stroke-linecap="round">
+    <path d="M220 229h87"/><path d="M226 325h57"/>
+  </g>
 </svg>
-

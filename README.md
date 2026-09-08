@@ -26,6 +26,29 @@ Para testar no PC do escritório, sem girar o monitor, a janela abre em
 540 × 960 (`window_width_override` no `project.godot`) — a proporção é a
 mesma, só menor.
 
+### Tema claro
+
+A máquina trabalha num salão de festas iluminado, no meio de infláveis e
+mesas de aniversário. **Tela escura ali parece monitor desligado**, e o
+preto engole justamente o vermelho da marca da casa, que é o que precisa
+aparecer do outro lado do corredor. Então o jogo é claro: céu em degradê,
+piso em perspectiva, refletor quente sobre o saco, e as peças são cartões
+brancos com sombra e tinta escura em cima.
+
+Todas as cores moram em `scripts/paleta.gd`. Fundo, saco, medidor,
+moldura e textos leem de lá, então o tema é uma coisa só — mudar a cara
+do jogo é mexer num arquivo, e não caçar hexadecimal em seis.
+
+Dois detalhes que só existem porque o tema é claro:
+
+- **Lâmpada em vez de ponto de luz.** Um LED desenhado como brilho
+  difuso some num fundo claro. Cada bulbo tem corpo pintado e aro
+  escuro, então a apagada também se vê — e é a fieira inteira que faz o
+  olho ler "letreiro".
+- **Clarão em âmbar, com as bordas escurecendo.** Lavar a tela de branco
+  não funciona sobre quase-branco. O golpe acende em âmbar e escurece as
+  bordas ao mesmo tempo: o que o olho lê como flash é o contraste.
+
 ### Como a tela se organiza
 
 A tela é dividida em **bandas horizontais fixas**, declaradas no topo de
@@ -65,6 +88,14 @@ modo livre, START entra direto.
 **A janela do soco é de oito segundos**, mostrada por uma barra que
 esvazia e fica vermelha no fim — sem número para ninguém precisar ler.
 
+**Carregando, o visor mostra o VALOR EXATO.** Enquanto a barra de espaço
+está pressionada, o número grande na tela e a coluna do medidor mostram
+quantos pontos o golpe vale *se soltar agora* — não a fração do tempo
+segurado. A conversão de tempo em pontos é uma curva, então uma barra
+proporcional ao tempo mostraria 60 % quando o golpe valeria 640. É a
+mesma chamada de `GameDef.pontos_da_carga` que o placar usa depois, e
+por isso o número prometido e o número pago não têm como divergir.
+
 **O resultado tem três faixas**, e é isso que faz o cliente jogar de novo:
 
 | Faixa | Padrão | O que a tela faz |
@@ -94,6 +125,13 @@ momento pelo qual o cliente pagou.
   a 20° — o saco reage ao soco sem sair do enquadramento.
 - Medidor de potência com escala numerada, as três zonas coloridas da
   máquina e o traço do recorde da casa.
+- Tema claro inteiro num arquivo só (`scripts/paleta.gd`).
+- Ícones desenhados em código (`scripts/icones.gd`): troféu, luva, ficha,
+  raio, alvo, botão e estrela. Sem arquivo de imagem — não somem se
+  faltar um PNG, não serrilham em outra resolução e mudam de cor junto
+  com a faixa do golpe.
+- A marca da casa montada como letreiro de parque: placa creme, moldura
+  marinho e lâmpadas correndo em volta.
 - Contagem regressiva animada `3, 2, 1` e janela de oito segundos para o golpe.
 - Pontuação de potência de 0 a 999 baseada na velocidade medida.
 - Sete vereditos, distribuídos pelas três faixas ajustáveis.
@@ -183,9 +221,10 @@ desça.
 ## Teste sem Arduino
 
 Durante a janela do soco, **segure a barra de espaço para carregar e
-solte para socar**: quanto mais tempo segura, mais forte o golpe. Fora
-da janela, a barra de espaço faz o papel do START. `C` adiciona crédito
-e `F9` abre a Central Técnica.
+solte para socar**: quanto mais tempo segura, mais forte o golpe. O
+número grande na tela mostra, a cada instante, exatamente quantos pontos
+sairão se você soltar naquele momento. Fora da janela, a barra de espaço
+faz o papel do START. `C` adiciona crédito e `F9` abre a Central Técnica.
 
 Essas instruções só aparecem no rodapé **quando o sensor não está
 conectado** — ou seja, na bancada de montagem. Com o Arduino no lugar, o
@@ -212,6 +251,17 @@ de mexer no traçado.
 O preset já está incluído. No Godot, instale os templates de exportação e
 use **Projeto → Exportar → Windows Desktop**. O executável será criado em
 `build/PunchChallenge.exe` com o pacote incorporado.
+
+## Refazer o ícone do aplicativo
+
+```
+python3 tools/gerar_icone.py
+```
+
+Redesenha `assets/icon.png` (512 × 512) a partir da mesma silhueta de
+luva que `scripts/icones.gd` usa no jogo — a luva da barra de tarefas e
+a luva do cartão de PARTIDAS são reconhecidamente a mesma coisa. Só
+depende do Python padrão; não há dependência de imagem para instalar.
 
 ## Documentação
 
