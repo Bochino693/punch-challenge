@@ -29,19 +29,19 @@ script = ExtResource("2_fundo")
 [node name="Saco" type="Control" parent="."]
 z_index = -1
 layout_mode = 0
-offset_left = 290.0
-offset_top = 162.0
-offset_right = 750.0
-offset_bottom = 1032.0
+offset_left = 250.0
+offset_top = 236.0
+offset_right = 710.0
+offset_bottom = 1136.0
 script = ExtResource("3_saco")
 
 [node name="Medidor" type="Control" parent="."]
 z_index = -1
 layout_mode = 0
-offset_left = 826.0
-offset_top = 300.0
-offset_right = 1020.0
-offset_bottom = 1032.0
+offset_left = 790.0
+offset_top = 360.0
+offset_right = 984.0
+offset_bottom = 1136.0
 script = ExtResource("4_medidor")
 
 [node name="Moldura" type="Control" parent="."]

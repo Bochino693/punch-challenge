@@ -59,10 +59,10 @@ static func _digito(
 	var t := h * 0.155             ## espessura do traço
 	var folga := t * 0.30          ## respiro entre dois segmentos vizinhos
 	var meio := canto.y + h * 0.5
-	# O fantasma tem de existir e NÃO competir. A 0.13 o traço apagado do
-	# 6 fazia o número ler como 8; a 0.09 o painel continua parecendo um
-	# painel e o algarismo continua sendo um só.
-	var apagado := Color(cor, 0.09)
+	# O fantasma tem de existir e NÃO competir. Quanto mais escuro o vidro
+	# atrás, mais o traço apagado salta: no tema claro 0.09 bastava, no
+	# vermelho escuro o mesmo valor fazia o 1 ler como 8.
+	var apagado := Color(cor, 0.055)
 
 	for seg: String in ["a", "b", "c", "d", "e", "f", "g"]:
 		var aceso: bool = ligados.contains(seg)

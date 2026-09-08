@@ -342,7 +342,11 @@ func _processar_armado(delta: float) -> void:
 		# distância, e não a nota.
 		saco.set_carga(carga_tempo / ScoreCurve.CHARGE_MAX_SECONDS)
 	if armed_left <= 0.0:
+		# A janela fechou sem soco. Precisa de som: uma rodada que acaba
+		# em silêncio deixa a pessoa achando que a máquina travou, e ela
+		# fica esperando em vez de apertar START de novo.
 		_cancelar_carga()
+		sons.play("error", -4.0)
 		_entrar_em_abertura()
 		_show_notice("TEMPO ESGOTADO — PRESSIONE START")
 
@@ -1006,11 +1010,15 @@ func _salvar() -> void:
 # DESENHO
 # ======================================================================
 func _draw() -> void:
-	fundo.visible = false
+	# O PALCO APARECE NA JANELA DO SOCO, E SÓ NELA. É o único momento em
+	# que a pessoa está olhando para o saco de verdade; na pose quem manda
+	# é a câmera, e no resultado é o anel do placar — os três disputariam
+	# o mesmo espaço se ficassem juntos.
+	var no_palco := state == GameDef.State.ARMED and not central_aberta
+	fundo.visible = true
 	moldura.visible = false
-	saco.visible = false
-	medidor.visible = false
-	_draw_show_background()
+	saco.visible = no_palco
+	medidor.visible = no_palco
 	# O TREMOR SACODE A TELA INTEIRA: um deslocamento só, antes de tudo.
 	_deslocamento = Vector2.ZERO
 	if tremor > 0.1:
@@ -1161,7 +1169,7 @@ func _pagina_recordes(alpha: float) -> void:
 
 ## Página 3 — os três passos, do tamanho de quem lê de longe.
 func _pagina_como_jogar(alpha: float) -> void:
-	_texto_arcade("COMO JOGAR", 320.0, 62, Color(Paleta.MARINHO, alpha), LARGURA_UTIL)
+	_texto_arcade("COMO JOGAR", 392.0, 62, Color(Paleta.CIANO, alpha), LARGURA_UTIL)
 	var passos := [
 		["ficha", "INSIRA A FICHA" if game_mode == "credit" else "MÁQUINA LIBERADA", Paleta.ROSA],
 		["botao", "APERTE START", Paleta.VERDE],
@@ -1261,42 +1269,91 @@ func _draw_partida() -> void:
 				_texto("FOTO PRONTA" if not result_photo_path.is_empty() else "SEM CÂMERA • VAMOS JOGAR", 1390.0, 32, Paleta.CIANO)
 				_texto("PREPARE O SOCO", 1500.0, 46, Color.WHITE)
 		GameDef.State.ARMED:
-			_texto_arcade("SOQUE", 730.0, 170, Color.WHITE, LARGURA_UTIL)
-			_texto_arcade("AGORA!", 930.0, 170, Paleta.CIANO, LARGURA_UTIL)
-			var energy := clampf(carga_tempo / ScoreCurve.CHARGE_MAX_SECONDS, 0.0, 1.0)
-			for i in range(12):
-				var lit := float(i) / 12.0 <= energy
-				var y := 1220.0 - float(i) * 24.0
-				draw_line(Vector2(95, y), Vector2(145, y - 22), Color(Paleta.CIANO, 0.9 if lit else 0.13), 8.0, true)
-				draw_line(Vector2(935, y - 22), Vector2(985, y), Color(Paleta.ROSA, 0.9 if lit else 0.13), 8.0, true)
-			if carga_tempo >= 0.0:
-				_texto("SOLTE!", 1400.0, 58, Paleta.AMBAR)
-			elif not _sensor_ligado():
-				_texto("SEGURE E SOLTE ESPAÇO", 1400.0, 28, Paleta.CIANO)
-			var remaining := clampf(armed_left / GameDef.JANELA_DO_SOCO, 0.0, 1.0)
-			draw_rect(Rect2(220, 1580, 640, 6), Color("5c2530"))
-			draw_rect(Rect2(220, 1580, 640 * remaining, 6), Paleta.CIANO)
+			_draw_janela_do_soco()
 		GameDef.State.MEASURING, GameDef.State.RESULT:
 			_draw_score_hero()
+
+## A JANELA DO SOCO. O saco e o medidor são desenhados pelos nós filhos,
+## atrás desta camada; aqui entram só as letras, e elas ficam ABAIXO do
+## palco de propósito — quem está com o punho erguido olha para o saco,
+## não para o texto, e o texto que cobre o saco só atrapalha a mira.
+func _draw_janela_do_soco() -> void:
+	var carregando := carga_tempo >= 0.0
+	var restante := clampf(armed_left / GameDef.JANELA_DO_SOCO, 0.0, 1.0)
+
+	if carregando:
+		# CARREGANDO: o número exato que sai se soltar agora, no mesmo
+		# formato em que ele vai aparecer no resultado.
+		var cor := GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+		_texto_arcade("%03d" % carga_pontos, 1310.0, 128, cor, LARGURA_UTIL)
+		_texto("PONTOS SE SOLTAR AGORA", 1362.0, 26, Color.WHITE)
+		var piscada := 0.6 + 0.4 * sin(animation_time * 9.0)
+		_texto_arcade("SOLTE!", 1452.0, 66, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
+	else:
+		_texto_arcade("SOQUE AGORA!", 1300.0, 104, Color.WHITE, LARGURA_UTIL)
+		var dica := "ACERTE O ALVO COM FORÇA" if _sensor_ligado() \
+			else "SEGURE E SOLTE ESPAÇO"
+		_texto(dica, 1370.0, 28, Paleta.CIANO)
+
+	# O relógio dos oito segundos: esvazia da direita e vira vermelho no
+	# fim, sem número para ninguém precisar ler.
+	var trilho := Rect2(220, 1470, 640, 16)
+	draw_rect(trilho, Color("5c2530"))
+	draw_rect(
+		Rect2(trilho.position, Vector2(trilho.size.x * restante, trilho.size.y)),
+		Paleta.CIANO if restante > 0.35 else Paleta.VERMELHO
+	)
+	draw_rect(trilho, Color(Paleta.AMBAR, 0.5), false, 2.0)
 
 func _draw_show_background() -> void:
 	ArcadeStage.background(self, animation_time)
 
+## A ABERTURA GIRA EM TRÊS CAPÍTULOS.
+##
+## Uma máquina de fliperama parada não fica repetindo o mesmo cartaz: ela
+## conta o jogo em partes, e é o rodízio que segura quem passa no
+## corredor por tempo suficiente para decidir jogar. A marca, os melhores
+## da casa e como jogar — e, FIXOS nos três, o convite e os créditos,
+## porque um botão que muda de lugar a cada oito segundos é um botão que
+## ninguém acha.
+const ABERTURA_CAPITULOS := 3
+const ABERTURA_DURACAO := 8.0
+
 func _draw_show_idle() -> void:
 	_texto("LAZER & SPORT", 220.0, 28, Paleta.CIANO)
-	if int(state_time / 8.0) % 2 == 1 and not ranking.is_empty():
-		_pagina_recordes(1.0)
-	else:
-		ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0)
-		_texto_arcade("PUNCH", 910.0, 144, Color.WHITE, LARGURA_UTIL)
-		_texto_arcade("CHALLENGE", 1010.0, 80, Paleta.AMBAR, LARGURA_UTIL)
-		_texto("QUAL É A SUA FORÇA?", 1120.0, 32, Color.WHITE)
-		_texto("RECORDE DA CASA", 1270.0, 24, Color("d8b6a6"))
-		_texto("%03d" % _melhor(), 1400.0, 98, Paleta.AMBAR)
+	var capitulo := int(state_time / ABERTURA_DURACAO) % ABERTURA_CAPITULOS
+	# Cada capítulo entra com o seu próprio esmaecer; sem isso só o
+	# primeiro teria entrada e os outros dariam um salto seco.
+	var entrada := ease(clampf(fmod(state_time, ABERTURA_DURACAO) / 0.5, 0.0, 1.0), 0.35)
+	match capitulo:
+		1:
+			_pagina_recordes(entrada)
+		2:
+			_pagina_como_jogar(entrada)
+		_:
+			_capitulo_da_marca(entrada)
+	_pontos_do_capitulo(capitulo)
 	var pulse := 0.8 + 0.2 * sin(animation_time * 2.6)
 	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), 1.0, 3.0)
 	_texto("PRESSIONE START", 1635.0, 46, Color.WHITE)
 	_texto("JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits, 1740.0, 26, Paleta.CIANO)
+
+func _capitulo_da_marca(alpha: float) -> void:
+	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0, alpha)
+	_texto_arcade("PUNCH", 910.0, 144, Color(Color.WHITE, alpha), LARGURA_UTIL)
+	_texto_arcade("CHALLENGE", 1010.0, 80, Color(Paleta.AMBAR, alpha), LARGURA_UTIL)
+	_texto("QUAL É A SUA FORÇA?", 1120.0, 32, Color(Color.WHITE, alpha))
+	_texto("RECORDE DA CASA", 1270.0, 24, Color(Color("d8b6a6"), alpha))
+	_texto("%03d" % _melhor(), 1400.0, 98, Color(Paleta.AMBAR, alpha))
+
+## Quantos capítulos existem e em qual estamos. Sem isso o rodízio parece
+## a tela trocando sozinha por defeito.
+func _pontos_do_capitulo(capitulo: int) -> void:
+	var largura := float(ABERTURA_CAPITULOS) * 30.0
+	for i in range(ABERTURA_CAPITULOS):
+		var atual := i == capitulo
+		var centro := Vector2(540.0 - largura * 0.5 + 15.0 + i * 30.0, 1500.0)
+		draw_circle(centro, 8.0 if atual else 5.0, Paleta.AMBAR if atual else Color("6d2835"))
 
 func _draw_score_hero() -> void:
 	var center := Vector2(540, 930)
@@ -1313,7 +1370,14 @@ func _draw_score_hero() -> void:
 		draw_arc(center, 347, angle, angle + 0.065, 5, color if lit else Color("57212c"), 14.0, true)
 	draw_arc(center, 302, animation_time * 0.5, animation_time * 0.5 + 1.2, 64, Color(color, 0.55), 2.0, true)
 	_texto("IMPACTO" if measuring else ("SUA PONTUAÇÃO" if verdict_time >= 0.0 else "CALCULANDO"), 785.0, 25, color)
-	_texto("—" if measuring else "%03d" % int(round(displayed_score)), 1010.0, 178, Color.WHITE)
+	# VISOR DE SETE SEGMENTOS, e não texto. Numa máquina de fliperama o
+	# placar é um painel de LED atrás de um vidro, e o que o olho
+	# reconhece não é o formato do algarismo: é o SEGMENTO APAGADO, que
+	# continua visível atrás do número. Nenhuma fonte dá isso.
+	VisorLed.desenhar(
+		self, "---" if measuring else "%03d" % int(round(displayed_score)),
+		center + Vector2(0.0, 20.0), 168.0, Color.WHITE if not measuring else color
+	)
 	if verdict_time >= 0.0:
 		_texto("PONTOS", 1110.0, 26, color)
 		var title := "%dº LUGAR" % posicao_no_ranking if posicao_no_ranking > 0 else "BOM SOCO!"
@@ -1431,14 +1495,24 @@ func _draw_ranking_reveal() -> void:
 	_texto_arcade("TOP 20", 220.0, 110, Paleta.CIANO, LARGURA_UTIL)
 	var title := "%dº LUGAR • VOCÊ ENTROU!" % posicao_no_ranking if posicao_no_ranking > 0 else "TENTE SUPERAR ESSAS MARCAS"
 	_texto_cabendo(title, 312.0, 38, Paleta.AMBAR, LARGURA_UTIL)
-	for i in range(ranking.size()):
+	# AS VINTE VAGAS, e não só as ocupadas. Numa máquina nova a lista tem
+	# uma linha e dezenove buracos; desenhando só o que existe, a tela
+	# vira um cartão solto num vazio preto. Desenhando a vaga aberta, o
+	# mesmo vazio passa a dizer "sobrou lugar para você".
+	for i in range(RANKING_TAMANHO):
 		var y := 430.0 + float(i) * 164.0 - offset
 		if y < 425.0 or y > 1150.0:
 			continue
+		var vazia := i >= ranking.size()
 		var selected := posicao_no_ranking == i + 1
 		var color := Paleta.AMBAR if selected else _cor_da_posicao(i + 1)
 		var shift := (1.0 - eased) * (80.0 + float(i % 5) * 30.0)
 		var card := Rect2(90.0 + shift, y, 900.0, 144.0)
+		if vazia:
+			_cartao(card, Color("1c060c"), Color("4a1420"), 1.0, 1.5)
+			_texto("%02d" % (i + 1), y + 91.0, 45, Color("4a1420"), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
+			_texto("VAGA ABERTA", y + 91.0, 30, Color("6d2835"), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
+			continue
 		_cartao(card, Color("b21029") if selected else Color("300b16"), color, 1.0, 4.0 if selected else 1.5)
 		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
 		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
@@ -1867,17 +1941,29 @@ func _draw_texture_cover(texture: Texture2D, rect: Rect2, alpha: float, mirror :
 	else:
 		draw_texture_rect_region(texture, rect, source, Color(1, 1, 1, alpha))
 
+## O LUGAR DA FOTO QUE AINDA NÃO EXISTE.
+##
+## Um círculo amarelo sobre um trapézio roxo não lê como pessoa: lê como
+## erro de desenho, e ainda por cima em duas cores que não são do tema.
+## Aqui é uma silhueta de ombros e cabeça, na cor da moldura, com a
+## mira de enquadramento por cima — a mesma que uma câmera mostra.
+## Assim o quadro vazio diz "é aqui que o seu rosto vai aparecer".
 func _draw_avatar(rect: Rect2, alpha: float) -> void:
-	draw_rect(rect, Color(Paleta.MARINHO, 0.90 * alpha))
+	draw_rect(rect, Color("1c060c", 0.94 * alpha))
 	var center := rect.get_center()
 	var unit := minf(rect.size.x, rect.size.y)
-	draw_circle(center - Vector2(0.0, unit * 0.14), unit * 0.15, Color(Paleta.CIANO, alpha))
-	draw_colored_polygon(PackedVector2Array([
-		center + Vector2(-unit * 0.30, unit * 0.38),
-		center + Vector2(-unit * 0.20, unit * 0.08),
-		center + Vector2(unit * 0.20, unit * 0.08),
-		center + Vector2(unit * 0.30, unit * 0.38),
-	]), Color(Paleta.ROXO, alpha))
+	var tom := Color("7a2a38", alpha)
+
+	Icones.avatar(self, center + Vector2(0.0, unit * 0.06), unit * 0.30, tom)
+
+	# Cantoneiras de enquadramento, como as de um visor de câmera.
+	var margem := unit * 0.10
+	var braco := unit * 0.14
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			var canto := center + Vector2(sx * (rect.size.x * 0.5 - margem), sy * (rect.size.y * 0.5 - margem))
+			draw_line(canto, canto - Vector2(sx * braco, 0.0), Color(Paleta.AMBAR, 0.55 * alpha), 4.0, true)
+			draw_line(canto, canto - Vector2(0.0, sy * braco), Color(Paleta.AMBAR, 0.55 * alpha), 4.0, true)
 
 func _draw_player_photo(rect: Rect2, path: String, alpha: float) -> void:
 	var texture := _photo_texture(path)

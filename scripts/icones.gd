@@ -129,6 +129,20 @@ static func estrela(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) ->
 		pontos.append(centro + Vector2(cos(a), sin(a)) * r)
 	ci.draw_colored_polygon(pontos, cor)
 
+## Boneco — o lugar da foto de quem ainda não foi fotografado. Sem ele o
+## quadro sem foto vira um buraco, e buraco parece defeito, não "vaga".
+static func avatar(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
+	var r := raio
+	ci.draw_circle(centro + Vector2(0.0, -r * 0.40), r * 0.40, cor)
+	# Ombros: meia elipse cortada na altura do queixo.
+	var ombros := PackedVector2Array()
+	for i in range(21):
+		var a := PI + float(i) / 20.0 * PI
+		ombros.append(centro + Vector2(cos(a) * r * 0.80, r * 0.66 + sin(a) * r * 0.56))
+	ombros.append(centro + Vector2(r * 0.80, r * 0.80))
+	ombros.append(centro + Vector2(-r * 0.80, r * 0.80))
+	ci.draw_colored_polygon(ombros, cor)
+
 ## Alvo — onde o soco tem de chegar.
 static func alvo(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
 	ci.draw_arc(centro, raio * 0.82, 0.0, TAU, 44, cor, raio * 0.18, true)
