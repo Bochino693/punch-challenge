@@ -122,10 +122,10 @@ const BOTOES_SIMPLES := {
 	"instalar_camera": Rect2(570, 920, 400, 56),
 	"testar_som": Rect2(300, 1498, 480, 60),
 	# --- página DADOS
-	"zerar": Rect2(110, 850, 207, 60),
-	"zerar_stats": Rect2(327, 850, 207, 60),
-	"zerar_ranking": Rect2(544, 850, 207, 60),
-	"reconectar": Rect2(761, 850, 209, 60),
+	"zerar": Rect2(110, 1064, 207, 60),
+	"zerar_stats": Rect2(327, 1064, 207, 60),
+	"zerar_ranking": Rect2(544, 1064, 207, 60),
+	"reconectar": Rect2(761, 1064, 209, 60),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -375,6 +375,9 @@ var abertura_chegada := 1.0
 var _photo_cache: Dictionary = {}
 
 var fx := PunchFX.new()
+## O VIGIA DO RITMO. Mede o quadro e, quando a máquina não dá conta,
+## manda os efeitos gastarem menos — sozinho, sem ninguém configurar.
+var desempenho := Desempenho.new()
 ## Deslocamento do tremor no quadro atual. Fica guardado porque o texto
 ## curvo troca a transformação do canvas e precisa devolvê-la exatamente
 ## como estava — senão o tremor some do resto da tela a partir dali.
@@ -401,6 +404,7 @@ var fonte: Font        ## Bungee: o cartaz.
 var fonte_texto: Font  ## Saira Condensed: a leitura.
 var logo: Texture2D = null
 
+@onready var letreiro_do_nome: Letreiro = $Letreiro
 @onready var fundo: PunchBackground = $Fundo
 @onready var moldura: LedFrame = $Moldura
 @onready var sons: AudioBank = $Audio
@@ -414,6 +418,8 @@ func _ready() -> void:
 	fonte_texto = fonte
 	if ResourceLoader.exists("res://assets/fonts/SairaCondensed-ExtraBold.ttf"):
 		fonte_texto = load("res://assets/fonts/SairaCondensed-ExtraBold.ttf")
+	letreiro_do_nome.fonte = fonte
+	fx.vigia = desempenho
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
@@ -503,6 +509,7 @@ func _process(delta: float) -> void:
 		hitstop_left = maxf(0.0, hitstop_left - delta)
 		queue_redraw()
 		return
+	desempenho.medir(delta)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
 		zoom_impacto = 1.0
@@ -1862,6 +1869,11 @@ func _iniciar_transicao() -> void:
 func _draw() -> void:
 	fundo.visible = true
 	moldura.visible = false
+	# O NOME COMEÇA ESCONDIDO A CADA QUADRO. Quem quiser mostrá-lo diz
+	# isso durante este desenho; sem esta linha, o letreiro ficaria na
+	# tela depois que a abertura sai, porque o nó do shader é desenhado
+	# depois deste e não sabe em que estado o jogo está.
+	letreiro_do_nome.esconder()
 	# TREMOR E ZOOM SACODEM A TELA INTEIRA: uma transformação só, antes de
 	# tudo. O zoom cresce a partir do PONTO DO SOCO e não do centro da
 	# tela — crescer pelo centro afastaria a imagem justamente do lugar
@@ -2208,11 +2220,40 @@ func _draw_show_idle() -> void:
 
 func _capitulo_da_marca(alpha: float) -> void:
 	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0, alpha)
-	_texto_arcade("PUNCH", 910.0, 144, Color(Color.WHITE, alpha), LARGURA_UTIL)
-	_texto_arcade("CHALLENGE", 1010.0, 80, Color(Paleta.AMBAR, alpha), LARGURA_UTIL)
+	# O NOME É DESENHADO PELO NÓ DO SHADER, e não aqui. Ele continua no
+	# mesmo lugar, no mesmo corpo e com a mesma entrada esmaecida — o que
+	# muda é quem passa a tinta, porque só um nó pode carregar material.
+	_nome_do_jogo(alpha)
 	_texto("QUAL É A SUA FORÇA?", 1120.0, 32, Color(Color.WHITE, alpha))
 	_texto("RECORDE DA CASA", 1270.0, 24, Color(Color("d8b6a6"), alpha))
 	_texto("%04d" % _melhor(), 1400.0, 98, Color(Paleta.AMBAR, alpha))
+
+## ENTREGA O NOME AO NÓ QUE TEM O SHADER.
+##
+## O reflexo que corre dentro das letras precisa de um material, material
+## é propriedade do nó, e o resto da tela é desenhado à mão num Control
+## só — pôr o shader ali aplicaria o brilho ao fundo, aos cartões e ao
+## placar. Então o nome mora num nó próprio, e esta função é a ponte:
+## a tela continua mandando quando, onde e com que opacidade.
+func _nome_do_jogo(alpha: float) -> void:
+	# O NÓ FICA ACIMA DO DESENHO PRINCIPAL — é o que faz o reflexo passar
+	# por cima do letreiro em vez de ficar embaixo do fundo. O preço é
+	# que a Central, a calibração e a cortina de transição, desenhadas
+	# pelo nó de baixo, NÃO cobrem o nome: sem esta guarda, o
+	# "PUNCH CHALLENGE" aparecia atravessado no meio da Central Técnica.
+	if alpha <= 0.01 or central_aberta or calib_ativo or transicao >= 0.0:
+		letreiro_do_nome.esconder()
+		return
+	letreiro_do_nome.mostrar(
+		[
+			{"texto": "PUNCH", "x": 540.0, "y": 910.0, "tamanho": 144, "cor": Color(Color.WHITE, alpha)},
+			{"texto": "CHALLENGE", "x": 540.0, "y": 1010.0, "tamanho": 80, "cor": Color(Paleta.AMBAR, alpha)},
+		],
+		# A faixa atravessa a LARGURA DO NOME, e não a da tela: medida na
+		# tela, o reflexo levaria o mesmo tempo cruzando as letras e o
+		# vazio dos dois lados, e a passagem pareceria travar no meio.
+		190.0, 700.0
+	)
 
 ## Quantos capítulos existem e em qual estamos. Sem isso o rodízio parece
 ## a tela trocando sozinha por defeito.
@@ -2245,10 +2286,22 @@ func _draw_score_hero() -> void:
 		color = GameDef.classificar(result_score)["cor_faixa"] as Color
 	_draw_campo_de_forca(center, color, progress, measuring)
 	_draw_colunas_de_forca(color, progress)
-	for i in range(12):
-		draw_arc(center, 335.0 + float(i) * 3.0, 0, TAU, 192, Color(color, 0.02), 9.0, true)
+	# O HALO DO ANEL, EM TRÊS PASSADAS E NÃO EM DOZE.
+	#
+	# Aqui havia doze anéis de 192 segmentos cada, com alfa 0,02 — três
+	# níveis de tinta em duzentos e cinquenta e cinco, ou seja, cada um
+	# praticamente invisível sozinho. Somados custavam TREZE MIL
+	# triângulos por quadro, que era sessenta por cento de todo o desenho
+	# desta tela. Três anéis mais largos, com o alfa somado, dão o mesmo
+	# brilho por um doze avos do preço.
+	#
+	# E 64 segmentos bastam: num raio de 340 px, a flecha do arco de 64
+	# lados é de quatro décimos de pixel. Os 192 desenhavam três vezes
+	# mais geometria para descrever a mesma circunferência.
+	for i in range(3):
+		draw_arc(center, 337.0 + float(i) * 11.0, 0, TAU, 64, Color(color, 0.075), 13.0, true)
 	draw_circle(center, 326.0, Color("250911"), true, -1.0, true)
-	draw_arc(center, 327, 0, TAU, 192, Color("6d2835"), 4.0, true)
+	draw_arc(center, 327, 0, TAU, 96, Color("6d2835"), 4.0, true)
 	for i in range(60):
 		var angle := float(i) / 60.0 * TAU - PI * 0.5
 		var lit := float(i) / 60.0 <= progress
@@ -2351,8 +2404,15 @@ func _draw_campo_de_forca(centro: Vector2, cor: Color, progresso: float, no_impa
 	var forca := progresso
 	if no_impacto:
 		forca = 1.0 - clampf(state_time / GameDef.IMPACTO_DURACAO, 0.0, 1.0)
-	for i in range(7):
-		draw_circle(centro, 380.0 + float(i) * 64.0, Color(cor, 0.013 * forca), true, -1.0, true)
+	# O CAMPO DE FORÇA, EM TRÊS DISCOS E NÃO EM SETE.
+	#
+	# Cada um destes discos tem raio maior que meia tela: sete deles são
+	# sete telas inteiras pintadas por quadro, com alfa 0,013 — tinta que
+	# ninguém enxerga isolada. Não custa triângulo, custa TAXA DE
+	# PREENCHIMENTO, que é o que falta primeiro num PC de gabinete com
+	# vídeo integrado. Três discos com o alfa somado dão o mesmo halo.
+	for i in range(3):
+		draw_circle(centro, 392.0 + float(i) * 150.0, Color(cor, 0.030 * forca), true, -1.0, true)
 	for i in range(36):
 		var ang := float(i) * TAU / 36.0 + animation_time * 0.22
 		var onda := 0.5 + 0.5 * sin(float(i) * 1.7 - animation_time * 4.0)
@@ -2764,7 +2824,50 @@ func _central_dados() -> void:
 		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 
-	_secao(Rect2(80, 796, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE
+	#
+	# "A animação está travada" é a queixa mais difícil de consertar,
+	# porque quem programa nunca vê: aqui roda liso, e o gabinete tem
+	# outro vídeo, outra TV, outra resolução. Sem número, o conserto vira
+	# palpite. Estas quatro linhas são o número — e é o que se manda para
+	# quem for consertar, em vez de "está travado".
+	_secao(Rect2(80, 796, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
+	var fps := desempenho.fps()
+	var cor_fps := Paleta.VERDE if fps >= 55.0 else (Paleta.AMBAR if fps >= 40.0 else Paleta.VERMELHO)
+	_texto(
+		"%.0f quadros por segundo  •  pior quadro %.1f ms  •  efeitos em %d%%" % [
+			fps, desempenho.pior_ms(), int(round(desempenho.qualidade * 100.0))
+		],
+		858.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto(
+		"%d chamadas de desenho  •  %d primitivas por quadro" % [
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
+		],
+		888.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# A ESCALA DENUNCIA A TELA DEITADA.
+	#
+	# O jogo é 1080x1920 em pé. Numa TV deitada, o Godot encolhe tudo
+	# para caber na altura e sobra tarja preta dos dois lados: a letra
+	# fica com metade dos pixels e a máquina parece de baixa qualidade
+	# sem nada estar errado no jogo. Escala 1,00 é a TV girada certo.
+	var escala := get_window().get_final_transform().get_scale()
+	var aviso := "" if absf(escala.y - 1.0) < 0.02 else "  ← GIRE A TELA NO WINDOWS PARA 1080x1920"
+	_texto(
+		"janela %dx%d  •  escala %.2f%s" % [
+			DisplayServer.window_get_size().x, DisplayServer.window_get_size().y, escala.y, aviso
+		],
+		918.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto(
+		"câmera: %s" % (camera_service.status if camera_service != null else "—"),
+		948.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	_secao(Rect2(80, 1010, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
 	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)

@@ -475,17 +475,15 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 	var t := _janela(time, T_BRILHO, 0.85)
 	if t <= 0.0 or morph > 0.0:
 		return
-	if t < 1.0:
-		var x := lerpf(-420.0, 1500.0, ease(t, 0.6))
-		var alto := 1150.0
-		var baixo := 1450.0
-		for camada in range(3):
-			var meia := 34.0 + float(camada) * 46.0
-			var faixa := PackedVector2Array([
-				Vector2(x - meia + 150.0, alto), Vector2(x + meia + 150.0, alto),
-				Vector2(x + meia - 150.0, baixo), Vector2(x - meia - 150.0, baixo),
-			])
-			Traco.poligono(canvas, faixa, Color(WHITE, 0.16 - float(camada) * 0.045))
+	# A FAIXA RETANGULAR SAIU DAQUI.
+	#
+	# Eram três quadriláteros atravessando a tela na altura do letreiro.
+	# Como o quadrilátero não sabe onde a letra está, a luz aparecia
+	# também no vazio entre as letras e em volta delas: o que se via não
+	# era o nome refletindo, era um retângulo luminoso passando por cima
+	# dele. O reflexo agora acontece DENTRO das letras, no sombreador de
+	# `shaders/brilho_letras.gdshader`, onde a máscara é o próprio glifo.
+	# Aqui fica só a batida do emblema, que nunca foi o problema.
 	# A batida do emblema: um anel que sai dele e se apaga.
 	var batida := _janela(time, T_BRILHO + 0.15, 0.75)
 	if batida > 0.0 and batida < 1.0:

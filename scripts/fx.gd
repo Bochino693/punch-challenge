@@ -17,6 +17,17 @@ extends RefCounted
 ## Teto de partículas vivas. Passando disso, as mais antigas saem.
 const LIMITE := 900
 
+## O VIGIA DO RITMO, ligado por quem cria o efeito.
+##
+## Cada função que solta partícula pergunta a ele quantas realmente
+## soltar. Num PC que está dando conta, todas; num que não está, menos —
+## e a queda acontece onde ninguém repara, em vez de aparecer como
+## animação aos trancos, que é onde todo mundo repara.
+var vigia: Desempenho = null
+
+func _quantas(pedido: int) -> int:
+	return pedido if vigia == null else vigia.quantas(pedido)
+
 var _particulas: Array = []
 var _ondas: Array = []
 
@@ -143,7 +154,7 @@ func onda(centro: Vector2, raio_inicial: float, raio_final: float, cor: Color, e
 
 
 func confete(centro: Vector2, quantidade: int, cores: Array, forca: float = 900.0) -> void:
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		var angulo := randf_range(-PI, 0.0)
 		var velocidade := Vector2(cos(angulo), sin(angulo)) * randf_range(forca * 0.35, forca)
 		_nascer({
@@ -165,7 +176,7 @@ func confete(centro: Vector2, quantidade: int, cores: Array, forca: float = 900.
 ## Cai mais rápido e mais reta do que o confete caía: confete plana no ar,
 ## e planar é o gesto de uma festa de aniversário. Brasa despenca.
 func chuva_de_brasas(largura: float, quantidade: int, cores: Array) -> void:
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		_nascer({
 			"tipo": "brasa",
 			"posicao": Vector2(randf_range(0.0, largura), randf_range(-300.0, -20.0)),
@@ -185,7 +196,7 @@ func chuva_de_brasas(largura: float, quantidade: int, cores: Array) -> void:
 ## Sai do ponto do impacto, e não do alto da tela, porque quem manda na
 ## comemoração é o soco — a origem tem de ser o lugar onde ele aterrissou.
 func explosao(centro: Vector2, quantidade: int, cores: Array, forca: float = 1100.0) -> void:
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		var angulo := randf_range(0.0, TAU)
 		var direcao := Vector2(cos(angulo), sin(angulo))
 		# Achatada na vertical: uma explosão redonda em tela alta some
@@ -207,7 +218,7 @@ func explosao(centro: Vector2, quantidade: int, cores: Array, forca: float = 110
 
 ## Raios saindo do ponto do soco, girando enquanto voam.
 func raios(centro: Vector2, quantidade: int, cor: Color, forca: float = 780.0) -> void:
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		var angulo := randf_range(0.0, TAU)
 		_nascer({
 			"tipo": "raio",
@@ -224,7 +235,7 @@ func raios(centro: Vector2, quantidade: int, cor: Color, forca: float = 780.0) -
 
 
 func faiscas(centro: Vector2, quantidade: int, cor: Color, forca: float = 1000.0) -> void:
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		var angulo := randf_range(0.0, TAU)
 		var tom := cor
 		tom.a = randf_range(0.65, 1.0)
@@ -244,7 +255,7 @@ func faiscas(centro: Vector2, quantidade: int, cor: Color, forca: float = 1000.0
 
 func estilhacos(centro: Vector2, quantidade: int, cor: Color) -> void:
 	## O que cai quando o soco foi fraco: pedaço escuro, pesado, sem brilho.
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		var angulo := randf_range(-PI * 0.85, -PI * 0.15)
 		_nascer({
 			"tipo": "estilhaco",
@@ -261,7 +272,7 @@ func estilhacos(centro: Vector2, quantidade: int, cor: Color) -> void:
 
 
 func poeira(centro: Vector2, quantidade: int, cor: Color, alcance: float = 420.0) -> void:
-	for i in range(quantidade):
+	for i in range(_quantas(quantidade)):
 		var angulo := randf_range(0.0, TAU)
 		_nascer({
 			"tipo": "poeira",

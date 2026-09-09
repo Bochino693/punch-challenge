@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3 uid="uid://j1iigsl0puq5"]
+[gd_scene load_steps=6 format=3 uid="uid://j1iigsl0puq5"]
 
 [ext_resource type="Script" uid="uid://5ua44uvnia2p" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/background.gd" id="2_fundo"]
 [ext_resource type="Script" path="res://scripts/led_frame.gd" id="5_moldura"]
 [ext_resource type="Script" path="res://scripts/audio_bank.gd" id="6_audio"]
+[ext_resource type="Script" path="res://scripts/letreiro.gd" id="7_letreiro"]
 
 [node name="PunchChallenge" type="Control"]
 layout_mode = 3
@@ -33,6 +34,16 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("5_moldura")
+
+[node name="Letreiro" type="Control" parent="."]
+z_index = 2
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("7_letreiro")
 
 [node name="Audio" type="Node" parent="."]
 script = ExtResource("6_audio")
