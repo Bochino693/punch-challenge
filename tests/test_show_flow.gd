@@ -42,6 +42,7 @@ func run() -> void:
 	_test_timeout_devolve_credito()
 	_test_quatro_digitos()
 	_test_bancada_sem_sensor()
+	_test_medico_da_camera()
 
 	jogo.queue_free()
 	await process_frame
@@ -222,3 +223,32 @@ func _test_bancada_sem_sensor() -> void:
 	jogo.simulacao_escolhida = true
 	jogo._on_serial_line("READY,PUNCH_MPU6050,V2")
 	assert(jogo.simulacao_bancada)
+
+# ------------------------------------------- médico da câmera
+## O DIAGNÓSTICO TEM DE AGIR, e não só relatar.
+##
+## Um relatório que exige o técnico repetir à mão o que a máquina acabou
+## de descobrir é meio relatório: achou câmera no índice 2, a máquina
+## passa a usar o índice 2 sozinha.
+func _test_medico_da_camera() -> void:
+	assert(jogo.medico != null)
+	assert(not jogo.medico.rodando)
+	# Ruído de biblioteca não entra no relatório: numa tela de doze
+	# linhas, quatro avisos do OpenCV por índice apagam o que interessa.
+	var limpas: Array = jogo.medico._linhas_de([
+		"[ WARN:0@0.011] global cap.cpp:475 open VIDEOIO(V4L2)",
+		"Python 3.12.3",
+		"",
+		"[ERROR:1] alguma coisa interna",
+	])
+	assert(limpas.size() == 1)
+	assert(str(limpas[0]) == "Python 3.12.3")
+
+	# Achou câmera: a máquina adota o índice e reabre.
+	jogo.camera_service.selected_index = 0
+	# `assign`, e não `=`: `indices` é Array[int] tipado, e atribuir um
+	# literal solto de fora deixa a lista vazia em silêncio.
+	jogo.medico.indices.assign([2])
+	jogo._fim_do_exame()
+	assert(jogo.camera_service.selected_index == 2)
+	jogo.medico.indices.clear()

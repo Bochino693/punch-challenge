@@ -12,9 +12,9 @@ extends RefCounted
 ## NUMERO em um e escreva em NOTA o que mudou. Um carimbo que não sobe
 ## mente, e um carimbo que mente é pior do que carimbo nenhum.
 
-const NUMERO := 22
+const NUMERO := 23
 const DATA := "09/09/2026"
-const NOTA := "barra de volta e instalador da camera"
+const NOTA := "diagnostico da camera dentro do jogo"
 
 ## Rodapé da abertura: cabe em uma linha discreta.
 static func curta() -> String:

@@ -95,8 +95,8 @@ const PASSOS := {
 	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
 	"amin": Rect2(570, 1124, 400, LADO_BOTAO),
-	"vol_musica": Rect2(110, 1020, 400, LADO_BOTAO),
-	"vol_efeitos": Rect2(570, 1020, 400, LADO_BOTAO),
+	"vol_musica": Rect2(110, 1386, 400, LADO_BOTAO),
+	"vol_efeitos": Rect2(570, 1386, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 const BOTOES_SIMPLES := {
@@ -118,8 +118,9 @@ const BOTOES_SIMPLES := {
 	"foto_teste": Rect2(670, 410, 300, 60),
 	"forcar_ponte": Rect2(110, 484, 400, 56),
 	"sondar_camera": Rect2(570, 484, 400, 56),
-	"instalar_camera": Rect2(110, 850, 860, 60),
-	"testar_som": Rect2(300, 1132, 480, 60),
+	"diagnosticar": Rect2(110, 920, 400, 56),
+	"instalar_camera": Rect2(570, 920, 400, 56),
+	"testar_som": Rect2(300, 1498, 480, 60),
 	# --- página DADOS
 	"zerar": Rect2(110, 850, 207, 60),
 	"zerar_stats": Rect2(327, 850, 207, 60),
@@ -141,7 +142,7 @@ const PAGINA_DO_CONTROLE := {
 	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
 	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
-	"forcar_ponte": 2, "sondar_camera": 2, "instalar_camera": 2,
+	"forcar_ponte": 2, "sondar_camera": 2, "instalar_camera": 2, "diagnosticar": 2,
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 }
@@ -332,6 +333,8 @@ var camera_mirrored := true
 ## numa máquina em que o caminho nativo nunca funciona, ligar isso uma
 ## vez tem de valer para sempre.
 var camera_forcar_ponte := false
+## Quem roda os comandos de diagnóstico e publica a resposta na tela.
+var medico: CameraDoctor
 var statistics: Dictionary = {}
 var result_photo_path := ""
 var pose_finished := false
@@ -373,6 +376,9 @@ func _ready() -> void:
 	camera_service.mirrored = camera_mirrored
 	camera_service.forcar_ponte = camera_forcar_ponte
 	add_child(camera_service)
+	medico = CameraDoctor.new()
+	medico.terminou.connect(_fim_do_exame)
+	add_child(medico)
 	# TRÊS PORTAS PARA A MESMA CHAVE, e de propósito: a da Central serve
 	# ao técnico no salão, a variável de ambiente serve à bancada de quem
 	# desenvolve, e o ajuste de projeto serve a uma build feita só para
@@ -1501,8 +1507,10 @@ func _click_central(p: Vector2) -> void:
 			"INDO DIRETO PELA PONTE PYTHON" if camera_forcar_ponte
 			else "TENTANDO O CAMINHO NATIVO PRIMEIRO"
 		)
+	elif _visivel_na_pagina("diagnosticar") and BOTOES_SIMPLES["diagnosticar"].has_point(p):
+		_examinar_camera(false)
 	elif _visivel_na_pagina("instalar_camera") and BOTOES_SIMPLES["instalar_camera"].has_point(p):
-		_show_notice(camera_service.instalar_dependencias())
+		_examinar_camera(true)
 	elif _visivel_na_pagina("sondar_camera") and BOTOES_SIMPLES["sondar_camera"].has_point(p):
 		# PROCURAR DE NOVO, e não só religar: `refresh` zera a desistência
 		# e refaz a enumeração inteira. É o botão de quem acabou de
@@ -2415,7 +2423,7 @@ func _curva_desenhada(rect: Rect2) -> void:
 
 # ------------------------------------------------------------ CÂMERA
 func _central_camera() -> void:
-	_secao(Rect2(80, 350, 920, 470), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
+	_secao(Rect2(80, 350, 920, 500), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
 	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
 	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
 	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
@@ -2425,38 +2433,56 @@ func _central_camera() -> void:
 		camera_forcar_ponte, Paleta.VERDE, 16
 	)
 	_botao(BOTOES_SIMPLES["sondar_camera"], "PROCURAR CÂMERA DE NOVO", false, Paleta.CIANO, 16)
-	var previa := Rect2(340, 560, 400, 230)
+	var previa := Rect2(340, 556, 400, 220)
 	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
 	if camera_service != null and camera_service.available():
 		_draw_texture_cover(camera_service.preview_texture(), previa, 1.0, camera_mirrored)
 	else:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
 	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
-	_texto(cam_status, 812.0, 16, Paleta.TINTA_FRACA)
-	# QUANTAS VEZES A PONTE PRECISOU SER RELIGADA. Uma ponte que
-	# ressuscita o tempo todo é cabo ou porta USB com defeito, não
-	# software — e sem esse número ninguém tem como saber a diferença.
+	_texto(cam_status, 806.0, 16, Paleta.TINTA_FRACA)
 	var religadas := camera_service.reinicios_da_ponte() if camera_service != null else 0
 	if religadas > 0:
 		_texto(
 			"ponte religada %d × nesta sessão — se for muito, troque o cabo ou a porta USB" % religadas,
-			836.0, 14, Paleta.AMBAR
+			830.0, 14, Paleta.AMBAR
 		)
 
-	# O BOTÃO QUE FAZ O QUE A MENSAGEM PEDE. "Instale o OpenCV" é correto
-	# e inútil para quem está na frente do gabinete às onze da noite: o
-	# operador do salão não é quem abre PowerShell.
-	_botao(BOTOES_SIMPLES["instalar_camera"], "INSTALAR / CONSERTAR A CÂMERA (WINDOWS)", false, Paleta.AMBAR, 19)
+	# ---- o relatório, na tela, e não numa janela que abre atrás do jogo
+	_secao(Rect2(80, 866, 920, 420), "DIAGNÓSTICO DA CÂMERA", Paleta.AMBAR)
+	var ocupado := medico != null and medico.rodando
+	_botao(BOTOES_SIMPLES["diagnosticar"], "AGUARDE…" if ocupado else "DIAGNOSTICAR", ocupado, Paleta.CIANO, 18)
+	_botao(BOTOES_SIMPLES["instalar_camera"], "INSTALAR OPENCV", false, Paleta.AMBAR, 18)
+	if medico == null or medico.linhas.is_empty():
+		_texto(
+			"DIAGNOSTICAR confere o Python, o OpenCV e procura a câmera. A resposta aparece aqui.",
+			1010.0, 15, Paleta.TINTA_FRACA
+		)
+		_texto(
+			"INSTALAR OPENCV faz o mesmo e instala o que faltar. Leva 1 a 2 minutos.",
+			1036.0, 15, Paleta.TINTA_FRACA
+		)
+	else:
+		for i in range(medico.linhas.size()):
+			var linha := str(medico.linhas[i])
+			# Aviso em vermelho, resposta comum em creme: quem olha de
+			# relance precisa achar o problema sem ler tudo.
+			var grave := linha == linha.to_upper() and linha.length() > 12
+			_texto(
+				linha, 1000.0 + float(i) * 22.0, 15,
+				Paleta.VERMELHO if grave else Paleta.CREME,
+				HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+			)
+	if medico != null and not medico.indices.is_empty():
+		_texto(
+			"CÂMERAS ENCONTRADAS NOS ÍNDICES: %s" % _lista_de_indices(medico.indices),
+			1256.0, 17, Paleta.VERDE
+		)
 
-	_secao(Rect2(80, 936, 920, 290), "MESA DE SOM", Paleta.VERDE)
+	_secao(Rect2(80, 1302, 920, 290), "MESA DE SOM", Paleta.VERDE)
 	_stepper("vol_musica", "%+.0f dB" % volume_musica, "TRILHA", Paleta.CIANO)
 	_stepper("vol_efeitos", "%+.0f dB" % volume_efeitos, "EFEITOS E VOZ", Paleta.AMBAR)
 	_botao(BOTOES_SIMPLES["testar_som"], "TOCAR SOCO DE TESTE", false, Paleta.VERDE, 19)
-
-	_secao(Rect2(80, 1256, 920, 170), "COMO A FOTO É USADA", Paleta.AMBAR)
-	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 1322.0, 15, Paleta.TINTA_FRACA)
-	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 1348.0, 15, Paleta.TINTA_FRACA)
-	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 1392.0, 18, Paleta.CREME)
 
 # ------------------------------------------------------------- DADOS
 func _central_dados() -> void:
@@ -2485,6 +2511,34 @@ func _central_dados() -> void:
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
 	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
 	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+
+## Os índices achados, em uma linha. Escrito à mão porque um `map` com
+## lambda aqui não deixa o GDScript inferir o tipo, e tipo inferido é o
+## que faz este arquivo compilar rápido.
+func _lista_de_indices(valores: Array) -> String:
+	var partes := PackedStringArray()
+	for v in valores:
+		partes.append(str(v))
+	return ", ".join(partes)
+
+## Manda examinar a instalação da câmera. `instalar` autoriza mexer no
+## sistema; sem ele o exame só olha e conta.
+func _examinar_camera(instalar: bool) -> void:
+	if medico == null or medico.rodando:
+		return
+	medico.diagnosticar(instalar, camera_service.caminho_da_ponte())
+	_show_notice("EXAMINANDO — A RESPOSTA APARECE NA TELA")
+
+## Terminado o exame, a máquina AGE com o que descobriu: se achou câmera
+## num índice, passa a usar aquele índice e reabre. Um relatório que
+## exige o técnico repetir à mão o que a máquina acabou de descobrir é
+## meio relatório.
+func _fim_do_exame() -> void:
+	if medico.indices.is_empty():
+		return
+	camera_service.selected_index = int(medico.indices[0])
+	camera_service.refresh()
+	_show_notice("CÂMERA ENCONTRADA NO ÍNDICE %d — RELIGANDO" % camera_service.selected_index)
 
 ## Quantas fotos existem na pasta do ranking. Serve para o técnico
 ## perceber sobra de arquivo — foto sem dono é disco enchendo à toa.

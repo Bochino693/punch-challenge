@@ -64,6 +64,19 @@ except ImportError:
     raise SystemExit(2)
 
 
+# O OPENCV FALA DEMAIS QUANDO NÃO ACHA CÂMERA.
+#
+# Cada índice que não abre gera três ou quatro linhas de aviso interno
+# ("VIDEOIO(V4L2): backend is generally available..."). Elas não dizem
+# nada a quem está na frente do gabinete e, na tela de diagnóstico do
+# jogo, empurram para fora as linhas que importam. Calamos o registro:
+# quem precisa desse detalhe roda a ponte no terminal.
+try:
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_SILENT)
+except AttributeError:
+    pass
+
+
 # Ordem de tentativa dos back-ends. No Windows, DirectShow abre webcams
 # baratas que o Media Foundation recusa; em algumas outras é o contrário,
 # então vale tentar os dois antes de desistir.
@@ -100,7 +113,14 @@ def sondar(largura: int) -> int:
         if captura is not None:
             w = int(captura.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(captura.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            # DUAS LINHAS: uma para gente, outra para o jogo.
+            #
+            # A da gente tem acento e travessão e muda quando alguém
+            # melhora o texto; a do jogo é `INDICE=n` e não muda nunca.
+            # Fazer o jogo ler a linha bonita é como uma correção de
+            # português quebra a leitura da câmera.
             print(f"câmera {indice}: OK via {nome} — {w}x{h}")
+            print(f"INDICE={indice}")
             achou.append(indice)
             captura.release()
     if not achou:

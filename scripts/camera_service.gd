@@ -361,6 +361,15 @@ func _bridge_frame_counter() -> int:
 func reinicios_da_ponte() -> int:
 	return _bridge_reinicios
 
+## O caminho real do `camera_bridge.py` em disco, materializando-o se
+## preciso. O diagnóstico precisa dele para sondar as câmeras, e numa
+## exportação com PCK embutido o .py não é um arquivo que o Python
+## consiga abrir.
+func caminho_da_ponte() -> String:
+	var data_dir := "user://camera_bridge"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
+	return _materialize_bridge_script(data_dir)
+
 ## RODA O INSTALADOR DA CÂMERA, do próprio jogo.
 ##
 ## Existe porque o operador do salão não é quem abre PowerShell. A
