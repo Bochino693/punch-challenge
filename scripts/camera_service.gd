@@ -110,9 +110,23 @@ func _process(_delta: float) -> void:
 	# câmera.
 	_next_bridge_poll_ms = now + 66
 	if not OS.is_process_running(_bridge_pid):
-		# O PROCESSO MORREU: ressuscita. Antes a máquina só anunciava
-		# "desconectada" e ficava assim até alguém reiniciar o jogo — num
-		# salão, isso é a noite inteira sem foto no ranking.
+		# MORREU SEM NUNCA PUBLICAR NADA? O INTERPRETADOR É QUE ESTÁ
+		# ERRADO, e insistir nele é perder a noite.
+		#
+		# É a assinatura exata do atalho da Microsoft Store: nasce, abre a
+		# loja e morre em menos de um segundo e meio, sem escrever o
+		# arquivo de estado que a ponte de verdade escreve no primeiro
+		# quadro. Riscando o candidato, o próximo (`python3`, `python`)
+		# entra na tentativa seguinte em vez de repetir o mesmo erro seis
+		# vezes e desistir.
+		var viveu := Time.get_ticks_msec() - _bridge_started_ms
+		if _bridge_texture == null and viveu < 2500 and _bridge_status_line().is_empty():
+			_riscar_interpretador(_interpretador_em_teste)
+			status = "PYTHON \"%s\" NÃO SERVIU — TENTANDO OUTRO" % _interpretador_em_teste
+			_interpretador_em_teste = ""
+			_bridge_pid = -1
+			_start_bridge()
+			return
 		_bridge_texture = null
 		_last_image = null
 		_bridge_pid = -1
@@ -411,6 +425,20 @@ func available() -> bool:
 func camera_count() -> int:
 	return CameraServer.get_feed_count()
 
+## A FICHA DA PONTE, numa linha: qual Python, qual índice, qual
+## back-end. Sem ela, "não conecta" continua sendo um mistério — e foi
+## justamente por não mostrar QUAL interpretador estava sendo usado que o
+## defeito do atalho da Microsoft Store passou tanto tempo escondido.
+func ficha_da_ponte() -> String:
+	var quem := _interpretador_em_teste if not _interpretador_em_teste.is_empty() else _proximo_interpretador()
+	if quem.is_empty():
+		quem = "nenhum"
+	var riscados := "" if _riscados.is_empty() else "  •  riscados: %s" % ", ".join(_riscados)
+	return "python %s%s  •  índice %d  •  back-end %s" % [
+		quem, riscados, selected_index,
+		backend_preferido if not backend_preferido.is_empty() else "automático",
+	]
+
 ## POR QUE NÃO SAIU FOTO, em poucas palavras.
 ##
 ## A tela da pose dizia "SEM CÂMERA • VAMOS JOGAR" para tudo: câmera
@@ -527,24 +555,91 @@ func _start_bridge() -> void:
 	if script.is_empty():
 		status = "PONTE DE CÂMERA NÃO ENCONTRADA"
 		return
-	var args := PackedStringArray([script, "--output", _bridge_path, "--camera", str(selected_index)])
+	var args := PackedStringArray()
+	var candidato := _proximo_interpretador()
+	if candidato.is_empty():
+		status = "NENHUM PYTHON SERVIU — F9 E DIAGNOSTICAR"
+		_bridge_desistiu = true
+		return
+	for a in _args_do_interpretador(candidato):
+		args.append(a)
+	args.append(script)
+	args.append("--output")
+	args.append(_bridge_path)
+	args.append("--camera")
+	args.append(str(selected_index))
 	if not backend_preferido.is_empty():
 		args.append("--backend")
 		args.append(backend_preferido)
 	if pattern_mode:
 		args.append("--pattern")
-	# Três nomes de interpretador, porque cada instalação de Windows
-	# expõe um: `python` (loja/PATH), `py` (o lançador oficial) e
-	# `python3` (Linux e macOS).
-	for interpretador in ["python", "python3", "py"]:
-		_bridge_pid = OS.create_process(interpretador, args, false)
-		if _bridge_pid > 0:
-			break
+	_bridge_pid = OS.create_process(candidato, args, false)
 	if _bridge_pid <= 0:
-		status = "PYTHON NÃO ENCONTRADO — VEJA docs/CAMERA.md"
+		# Nem criou processo: este nome não existe nesta máquina. Risca e
+		# tenta o próximo já no mesmo instante.
+		_riscar_interpretador(candidato)
+		_start_bridge()
 		return
+	_interpretador_em_teste = candidato
 	_bridge_started_ms = Time.get_ticks_msec()
 	status = "INICIANDO PONTE DE CÂMERA…"
+
+## O INTERPRETADOR QUE O JOGO VAI USAR — e por que isto virou uma lista
+## com eliminação, em vez de três tentativas em sequência.
+##
+## AQUI ESTAVA O DEFEITO que fazia a sonda achar a câmera e o jogo não
+## mostrar imagem nenhuma.
+##
+## O diagnóstico procura o Python DIREITO: roda cada candidato com
+## `--version` e só aceita quem responder "Python 3". O jogo não fazia
+## nada disso — pedia `python` primeiro e dava por bom qualquer PID
+## maior que zero. No Windows, `python` quase sempre é o ATALHO DA
+## MICROSOFT STORE: ele existe, abre, devolve um PID perfeitamente
+## válido, mostra a loja e morre. Para o jogo isso era "a ponte subiu".
+## Ela morria, o jogo religava, morria de novo, seis vezes, e desistia —
+## enquanto o `py -3` ao lado tinha OpenCV, câmera e tudo funcionando.
+##
+## E o `py` precisa do `-3`, que também nunca era passado.
+##
+## Agora um candidato que morre sem publicar quadro é RISCADO, e o
+## próximo entra. `py` vem primeiro porque é o lançador oficial; o atalho
+## da loja fica por último, onde ele não atrapalha mais ninguém.
+## A lista muda com o sistema. `py` é o lançador do Windows e não existe
+## em mais lugar nenhum: tentá-lo no Linux só produz um erro no registro
+## a cada abertura, e erro no registro que é normal treina quem lê a
+## ignorar os que não são.
+static func _lista_de_interpretadores() -> Array:
+	if OS.get_name() == "Windows":
+		return ["py", "python", "python3"]
+	return ["python3", "python"]
+var _riscados: Array[String] = []
+var _interpretador_em_teste := ""
+## Preenchido pelo diagnóstico quando ele confirma um Python com OpenCV.
+## Tem precedência sobre a lista: já foi provado nesta máquina.
+var python_exe := ""
+var python_args: PackedStringArray = PackedStringArray()
+
+func _proximo_interpretador() -> String:
+	if not python_exe.is_empty() and python_exe not in _riscados:
+		return python_exe
+	for nome in _lista_de_interpretadores():
+		if nome not in _riscados:
+			return nome
+	return ""
+
+func _args_do_interpretador(nome: String) -> PackedStringArray:
+	if nome == python_exe:
+		return python_args
+	# O lançador oficial do Windows escolhe a versão pelo argumento. Sem
+	# `-3` ele pode abrir um Python 2 esquecido na máquina.
+	return PackedStringArray(["-3"]) if nome == "py" else PackedStringArray()
+
+func _riscar_interpretador(nome: String) -> void:
+	if nome.is_empty() or nome in _riscados:
+		return
+	_riscados.append(nome)
+	if nome == python_exe:
+		python_exe = ""
 
 ## A linha de estado que a ponte grava ao lado do JPEG, no formato
 ## `TEXTO|contador|epoch_ms`.
@@ -581,6 +676,19 @@ func caminho_da_ponte() -> String:
 	var data_dir := "user://camera_bridge"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	return _materialize_bridge_script(data_dir)
+
+## O DIAGNÓSTICO ENTREGA O QUE PROVOU. Índice, back-end e — o que
+## faltava — o interpretador. Sem esta última peça o exame dizia
+## "câmera 0 pronta via DSHOW" e o jogo continuava tentando abrir a ponte
+## com um Python que não tinha OpenCV, ou que nem era Python.
+func adotar_python(exe: String, args: PackedStringArray) -> void:
+	if exe.is_empty():
+		return
+	python_exe = exe
+	python_args = args.duplicate()
+	_riscados.clear()
+	_bridge_desistiu = false
+	_bridge_reinicios = 0
 
 ## O caminho real do inspetor do Windows (`camera_windows.ps1`), pela
 ## mesma razão da ponte: num pacote exportado ele não é um arquivo que o

@@ -43,6 +43,7 @@ func run() -> void:
 	_test_quatro_digitos()
 	_test_bancada_sem_sensor()
 	_test_medico_da_camera()
+	_test_interpretador_da_ponte()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -363,3 +364,37 @@ func _test_obturador_da_pose() -> void:
 	assert(is_equal_approx(camera._melhor_nota, nota_boa))
 	camera._melhor_imagem = null
 	camera._melhor_nota = -1.0
+
+# ------------------------------------------- qual Python a ponte usa
+func _test_interpretador_da_ponte() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera._riscados.clear()
+	camera.python_exe = ""
+	camera.python_args = PackedStringArray()
+
+	# Sem nada provado, vale a lista do sistema, na ordem.
+	var lista: Array = camera._lista_de_interpretadores()
+	assert(camera._proximo_interpretador() == str(lista[0]))
+
+	# Um candidato riscado sai da fila. É isto que impede o jogo de
+	# insistir no atalho da Microsoft Store, que nasce, abre a loja e
+	# morre — devolvendo um PID válido que o jogo tomava por sucesso.
+	camera._riscar_interpretador(str(lista[0]))
+	assert(camera._proximo_interpretador() == str(lista[1]))
+
+	# Riscados todos, não sobra nada: aí é falar, não tentar de novo.
+	for nome in lista:
+		camera._riscar_interpretador(str(nome))
+	assert(camera._proximo_interpretador() == "")
+
+	# O que o diagnóstico PROVOU tem precedência e limpa os riscos.
+	camera.adotar_python("py", PackedStringArray(["-3"]))
+	assert(camera._proximo_interpretador() == "py")
+	assert(camera._args_do_interpretador("py") == PackedStringArray(["-3"]))
+	# E o `py` sem prova ainda recebe o -3: sem ele o lançador pode abrir
+	# um Python 2 esquecido na máquina.
+	camera.python_exe = ""
+	assert(camera._args_do_interpretador("py") == PackedStringArray(["-3"]))
+	camera._riscados.clear()
+	camera.python_exe = ""
+	camera.python_args = PackedStringArray()

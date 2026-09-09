@@ -337,6 +337,11 @@ var camera_enabled := true
 ## igual à da centésima.
 var camera_index := 0
 var camera_backend := ""
+## O interpretador que o diagnóstico provou ter OpenCV, guardado entre
+## sessões. Sem ele, toda vez que a máquina liga a ponte recomeça a
+## adivinhar qual Python usar.
+var camera_python := ""
+var camera_python_args := ""
 var camera_mirrored := true
 ## Pula o CameraServer e vai direto à ponte Python. Guardado em disco:
 ## numa máquina em que o caminho nativo nunca funciona, ligar isso uma
@@ -427,6 +432,11 @@ func _ready() -> void:
 	camera_service.enabled = camera_enabled
 	camera_service.selected_index = camera_index
 	camera_service.backend_preferido = camera_backend
+	if not camera_python.is_empty():
+		var guardados := PackedStringArray()
+		for a in camera_python_args.split(",", false):
+			guardados.append(str(a))
+		camera_service.adotar_python(camera_python, guardados)
 	camera_service.mirrored = camera_mirrored
 	camera_service.forcar_ponte = camera_forcar_ponte
 	add_child(camera_service)
@@ -510,6 +520,7 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	desempenho.medir(delta)
+	_socorro_da_camera(delta)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
 		zoom_impacto = 1.0
@@ -1820,6 +1831,8 @@ func _carregar() -> void:
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
 	camera_index = int(data.get("camera_index", camera_index))
 	camera_backend = str(data.get("camera_backend", camera_backend))
+	camera_python = str(data.get("camera_python", camera_python))
+	camera_python_args = str(data.get("camera_python_args", camera_python_args))
 	camera_ponte_escolhida = bool(data.get("camera_ponte_escolhida", false))
 	if camera_ponte_escolhida:
 		camera_forcar_ponte = bool(data.get("camera_forcar_ponte", camera_forcar_ponte))
@@ -1853,6 +1866,8 @@ func _salvar() -> void:
 		"camera_enabled": camera_enabled,
 		"camera_index": camera_index,
 		"camera_backend": camera_backend,
+		"camera_python": camera_python,
+		"camera_python_args": camera_python_args,
 		"camera_forcar_ponte": camera_forcar_ponte,
 		"camera_ponte_escolhida": camera_ponte_escolhida,
 		"camera_mirrored": camera_mirrored,
@@ -2750,6 +2765,11 @@ func _central_camera() -> void:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
 	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
 	_texto(cam_status, 806.0, 16, Paleta.TINTA_FRACA)
+	if camera_service != null:
+		_texto(
+			camera_service.ficha_da_ponte(), 806.0, 16, Paleta.CIANO,
+			HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		)
 	var religadas := camera_service.reinicios_da_ponte() if camera_service != null else 0
 	if religadas > 0:
 		_texto(
@@ -2884,6 +2904,38 @@ func _lista_de_indices(valores: Array) -> String:
 
 ## Manda examinar a instalação da câmera. `instalar` autoriza mexer no
 ## sistema; sem ele o exame só olha e conta.
+## O SOCORRO: A MÁQUINA SE EXAMINA SOZINHA.
+##
+## Até aqui o diagnóstico era um botão, e um botão só serve para quem
+## sabe que ele existe, sabe abrir a Central e está na frente do
+## gabinete. Quem liga a máquina no salão às oito da noite não é essa
+## pessoa — e uma câmera que não sobe ficava sem imagem a noite inteira
+## sem ninguém saber por quê.
+##
+## Doze segundos depois de ligar, se ainda não veio quadro nenhum, a
+## máquina roda o exame por conta própria e ADOTA o que descobrir: o
+## índice, o back-end e o interpretador. Uma vez por sessão — se o exame
+## não resolveu, repeti-lo de minuto em minuto não resolve também, e
+## ainda ocupa a linha de execução no meio das partidas.
+const SOCORRO_ESPERA := 12.0
+var _socorro_relogio := 0.0
+var _socorro_feito := false
+
+func _socorro_da_camera(delta: float) -> void:
+	if _socorro_feito or camera_service == null or medico == null:
+		return
+	if not camera_enabled or camera_service.available():
+		# Já veio imagem: não há o que socorrer, e a contagem não recomeça
+		# — uma câmera que caiu depois de funcionar é caso da religação
+		# automática da ponte, não do exame.
+		_socorro_feito = camera_service.available()
+		return
+	_socorro_relogio += delta
+	if _socorro_relogio < SOCORRO_ESPERA or medico.rodando:
+		return
+	_socorro_feito = true
+	medico.diagnosticar(false, camera_service.caminho_da_ponte(), camera_service.caminho_do_inspetor())
+
 func _examinar_camera(resolver: bool) -> void:
 	if medico == null or medico.rodando:
 		return
@@ -2897,7 +2949,17 @@ func _examinar_camera(resolver: bool) -> void:
 ## exige o técnico repetir à mão o que a máquina acabou de descobrir é
 ## meio relatório.
 func _fim_do_exame() -> void:
+	# O INTERPRETADOR VALE MESMO SEM ÍNDICE. Se o exame confirmou um
+	# Python com OpenCV, guardá-lo já conserta a próxima tentativa da
+	# ponte — mesmo que a câmera estivesse ocupada no instante da sonda.
+	if not medico.python.is_empty() and medico.tem_opencv:
+		camera_python = medico.python
+		camera_python_args = ",".join(medico.python_args)
+		camera_service.adotar_python(medico.python, medico.python_args)
+		_salvar()
 	if medico.indices.is_empty():
+		if camera_enabled and not medico.linhas.is_empty():
+			_show_notice(str(medico.linhas[medico.linhas.size() - 1]))
 		return
 	camera_index = int(medico.indices[0])
 	camera_service.selected_index = camera_index
@@ -2907,6 +2969,11 @@ func _fim_do_exame() -> void:
 	# — segundos que caem justamente na hora de tirar a foto.
 	camera_backend = medico.backend
 	camera_service.backend_preferido = camera_backend
+	# O INTERPRETADOR PROVADO. É a peça que faltava: o exame achava tudo
+	# certo e o jogo continuava subindo a ponte com outro Python.
+	camera_python = medico.python
+	camera_python_args = ",".join(medico.python_args)
+	camera_service.adotar_python(medico.python, medico.python_args)
 	camera_enabled = true
 	camera_service.enabled = true
 	camera_service.refresh()
