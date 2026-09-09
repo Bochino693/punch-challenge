@@ -2007,6 +2007,15 @@ func _central_camera() -> void:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
 	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
 	_texto(cam_status, 792.0, 16, Paleta.TINTA_FRACA)
+	# QUANTAS VEZES A PONTE PRECISOU SER RELIGADA. Uma ponte que
+	# ressuscita o tempo todo é cabo ou porta USB com defeito, não
+	# software — e sem esse número ninguém tem como saber a diferença.
+	var religadas := camera_service.reinicios_da_ponte() if camera_service != null else 0
+	if religadas > 0:
+		_texto(
+			"ponte religada %d × nesta sessão — se for muito, troque o cabo ou a porta USB" % religadas,
+			818.0, 14, Paleta.AMBAR
+		)
 
 	_secao(Rect2(80, 850, 920, 200), "COMO A FOTO É USADA", Paleta.AMBAR)
 	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 916.0, 15, Paleta.TINTA_FRACA)
