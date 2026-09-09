@@ -365,6 +365,15 @@ var medico: CameraDoctor
 var statistics: Dictionary = {}
 var result_photo_path := ""
 var pose_finished := false
+## A CONTAGEM SEGURA ENQUANTO A CÂMERA NÃO ACENDE.
+##
+## E segura com HORA MARCADA. Uma máquina sem webcam, com o cabo solto ou
+## com o Python faltando não pode ficar sem jogar: quem pôs a ficha tem
+## direito à partida, com foto ou sem. Passados estes segundos a rodada
+## começa assim mesmo, e a tela diz por quê.
+const ESPERA_MAXIMA_DA_CAMERA := 6.0
+var aguardando_camera := false
+var espera_da_camera := 0.0
 var photo_retained := false
 var ranking_announced := false
 var intro_active := true
@@ -608,6 +617,20 @@ func _processar_abertura(delta: float) -> void:
 		)
 
 func _processar_contagem(delta: float) -> void:
+	if aguardando_camera:
+		espera_da_camera += delta
+		var pronta := camera_service != null and camera_service.pronta()
+		if not pronta and espera_da_camera < ESPERA_MAXIMA_DA_CAMERA:
+			# A contagem NÃO anda: o relógio da pose só começa quando há
+			# imagem para fotografar.
+			return
+		aguardando_camera = false
+		if camera_service != null:
+			camera_service.abrir_obturador()
+		if not pronta:
+			_show_notice(
+				camera_service.estado_curto() if camera_service != null else "SEM CÂMERA"
+			)
 	countdown_left -= delta
 	if not pose_finished and countdown_left <= 0.0:
 		pose_finished = true
@@ -932,10 +955,15 @@ func _iniciar_rodada() -> void:
 	result_score = 0
 	result_photo_path = ""
 	pose_finished = false
-	# O OBTURADOR ABRE COM A CONTAGEM, e não no instante em que ela zera.
-	# São três segundos de quadros para escolher o melhor, em vez de um
-	# sexagésimo de segundo de sorte.
-	if camera_service != null:
+	# A CONTAGEM ESPERA A CÂMERA, e o obturador abre junto com ela.
+	#
+	# Contar 3-2-1 enquanto a webcam ainda está subindo é gastar a pose
+	# inteira esperando: quando a contagem zera, a ponte às vezes acabou
+	# de entregar o primeiro quadro, e a foto sai do nada ou não sai. A
+	# espera é o conserto óbvio, e é o que o operador pediu.
+	espera_da_camera = 0.0
+	aguardando_camera = camera_enabled and camera_service != null and not camera_service.pronta()
+	if camera_service != null and not aguardando_camera:
 		camera_service.abrir_obturador()
 	photo_retained = false
 	ranking_announced = false
@@ -1647,7 +1675,7 @@ func _click_central(p: Vector2) -> void:
 		camera_forcar_ponte = not camera_forcar_ponte
 		camera_ponte_escolhida = true
 		camera_service.forcar_ponte = camera_forcar_ponte
-		camera_service.refresh(true)
+		camera_service.pedir_abertura()
 		_show_notice(
 			"INDO DIRETO PELA PONTE PYTHON" if camera_forcar_ponte
 			else "TENTANDO O CAMINHO NATIVO PRIMEIRO"
@@ -1660,8 +1688,8 @@ func _click_central(p: Vector2) -> void:
 		# PROCURAR DE NOVO, e não só religar: `refresh` zera a desistência
 		# e refaz a enumeração inteira. É o botão de quem acabou de
 		# espetar a webcam com o jogo já aberto.
-		camera_service.refresh(true)
-		_show_notice(camera_service.status)
+		camera_service.pedir_abertura()
+		_show_notice(camera_service.estado_curto())
 	elif _tocou("trocar_camera", p):
 		camera_service.cycle_camera()
 		# A escolha do técnico também é descoberta e também fica guardada:
@@ -2105,7 +2133,15 @@ func _draw_partida() -> void:
 				# nos primeiros segundos de qualquer rodada.
 				if camera_enabled:
 					_carregando(rect.get_center() + Vector2(0.0, 210.0), 30.0, Paleta.CIANO)
-			if not pose_finished:
+			if aguardando_camera:
+				# Enquanto a câmera sobe, a tela diz o que está esperando
+				# — e o anel girando prova que a máquina não travou.
+				_carregando(Vector2(540.0, 1400.0), 40.0, Paleta.CIANO)
+				_rotulo(
+					camera_service.estado_curto() if camera_service != null else "LIGANDO A CÂMERA…",
+					1490.0, Paleta.CIANO
+				)
+			elif not pose_finished:
 				_texto_arcade(str(clampi(int(ceil(countdown_left)), 1, 3)), 1400.0, 150, Color.WHITE, LARGURA_UTIL)
 				_rotulo("OLHE PARA A CÂMERA", 1490.0, Paleta.AMBAR)
 			else:
@@ -2942,7 +2978,7 @@ func _examinar_camera(resolver: bool) -> void:
 	# A PONTE SAI DO AR ANTES DA SONDAGEM. Os dois disputando a webcam é
 	# o que fazia a imagem piscar na Central: um abre, o outro perde, o
 	# vigia religa, e assim sem parar.
-	camera_service.pausar_para_exame()
+	camera_service.pedir_exame()
 	medico.diagnosticar(
 		resolver, camera_service.caminho_da_ponte(), camera_service.caminho_do_inspetor()
 	)
@@ -2965,7 +3001,7 @@ func _fim_do_exame() -> void:
 		# Sem índice, a ponte volta ao ar mesmo assim: ela varre os
 		# índices sozinha, e a webcam pode ter estado ocupada só no
 		# instante da sondagem.
-		camera_service.retomar_apos_exame()
+		camera_service.terminar_exame()
 		if camera_enabled and not medico.linhas.is_empty():
 			_show_notice(str(medico.linhas[medico.linhas.size() - 1]))
 		return
@@ -2984,8 +3020,7 @@ func _fim_do_exame() -> void:
 	camera_service.adotar_python(medico.python, medico.python_args)
 	camera_enabled = true
 	camera_service.enabled = true
-	camera_service.exame_em_curso = false
-	camera_service.refresh(true)
+	camera_service.terminar_exame()
 	_salvar()
 	_show_notice("CÂMERA NO ÍNDICE %d%s — RELIGANDO" % [
 		camera_service.selected_index,

@@ -100,9 +100,166 @@ func _ready() -> void:
 	if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
 		CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
 	set_process(true)
-	call_deferred("refresh")
+	pedir_abertura()
 
-func _process(_delta: float) -> void:
+## ---------------------------------------------------------------------
+## O FLUXO ÚNICO DA CÂMERA
+##
+## Este bloco existe porque a câmera acendia e apagava sozinha, e a causa
+## nunca era uma só: era o número de portas de entrada. Havia seis
+## lugares diferentes que ligavam, desligavam, matavam ou ressuscitavam a
+## ponte — `refresh`, `set_enabled`, `cycle_camera`, o sinal de feed do
+## Godot, o vigia do processo e o diagnóstico — e cada par deles tinha o
+## seu próprio jeito de se atrapalhar. Consertar um par fazia aparecer
+## outro.
+##
+## Agora ninguém liga nem desliga nada de fora. Quem chama de fora só
+## PEDE, e o pedido fica guardado. Uma única função por quadro,
+## `_supervisionar()`, olha o estado, olha o pedido e decide o que
+## acontece — e ela é o ÚNICO lugar do arquivo que sobe ou derruba a
+## ponte. Duas ordens contraditórias no mesmo quadro deixam de ser uma
+## corrida: a última a chegar é a que vale, e ela é atendida uma vez só.
+enum Estado {
+	DESLIGADA,  ## por escolha do operador
+	SUBINDO,    ## processo de pé, ainda sem quadro
+	ACESA,      ## entregando imagem
+	EXAME,      ## o diagnóstico está com a webcam
+	PARADA,     ## desistiu: sem Python que sirva
+}
+
+enum Pedido { NENHUM, ABRIR, FECHAR, EXAME_ENTRAR, EXAME_SAIR }
+
+var estado := Estado.DESLIGADA
+var _pedido := Pedido.NENHUM
+
+## As portas de entrada. Todas só anotam a intenção.
+func pedir_abertura() -> void:
+	_pedido = Pedido.ABRIR
+
+func pedir_fechamento() -> void:
+	_pedido = Pedido.FECHAR
+
+func pedir_exame() -> void:
+	_pedido = Pedido.EXAME_ENTRAR
+
+func terminar_exame() -> void:
+	_pedido = Pedido.EXAME_SAIR
+
+## A câmera está entregando imagem AGORA? É o que a contagem regressiva
+## espera antes de começar, e o que a foto pergunta antes de sair.
+func pronta() -> bool:
+	return estado == Estado.ACESA
+
+## Uma frase curta do estado, para a tela da pose e para a Central.
+func estado_curto() -> String:
+	match estado:
+		Estado.DESLIGADA:
+			return "CÂMERA DESLIGADA NA CENTRAL"
+		Estado.SUBINDO:
+			return "LIGANDO A CÂMERA…"
+		Estado.ACESA:
+			return "CÂMERA PRONTA"
+		Estado.EXAME:
+			return "EXAMINANDO A CÂMERA…"
+		Estado.PARADA:
+			return motivo_curto()
+	return ""
+
+func _process(delta: float) -> void:
+	_supervisionar(delta)
+
+## A ÚNICA função que sobe ou derruba a câmera.
+func _supervisionar(_delta: float) -> void:
+	_atender_pedido()
+	# Durante o exame ninguém mexe na webcam: ela é do diagnóstico.
+	if estado == Estado.EXAME or estado == Estado.DESLIGADA or estado == Estado.PARADA:
+		return
+	# O vigia de sempre, agora com um dono só.
+	if _feed != null:
+		_vigiar_nativa()
+		estado = Estado.ACESA if _native_ok else Estado.SUBINDO
+		return
+	_vigiar_ponte()
+	if _bridge_desistiu:
+		estado = Estado.PARADA
+	elif _bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500:
+		estado = Estado.ACESA
+	else:
+		estado = Estado.SUBINDO
+
+## O pedido pendente, atendido uma vez só. Separado da supervisão porque
+## é aqui que mora a regra que interessa — e uma regra que interessa tem
+## de poder ser verificada sozinha, sem um processo de verdade no ar.
+func _atender_pedido() -> void:
+	var pedido := _pedido
+	_pedido = Pedido.NENHUM
+	match pedido:
+		Pedido.FECHAR:
+			enabled = false
+			_derrubar()
+			estado = Estado.DESLIGADA
+			status = "CÂMERA DESATIVADA"
+		Pedido.EXAME_ENTRAR:
+			_derrubar()
+			estado = Estado.EXAME
+			status = "EXAMINANDO A CÂMERA…"
+		Pedido.EXAME_SAIR:
+			estado = Estado.DESLIGADA if not enabled else Estado.SUBINDO
+			_riscados.clear()
+			_bridge_desistiu = false
+			_bridge_reinicios = 0
+			if enabled:
+				_levantar()
+		Pedido.ABRIR:
+			enabled = true
+			# ACESA NÃO SE MEXE. É a regra que faltava: uma câmera que
+			# está entregando imagem não é reconstruída porque alguém
+			# pediu "abre" — ela já está aberta.
+			if estado != Estado.ACESA:
+				_derrubar()
+				_riscados.clear()
+				_bridge_desistiu = false
+				_bridge_reinicios = 0
+				estado = Estado.SUBINDO
+				_levantar()
+
+## Sobe o caminho da câmera: nativo quando o Godot enxerga, ponte quando
+## não. Chamada de um lugar só.
+func _levantar() -> void:
+	_native_ok = false
+	var feeds: Array = []
+	if not forcar_ponte:
+		# O Godot 4.6 só enumera câmeras sob pedido. E acordar o servidor
+		# EMITE `camera_feed_added` na mesma pilha — por isso este
+		# despertar mora aqui dentro, onde o sinal não tem como virar uma
+		# segunda abertura: ele só marca um pedido para o próximo quadro.
+		_acordar_servidor()
+		feeds = CameraServer.feeds()
+	if feeds.is_empty():
+		_start_bridge()
+		return
+	selected_index = clampi(selected_index, 0, feeds.size() - 1)
+	_feed = feeds[selected_index]
+	var formatos := _feed.get_formats()
+	if not formatos.is_empty():
+		_feed.set_format(0, {})
+	_feed.set_active(true)
+	_texture = CameraTexture.new()
+	_texture.camera_feed_id = _feed.get_id()
+	_texture.which_feed = CameraServer.FEED_RGBA_IMAGE
+	_native_started_ms = Time.get_ticks_msec()
+	status = "ABRINDO CÂMERA…"
+
+## Derruba tudo o que estiver de pé. Chamada de um lugar só.
+func _derrubar() -> void:
+	if _feed != null:
+		_feed.set_active(false)
+	_feed = null
+	_texture = null
+	_native_ok = false
+	_matar_ponte()
+
+func _vigiar_ponte() -> void:
 	# EXAME EM CURSO: A PONTE FICA FORA DO AR, E O VIGIA TAMBÉM.
 	#
 	# AQUI ESTAVA A PISCA-PISCA. Só um programa por vez consegue abrir uma
@@ -117,11 +274,6 @@ func _process(_delta: float) -> void:
 	# O conserto é combinar quem manda: durante o exame, a ponte sai do
 	# ar de propósito e ninguém a religa. Ela volta no fim, já com o
 	# índice, o back-end e o Python que o exame descobriu.
-	if exame_em_curso:
-		return
-	if _feed != null:
-		_vigiar_nativa()
-		return
 	if _bridge_pid <= 0:
 		return
 	var now := Time.get_ticks_msec()
@@ -366,141 +518,48 @@ func _acordar_servidor() -> void:
 	if CameraServer.has_method("set_monitoring_feeds"):
 		CameraServer.call("set_monitoring_feeds", true)
 
-## LIGOU UMA VEZ, NÃO DESLIGA MAIS.
+## AS PORTAS ANTIGAS, agora fininhas.
 ##
-## `refresh()` DERRUBA a câmera para levantá-la de novo — e por isso ela
-## nunca deveria ter sido chamada com a câmera funcionando. Era isso que
-## fazia a imagem acender e apagar: várias origens pediam "atualize" a
-## todo momento, e cada pedido matava a ponte que estava entregando
-## quadro para subir outra do zero.
-##
-## Agora há duas defesas, e as duas foram necessárias:
-##
-##   PONTE VIVA NÃO SE MEXE. Se a ponte publicou quadro há menos de três
-##   segundos, `refresh()` não faz nada — a não ser que quem chamou diga
-##   `forcado`, que é o caso do técnico apertando PROCURAR DE NOVO ou
-##   TROCAR CÂMERA. Uma câmera acesa é o estado que se quer preservar,
-##   não um estado a ser reconstruído.
-##
-##   NÃO SE CHAMA A SI MESMA. `_acordar_servidor()` liga o monitoramento
-##   do CameraServer, e ligar o monitoramento faz o servidor enumerar as
-##   câmeras AGORA, na mesma pilha — o que emite `camera_feed_added`, que
-##   caía em `_on_camera_feeds_updated`, que chamava `refresh()` de novo.
-##   A chamada de dentro matava a ponte que a de fora estava prestes a
-##   subir. Reentrância pura, e invisível no código porque o laço passa
-##   por um sinal do motor.
-var _refrescando := false
-
-func refresh(forcado := false) -> void:
-	if _refrescando:
-		return
-	if not forcado and _ponte_saudavel():
-		return
-	_refrescando = true
-	_refrescar(forcado)
-	_refrescando = false
-
-## A ponte está de pé E entregando? Então há uma câmera acesa a preservar.
-func _ponte_saudavel() -> bool:
-	return (
-		enabled
-		and _bridge_pid > 0
-		and _bridge_texture != null
-		and Time.get_ticks_msec() - _last_frame_ms < 3000
-	)
-
-func _refrescar(_forcado: bool) -> void:
-	_stop_feed()
-	_native_ok = false
-	# Toda tentativa manual (ligar, trocar de câmera, reabrir a Central)
-	# tem direito a uma bateria nova de religamentos: quem clicou está
-	# dizendo que alguma coisa mudou.
-	_bridge_desistiu = false
-	_bridge_reinicios = 0
-	if not enabled:
-		status = "CÂMERA DESATIVADA"
-		return
-	# O GODOT 4.6 SÓ ENUMERA CÂMERAS SOB PEDIDO.
-	#
-	# Até a 4.5 `CameraServer.feeds()` já vinha preenchido; na 4.6 o
-	# servidor começa dormindo e responde
-	# "CameraServer is not actively monitoring feeds" — a lista volta
-	# vazia e a máquina conclui, errado, que não há câmera nenhuma.
-	# Ligar o monitoramento é barato e idempotente.
-	#
-	# MAS SÓ QUANDO O CAMINHO NATIVO ESTÁ EM JOGO. No Windows, onde a
-	# ponte é o caminho, acordar o servidor não traz benefício nenhum e
-	# traz o laço descrito acima — além de manter o Godot segurando
-	# descritores da webcam que a ponte quer abrir.
-	var feeds: Array = []
-	if not forcar_ponte:
-		_acordar_servidor()
-		feeds = CameraServer.feeds()
-	if feeds.is_empty():
-		# A PONTE NÃO É MAIS SÓ DO WINDOWS. Ela é a reserva para QUALQUER
-		# caso em que o Godot não enxerga a webcam — e são vários: falta
-		# de driver na plataforma, permissão negada, câmera ocupada por
-		# outro programa. Amarrada ao Windows, todo o resto ficava sem
-		# saída, e ninguém conseguia nem testar o caminho.
-		_start_bridge()
-		return
-	selected_index = clampi(selected_index, 0, feeds.size() - 1)
-	_feed = feeds[selected_index]
-	# ESCOLHER O FORMATO ANTES DE ATIVAR. Nas plataformas em que o Godot
-	# fala com a câmera de verdade (V4L2 no Linux, Media Foundation no
-	# Windows), um feed sem formato escolhido ativa mas nunca entrega
-	# quadro — fica "conectada" e preta. Pegamos o primeiro formato que a
-	# câmera anuncia, que é sempre um que ela suporta.
-	var formatos := _feed.get_formats()
-	if not formatos.is_empty():
-		_feed.set_format(0, {})
-	_feed.set_active(true)
-	_texture = CameraTexture.new()
-	_texture.camera_feed_id = _feed.get_id()
-	_texture.which_feed = CameraServer.FEED_RGBA_IMAGE
-	_native_started_ms = Time.get_ticks_msec()
-	status = "ABRINDO CÂMERA…"
-
-## O servidor avisou que a lista de câmeras mudou.
-##
-## Só interessa quando o caminho nativo está em uso E não há nada de pé.
-## Com a ponte no ar, este aviso é ruído: a ponte fala com a webcam por
-## fora do Godot e não liga para a lista dele.
-func _on_camera_feeds_updated(_id: int = 0) -> void:
-	if forcar_ponte or _refrescando or not enabled:
-		return
-	if _feed == null and _bridge_pid <= 0:
-		refresh()
+## `refresh`, `set_enabled` e `cycle_camera` continuam existindo porque o
+## resto do jogo as chama — mas nenhuma delas mexe mais na webcam. Todas
+## viraram pedidos, atendidos por `_supervisionar()` no próximo quadro.
+## É isso que acaba com a corrida: duas ordens no mesmo quadro deixam de
+## ser duas aberturas simultâneas e passam a ser uma só, a última.
+func refresh(_forcado := false) -> void:
+	pedir_abertura()
 
 func set_enabled(value: bool) -> void:
-	enabled = value
-	# Ligar ou desligar à mão é ordem explícita: passa por cima da
-	# proteção que preserva a ponte viva.
-	refresh(true)
+	if value:
+		pedir_abertura()
+	else:
+		pedir_fechamento()
 
 ## TROCAR DE CÂMERA É ORDEM DO TÉCNICO: derruba a que está no ar de
 ## propósito, porque é justamente isso que ele pediu.
 func cycle_camera() -> void:
-	var feeds: Array = []
-	if not forcar_ponte:
-		# O Godot 4.6 só enumera câmeras sob pedido: até a 4.5 `feeds()`
-		# já vinha preenchido, e na 4.6 o servidor começa dormindo.
-		_acordar_servidor()
-		feeds = CameraServer.feeds()
-	if feeds.is_empty():
-		# Sem feed nativo, quem troca de câmera é a ponte. Vai até o
-		# índice 9 porque é até onde a sondagem procura — parar no 3
-		# deixava de fora justamente a máquina com câmera virtual
-		# instalada, que é onde a webcam boa acaba no 6 ou no 7.
-		selected_index = (selected_index + 1) % 10
-		# Trocou de câmera, o back-end provado não vale mais para o novo
-		# índice: sem limpar, a ponte insistiria com `--fixo` num par
-		# índice/back-end que nunca foi testado junto.
-		backend_preferido = ""
-		refresh(true)
+	# Vai até o índice 9 porque é até onde a sondagem procura — parar no
+	# 3 deixava de fora justamente a máquina com câmera virtual
+	# instalada, que é onde a webcam boa acaba no 6 ou no 7.
+	selected_index = (selected_index + 1) % 10
+	# Trocou de câmera, o back-end provado não vale mais para o novo
+	# índice: sem limpar, a ponte insistiria com `--fixo` num par
+	# índice/back-end que nunca foi testado junto.
+	backend_preferido = ""
+	# Derruba de propósito: é a única ordem que quer a câmera reaberta
+	# mesmo estando acesa.
+	estado = Estado.SUBINDO
+	_derrubar()
+	pedir_abertura()
+
+func _on_camera_feeds_updated(_id: int = 0) -> void:
+	# SÓ UM PEDIDO, NUNCA UMA AÇÃO. Este aviso chega de dentro do próprio
+	# `_levantar()`, quando ele acorda o servidor: se aqui houvesse
+	# qualquer abertura, ela aconteceria no meio da abertura que a
+	# provocou. Anotando um pedido, o pior caso vira um quadro a mais.
+	if forcar_ponte or not enabled:
 		return
-	selected_index = (selected_index + 1) % feeds.size()
-	refresh(true)
+	if estado == Estado.SUBINDO and _feed == null and _bridge_pid <= 0:
+		pedir_abertura()
 
 func preview_texture() -> Texture2D:
 	return _texture if _texture != null else _bridge_texture
@@ -780,23 +839,13 @@ func caminho_da_ponte() -> String:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	return _materialize_bridge_script(data_dir)
 
-## Verdadeiro enquanto o diagnóstico está usando a câmera.
-var exame_em_curso := false
-
-## Tira a ponte do ar para o exame poder abrir a webcam.
+## Compatibilidade: o resto do jogo pede o exame por estes dois nomes, e
+## os dois só anotam a intenção no mesmo fluxo de sempre.
 func pausar_para_exame() -> void:
-	exame_em_curso = true
-	_matar_ponte()
-	status = "EXAMINANDO A CÂMERA…"
+	pedir_exame()
 
-## Devolve a ponte ao ar depois do exame. Uma bateria nova de tentativas:
-## o exame pode ter acabado de descobrir o índice certo.
 func retomar_apos_exame() -> void:
-	exame_em_curso = false
-	_bridge_desistiu = false
-	_bridge_reinicios = 0
-	if enabled and _feed == null:
-		_start_bridge()
+	terminar_exame()
 
 ## O DIAGNÓSTICO ENTREGA O QUE PROVOU. Índice, back-end e — o que
 ## faltava — o interpretador. Sem esta última peça o exame dizia

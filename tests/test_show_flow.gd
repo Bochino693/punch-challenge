@@ -46,6 +46,7 @@ func run() -> void:
 	_test_interpretador_da_ponte()
 	_test_exame_nao_briga_com_a_ponte()
 	_test_camera_acesa_nao_apaga()
+	_test_contagem_espera_a_camera()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -401,68 +402,123 @@ func _test_interpretador_da_ponte() -> void:
 	camera.python_exe = ""
 	camera.python_args = PackedStringArray()
 
-# ----------------------------- exame e ponte nao disputam a webcam
+# ------------------------------- o fluxo unico da camera
 func _test_exame_nao_briga_com_a_ponte() -> void:
 	var camera: CameraService = jogo.camera_service
-	assert(not camera.exame_em_curso)
+	camera.enabled = true
+	camera.estado = camera.Estado.SUBINDO
 
-	# Durante o exame a ponte sai do ar e o vigia para. Sem isso, a
-	# sondagem abre a webcam, a ponte perde o dispositivo, o vigia religa
-	# a ponte, a ponte rouba de volta -- e a imagem pisca na tela.
-	camera.pausar_para_exame()
-	assert(camera.exame_em_curso)
+	# O exame pede a webcam. Só um programa por vez abre uma: enquanto o
+	# diagnóstico sonda os índices, a ponte tem de estar fora do ar --
+	# senão os dois se atropelam e a imagem pisca.
+	camera.pedir_exame()
+	camera._atender_pedido()
+	assert(camera.estado == camera.Estado.EXAME)
 	assert(camera._bridge_pid <= 0)
-	# Com o exame em curso, um quadro de processo não reinicia nada.
-	camera._process(0.016)
+
+	# Em exame, nenhum quadro de supervisão religa nada.
+	camera._supervisionar(0.016)
+	camera._supervisionar(0.016)
+	assert(camera.estado == camera.Estado.EXAME)
 	assert(camera._bridge_pid <= 0)
 
 	# No fim, a ponte volta com bateria nova de tentativas.
 	camera._bridge_desistiu = true
 	camera._bridge_reinicios = 99
-	camera.enabled = false  # evita subir processo de verdade neste teste
-	camera.retomar_apos_exame()
-	assert(not camera.exame_em_curso)
+	camera.enabled = false
+	camera.terminar_exame()
+	camera._atender_pedido()
+	assert(camera.estado == camera.Estado.DESLIGADA)
 	assert(not camera._bridge_desistiu)
 	assert(camera._bridge_reinicios == 0)
 	camera.enabled = true
 
-# ------------------------------- camera acesa nao se apaga sozinha
+# ------------------------------- camera acesa nao apaga sozinha
 func _test_camera_acesa_nao_apaga() -> void:
 	var camera: CameraService = jogo.camera_service
-	camera.exame_em_curso = false
 	camera.enabled = true
 	camera.forcar_ponte = true
 
 	# Finge uma ponte de pé, entregando quadro agora mesmo.
+	camera.estado = camera.Estado.ACESA
 	camera._bridge_pid = 999999
 	camera._bridge_texture = ImageTexture.create_from_image(
 		Image.create(8, 8, false, Image.FORMAT_RGB8)
 	)
 	camera._last_frame_ms = Time.get_ticks_msec()
-	assert(camera._ponte_saudavel())
+	assert(camera.pronta())
 
-	# UM `refresh()` COMUM NÃO PODE DERRUBAR ISSO. Era daqui que vinha o
-	# acende-e-apaga: várias origens pediam "atualize" o tempo todo, e
-	# cada pedido matava a ponte que estava entregando imagem.
+	# UM PEDIDO DE ABERTURA NÃO DERRUBA O QUE JÁ ESTÁ ACESO. Era daqui
+	# que vinha o acende-e-apaga: várias origens pediam "atualize" o
+	# tempo todo, e cada pedido matava a ponte que estava entregando.
 	camera.refresh()
+	camera._atender_pedido()
 	assert(camera._bridge_pid == 999999)
-	assert(camera._bridge_texture != null)
+	assert(camera.pronta())
 
 	# O aviso de lista de câmeras do Godot também não derruba: com a
 	# ponte no ar ele é ruído, porque ela fala com a webcam por fora.
 	camera._on_camera_feeds_updated(0)
+	camera._atender_pedido()
 	assert(camera._bridge_pid == 999999)
 
-	# Mas a ordem explícita do técnico derruba, que é o que ele pediu.
-	camera.enabled = false
-	camera.refresh(true)
-	assert(camera._bridge_pid <= 0)
+	# DUAS ORDENS NO MESMO QUADRO VALEM UMA. É o que o fluxo único
+	# garante: antes, cada chamada agia na hora e uma atropelava a outra.
+	camera.pedir_fechamento()
+	camera.pedir_abertura()
+	camera._atender_pedido()
+	assert(camera.enabled)
 
-	# Quadro velho não é câmera acesa: aí atualizar é o certo.
+	# E a ordem de desligar, essa derruba mesmo.
+	camera.pedir_fechamento()
+	camera._atender_pedido()
+	assert(camera.estado == camera.Estado.DESLIGADA)
+	assert(camera._bridge_pid <= 0)
+	assert(not camera.pronta())
+
 	camera.enabled = true
-	camera._bridge_pid = 999999
-	camera._last_frame_ms = Time.get_ticks_msec() - 9000
-	assert(not camera._ponte_saudavel())
-	camera._bridge_pid = -1
-	camera._bridge_texture = null
 	camera.forcar_ponte = false
+	camera.estado = camera.Estado.SUBINDO
+	camera._bridge_texture = null
+
+# ------------------------- a contagem so comeca com a camera acesa
+func _test_contagem_espera_a_camera() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera.enabled = true
+	jogo.camera_enabled = true
+	camera.estado = camera.Estado.SUBINDO
+	assert(not camera.pronta())
+
+	jogo.credits = 9
+	# `_iniciar_rodada` e nao `_pressionou_start`: o segundo so vale em
+	# IDLE ou RESULT, e aqui a rodada e comecada duas vezes de proposito.
+	jogo._iniciar_rodada()
+	assert(jogo.aguardando_camera)
+	var comeco: float = jogo.countdown_left
+
+	# Com a câmera ainda subindo, o relógio da pose NÃO anda. Contar
+	# 3-2-1 enquanto a webcam sobe gasta a pose inteira esperando, e
+	# quando a contagem zera não há imagem para fotografar.
+	for i in range(30):
+		jogo._processar_contagem(0.016)
+	assert(jogo.aguardando_camera)
+	assert(is_equal_approx(jogo.countdown_left, comeco))
+
+	# Acendeu: a contagem destrava e o obturador abre junto.
+	camera.estado = camera.Estado.ACESA
+	jogo._processar_contagem(0.016)
+	assert(not jogo.aguardando_camera)
+	assert(jogo.countdown_left < comeco)
+
+	# E A ESPERA TEM HORA MARCADA. Sem webcam, quem pôs a ficha ainda
+	# tem direito à partida: passados os segundos do teto, a rodada
+	# começa assim mesmo.
+	camera.estado = camera.Estado.SUBINDO
+	jogo._iniciar_rodada()
+	assert(jogo.aguardando_camera)
+	for i in range(20):
+		jogo._processar_contagem(0.5)
+	assert(not jogo.aguardando_camera)
+
+	camera.estado = camera.Estado.SUBINDO
+	jogo._entrar_em_abertura()
