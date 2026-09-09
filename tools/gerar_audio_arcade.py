@@ -413,6 +413,143 @@ def gerar_efeitos() -> None:
 
 
 # ======================================================================
+# OS OITO NÍVEIS, E O RESTO DA MESA DE SOM
+# ======================================================================
+
+def gerar_niveis() -> None:
+    """Um estojo sonoro por nível.
+
+    A regra é a mesma da tabela de efeitos: dois níveis não podem soar
+    parecidos. Cada um muda de FAMÍLIA, e não só de volume — seco, couro,
+    metal, estouro, sirene, fanfarra, coro. Quem joga duas vezes seguidas
+    percebe volume repetido na hora; timbre diferente ele sente antes de
+    conseguir explicar.
+    """
+    # 1) IMPACTO LEVE — seco, curto, sem grave e sem cauda.
+    leve = np.zeros(n_amostras(0.34))
+    somar(leve, biquad(ruido(0.05), 1800, 1.0, "bp") * env_ad(0.05, 0.001, 0.03, 6.0), 0, 0.8)
+    somar(leve, blip(69, 0.10, quadrada, 0.03), n_amostras(0.02), 0.35)
+    salvar("nivel_leve", satura(leve, 1.2), alvo_rms=0.10)
+
+    # 2) BOM GOLPE — couro: ruído grave abafado com um corpo de seno.
+    bom = np.zeros(n_amostras(0.7))
+    couro = biquad(ruido(0.22), 620, 0.8, "lp") * env_ad(0.22, 0.002, 0.09, 3.5)
+    somar(bom, couro, 0, 1.0)
+    somar(bom, senoide(varredura(150, 62, 0.25, 3.0), 0.25) * env_ad(0.25, 0.002, 0.1, 3.0), 0, 0.7)
+    somar(bom, arpejo([64, 71], 0.09, quadrada, 0.22), n_amostras(0.12), 0.35)
+    e, d = largura(reverb(bom, 0.35, 0.16), 9.0)
+    salvar("nivel_bom", e, d, alvo_rms=0.13)
+
+    # 3) GOLPE FORTE — metal: bumbo encorpado, acorde de serra e prato.
+    forte = np.zeros(n_amostras(1.2))
+    somar(forte, bumbo(0.5, 190, 46), 0, 1.0)
+    for m in (52, 59, 64):
+        somar(forte, blip(m, 0.55, dente, 0.22), n_amostras(0.04), 0.30)
+    somar(forte, prato(0.9), n_amostras(0.04), 0.40)
+    somar(forte, senoide(varredura(90, 40, 0.5, 3.0), 0.5) * env_ad(0.5, 0.003, 0.2, 2.5), 0, 0.6)
+    e, d = largura(reverb(forte, 0.5, 0.24), 12.0)
+    salvar("nivel_forte", e, d, alvo_rms=0.15)
+
+    # 4) EXPLOSIVO — estouro: clarão de ruído agudo mais subgrave caindo.
+    expl = np.zeros(n_amostras(1.4))
+    somar(expl, biquad(ruido(0.35), 2600, 0.7, "hp") * env_ad(0.35, 0.0004, 0.10, 5.0), 0, 0.9)
+    somar(expl, senoide(varredura(120, 30, 0.9, 4.0), 0.9) * env_ad(0.9, 0.002, 0.45, 2.0), 0, 1.0)
+    somar(expl, impacto(0.7, 1.0), 0, 0.8)
+    somar(expl, impacto(0.5, 0.7), n_amostras(0.16), 0.5)
+    e, d = largura(reverb(expl, 0.6, 0.30), 13.0)
+    salvar("nivel_explosivo", e, d, alvo_rms=0.16)
+
+    # 5) NOCAUTE — sirene curta de ringue e três marteladas.
+    noc = np.zeros(n_amostras(1.8))
+    sirene = senoide(varredura(760, 1250, 0.5, 1.0), 0.5) + senoide(varredura(1250, 760, 0.5, 1.0), 0.5) * 0.0
+    somar(noc, sirene * env_ad(0.5, 0.02, 0.25, 2.0), n_amostras(0.30), 0.45)
+    for i, pos in enumerate((0.0, 0.19, 0.38)):
+        somar(noc, impacto(0.8, 1.1 - i * 0.12), n_amostras(pos), 1.0 - i * 0.18)
+    somar(noc, prato(1.3), n_amostras(0.38), 0.5)
+    e, d = largura(reverb(noc, 0.68, 0.32), 15.0)
+    salvar("nivel_nocaute", e, d, alvo_rms=0.17)
+
+    # 6) PESO-PESADO — fanfarra: tríade subindo em serra, sub e rufo.
+    peso = np.zeros(n_amostras(2.4))
+    somar(peso, subida(0.42, 240, 2600), 0, 0.55)
+    for i, m in enumerate((52, 59, 64, 71)):
+        voz = blip(m, 0.95, dente, 0.34) + blip(m + 12, 0.95, quadrada, 0.28) * 0.35
+        somar(peso, voz, n_amostras(0.42 + i * 0.11), 0.42)
+    somar(peso, impacto(1.1, 1.15), n_amostras(0.42), 0.95)
+    for i in range(6):
+        somar(peso, bumbo(0.26, 150, 48), n_amostras(0.9 + i * 0.075), 0.30 + i * 0.05)
+    somar(peso, prato(1.6), n_amostras(0.42), 0.55)
+    e, d = largura(reverb(peso, 0.72, 0.34), 16.0)
+    salvar("nivel_peso", e, d, alvo_rms=0.18)
+
+    # 7) LENDÁRIO — vitória inteira: riser, arpejo longo e cauda grande.
+    lend = np.zeros(n_amostras(3.0))
+    somar(lend, subida(0.55, 300, 3800), 0, 0.55)
+    for i, m in enumerate((57, 64, 69, 73, 76, 81, 88, 93)):
+        voz = blip(m, 1.1, dente, 0.38) + blip(m + 12, 1.1, quadrada, 0.32) * 0.42
+        somar(lend, voz, n_amostras(0.55 + i * 0.08), 0.40)
+    somar(lend, impacto(1.2, 1.2), n_amostras(0.55), 0.95)
+    somar(lend, prato(1.9), n_amostras(0.55), 0.62)
+    for i in range(4):
+        somar(lend, caixa(0.22), n_amostras(1.5 + i * 0.13), 0.30)
+    e, d = largura(reverb(lend, 0.82, 0.38), 18.0)
+    salvar("nivel_lendario", e, d, alvo_rms=0.185)
+
+    # 8) SOCO PERFEITO — coro: vozes empilhadas com ataque lento, gongo e
+    #    a maior cauda do jogo. É a única vez que a máquina faz isso.
+    perf = np.zeros(n_amostras(4.0))
+    somar(perf, subida(0.7, 200, 5200), 0, 0.6)
+    coro = np.zeros(n_amostras(3.0))
+    for m in (45, 52, 57, 64, 69, 76, 81):
+        f = nota(m)
+        # Três vozes levemente desafinadas por nota: é a desafinação
+        # pequena que faz um seno virar coro em vez de apito.
+        for det in (-0.4, 0.0, 0.4):
+            v = senoide(f * (2.0 ** (det / 1200.0 * 10.0)), 3.0)
+            somar(coro, v * env_ad(3.0, 0.25, 2.0, 1.6), 0, 0.085)
+    somar(perf, biquad(coro, 5200, 0.7, "lp"), n_amostras(0.7), 1.0)
+    somar(perf, impacto(1.4, 1.3), n_amostras(0.7), 1.0)
+    somar(perf, prato(2.4), n_amostras(0.7), 0.7)
+    somar(perf, senoide(varredura(70, 26, 1.6, 3.0), 1.6) * env_ad(1.6, 0.004, 0.9, 1.8),
+          n_amostras(0.7), 0.9)
+    e, d = largura(reverb(perf, 0.9, 0.42), 22.0)
+    salvar("nivel_perfeito", e, d, alvo_rms=0.19)
+
+
+def gerar_avisos() -> None:
+    """Os sons de operação que faltavam à mesa."""
+    # START sem crédito: dois zumbidos graves descendo, secos. Precisa
+    # soar NEGADO e não quebrado — quem ouve tem de entender que faltou
+    # ficha, não que a máquina pifou.
+    negado = np.zeros(n_amostras(0.55))
+    for i, pos in enumerate((0.0, 0.17)):
+        z = biquad(dente(nota(45 - i * 3), 0.13), 900, 1.2, "lp")
+        somar(negado, z * env_ad(0.13, 0.004, 0.05, 3.0), n_amostras(pos), 0.9)
+    salvar("start_negado", satura(negado, 1.6), alvo_rms=0.12)
+
+    # Sensor armado: duas notas curtas subindo e um chiado leve. Diz
+    # "pode vir" sem parecer contagem.
+    armado = np.zeros(n_amostras(0.6))
+    somar(armado, blip(76, 0.10, quadrada, 0.03), 0, 0.7)
+    somar(armado, blip(83, 0.14, quadrada, 0.04), n_amostras(0.10), 0.75)
+    somar(armado, biquad(ruido(0.25), 3800, 0.9, "hp") * env_ad(0.25, 0.02, 0.12, 3.0),
+          n_amostras(0.10), 0.22)
+    e, d = largura(reverb(armado, 0.35, 0.18), 10.0)
+    salvar("armado", e, d, alvo_rms=0.11)
+
+    # Couro do saco: o baque do material, sem nota nenhuma.
+    couro = biquad(ruido(0.3), 520, 0.7, "lp") * env_ad(0.3, 0.0015, 0.12, 3.2)
+    somar(couro, senoide(varredura(120, 55, 0.3, 3.0), 0.3) * env_ad(0.3, 0.002, 0.12, 3.0), 0, 0.6)
+    salvar("couro", satura(couro, 1.4), alvo_rms=0.13)
+
+    # Subgrave do impacto: só o chão tremendo, para somar por baixo dos
+    # níveis altos sem disputar o agudo com eles.
+    sub = senoide(varredura(78, 27, 1.1, 3.2), 1.1) * env_ad(1.1, 0.003, 0.6, 1.9)
+    sub = biquad(sub, 160, 0.7, "lp")
+    salvar("subgrave", satura(sub, 1.2), alvo_rms=0.15)
+
+
+# ======================================================================
 # LOOPS
 # ======================================================================
 
@@ -545,5 +682,7 @@ def salvar_musica() -> None:
 
 if __name__ == "__main__":
     gerar_efeitos()
+    gerar_niveis()
+    gerar_avisos()
     gerar_loops()
     print("ARCADE_AUDIO_OK")

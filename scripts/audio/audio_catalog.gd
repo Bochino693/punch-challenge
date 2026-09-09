@@ -16,7 +16,15 @@ const FALLBACK := {
 	"record": "res://assets/audio/record.wav",
 	"legendary": "res://assets/audio/legendary.wav",
 }
-const EXTRA := ["music", "shutter", "ranking", "score_loop"]
+## Sons que existem só como arquivo em `assets/audio/arcade/` e não têm
+## um par no FALLBACK. Os oito níveis entram aqui: eles nasceram já na
+## mesa nova e nunca tiveram versão antiga.
+const EXTRA := [
+	"music", "shutter", "ranking", "score_loop",
+	"nivel_leve", "nivel_bom", "nivel_forte", "nivel_explosivo",
+	"nivel_nocaute", "nivel_peso", "nivel_lendario", "nivel_perfeito",
+	"start_negado", "armado", "couro", "subgrave",
+]
 const LOOPS := ["music", "charge", "score_loop"]
 const ROOT := "res://assets/audio/arcade/"
 

@@ -66,7 +66,7 @@ func _preparar(estado: int) -> void:
 	jogo.animation_time = 3.0
 
 func _abertura() -> void:
-	jogo.ranking = RankingStore.migrate([872, 705, 640, 512, 388])
+	jogo.ranking = RankingStore.migrate([8720, 7050, 6400, 5120, 3880])
 	jogo.plays = 431
 	jogo.credits = 3
 	_preparar(GameDef.State.IDLE)
@@ -102,7 +102,7 @@ func _impacto() -> void:
 	jogo.carga_tempo = -1.0
 	_preparar(GameDef.State.MEASURING)
 	jogo.state_time = 0.25
-	jogo.result_score = 903
+	jogo.result_score = 9034
 
 func _resultado(pontos: int, veredito: float) -> void:
 	_preparar(GameDef.State.RESULT)
@@ -118,16 +118,16 @@ func _resultado(pontos: int, veredito: float) -> void:
 		jogo.moldura.set_estado(LedFrame.RESULTADO, GameDef.classificar(pontos)["cor_faixa"])
 
 func _contando() -> void:
-	_resultado(903, -1.0)
+	_resultado(9030, -1.0)
 
 func _lendario() -> void:
-	_resultado(961, 1.6)
+	_resultado(9610, 1.6)
 
 func _forte() -> void:
-	_resultado(645, 1.6)
+	_resultado(6450, 1.6)
 
 func _leve() -> void:
-	_resultado(148, 1.6)
+	_resultado(1480, 1.6)
 
 func _central() -> void:
 	_preparar(GameDef.State.IDLE)

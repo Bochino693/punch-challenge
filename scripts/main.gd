@@ -148,13 +148,43 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
+## SIMULAÇÃO DE BANCADA. Desligada de fábrica.
+##
+## Ligada, a barra de espaço vira um soco falso. É indispensável para
+## montar e regular a máquina sem bater no saco cem vezes, e é fraude num
+## salão: com ela ligada, qualquer pessoa tira 9999 sem encostar no
+## equipamento. Por isso ela não é um atalho escondido, é uma chave — e
+## uma chave que a Central mostra ligada, em vermelho, quando está.
+var simulacao_bancada := false
+## Uma segunda porta, para a bancada de quem desenvolve: `PUNCH_SIMULACAO=1`
+## no ambiente libera a barra sem mexer na configuração da máquina.
+var simulacao_por_ambiente := false
+## O GOLPE DA RODADA JÁ FOI. Um soco por rodada: o saco balança depois do
+## impacto e o MPU-6050 vê esse balanço como um segundo evento.
+var golpe_registrado := false
+## Instante do último golpe ACEITO, para o tempo morto entre eventos.
+var ultimo_golpe_ms := 0
+## O firmware avisou que o acelerômetro saturou. Fica registrado para a
+## Central; um golpe saturado NÃO vira 9999 artificial, porque a máquina
+## não sabe quanto ele valeu de verdade.
+var saturacao_recente := ""
 ## Marcado quando `_carregar` converteu marcas da escala antiga. `_ready`
 ## grava logo em seguida, e é isso que torna a conversão de uma vez só.
 var _converteu_esquema := false
-## A ESTRELA DE PANCADA: quanto tempo desde o golpe, e com que força.
-## Negativo quer dizer que não há pancada no ar.
+## A ESTRELA DE PANCADA: quanto tempo desde o golpe, com que força e de
+## qual nível. Negativo quer dizer que não há pancada no ar.
 var pancada_tempo := -1.0
 var pancada_forca := 0.0
+var pancada_nivel: Dictionary = {}
+## HIT-STOP: o congelamento curto que dá peso ao golpe. Enquanto ele
+## corre, o relógio do jogo PARA — animação, contagem e máquina de
+## estados — e só a tela continua sendo desenhada. É o que faz um
+## nocaute parecer que acertou alguma coisa sólida.
+var hitstop_left := 0.0
+## ZOOM DE IMPACTO: a tela inteira cresce um pouco e volta. Fica no
+## desenho, não na câmera, porque não há câmera — o jogo é um `_draw`.
+var zoom_impacto := 1.0
+var zoom_alvo := 1.0
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -237,6 +267,7 @@ func _ready() -> void:
 	camera_service.enabled = camera_enabled
 	camera_service.mirrored = camera_mirrored
 	add_child(camera_service)
+	simulacao_por_ambiente = OS.get_environment("PUNCH_SIMULACAO") == "1"
 	_aplicar_faixas()
 	if _converteu_esquema:
 		_converteu_esquema = false
@@ -295,6 +326,17 @@ func _alvo() -> Vector2:
 # CICLO
 # ======================================================================
 func _process(delta: float) -> void:
+	# O HIT-STOP CONGELA O JOGO, E SÓ ELE ANDA. Nem `animation_time` nem
+	# a máquina de estados avançam: se avançassem, o congelamento seria
+	# só um quadro repetido enquanto o resto seguia, e a pessoa sentiria
+	# um engasgo em vez de um golpe pesado.
+	if hitstop_left > 0.0:
+		hitstop_left = maxf(0.0, hitstop_left - delta)
+		queue_redraw()
+		return
+	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
+	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
+		zoom_impacto = 1.0
 	animation_time += delta
 	state_time += delta
 	_poll_serial(delta)
@@ -303,7 +345,10 @@ func _process(delta: float) -> void:
 	clarao = maxf(0.0, clarao - delta * 2.6)
 	if pancada_tempo >= 0.0:
 		pancada_tempo += delta
-		if pancada_tempo > PANCADA_DURACAO:
+		# O zoom volta ao normal assim que o estrelão passa da metade.
+		if pancada_tempo > ImpactDirector.PANCADA_DURACAO * 0.5:
+			zoom_alvo = 1.0
+		if pancada_tempo > ImpactDirector.PANCADA_DURACAO:
 			pancada_tempo = -1.0
 
 	if notice_left > 0.0:
@@ -384,6 +429,10 @@ func _processar_contagem(delta: float) -> void:
 		state_time = 0.0
 		espera_left = GameDef.ESPERA_DO_SOCO
 		carga_tempo = -1.0
+		# A rodada nova começa sem golpe e sem saturação pendente.
+		golpe_registrado = false
+		saturacao_recente = ""
+		sons.play("armado", -6.0)
 		sons.play("go")
 		sons.music(-19.0)
 		moldura.set_estado(LedFrame.ARMADA)
@@ -444,28 +493,17 @@ func _processar_resultado(delta: float) -> void:
 	if result_time > GameDef.RESULTADO_TIMEOUT:
 		_entrar_em_abertura()
 
-func _manter_festa(delta: float) -> void:
-	## A festa continua enquanto o veredito está na tela, e o tamanho
-	## dela é o da faixa — as mesmas três faixas da régua da Central.
-	match GameDef.faixa_de(result_score):
-		GameDef.Faixa.FORTE:
-			# Estouros pela tela, sempre a partir de um ponto: cada um é
-			# um eco do soco, e não um fogo de artifício solto no ar.
-			if verdict_time < 5.0 and verdict_time >= proximo_fogo:
-				proximo_fogo = verdict_time + 0.55
-				var ponto := Vector2(randf_range(180.0, 900.0), randf_range(280.0, 900.0))
-				fx.onda(ponto, 6.0, randf_range(150.0, 260.0), Color(Paleta.AMBAR, 0.5), 6.0, 0.5)
-				fx.explosao(ponto, 22, CORES_FESTA, 820.0)
-				fx.raios(ponto, 3, Paleta.CREME, 520.0)
-			if verdict_time < 3.0 and randf() < delta * 22.0:
-				fx.chuva_de_brasas(TELA.x, 2, CORES_FESTA)
-		GameDef.Faixa.MEDIA:
-			if verdict_time >= proximo_fogo:
-				proximo_fogo = verdict_time + 0.85
-				fx.onda(_alvo(), 90.0, 450.0, Color(Paleta.AMBAR, 0.45), 7.0, 0.85)
-		_:
-			if verdict_time < 2.2 and randf() < delta * 9.0:
-				fx.estilhacos(Vector2(randf_range(180.0, 900.0), 420.0), 2, Color("6b7b98"))
+func _manter_festa(_delta: float) -> void:
+	## A COMEMORAÇÃO QUE CONTINUA é do nível, e o intervalo entre os
+	## estouros também. Um impacto leve tem intervalo zero e não comemora
+	## nada: dizer "mandou bem" a quem não mandou é o jeito mais rápido
+	## de a máquina perder a credibilidade.
+	var nivel := ScoreTier.de(result_score)
+	var intervalo := float(nivel["festa_intervalo"])
+	if intervalo <= 0.0 or verdict_time >= 5.0 or verdict_time < proximo_fogo:
+		return
+	proximo_fogo = verdict_time + intervalo
+	ImpactDirector.festa(fx, _alvo(), nivel, CORES_FESTA)
 
 # ======================================================================
 # ENTRADA DE COMANDOS
@@ -519,16 +557,28 @@ func _input(event: InputEvent) -> void:
 	if central_aberta and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_click_central(event.position)
 
+## A BARRA DE ESPAÇO É BANCADA, NUNCA SALÃO.
+##
+## O golpe de verdade vem do MPU-6050 e de mais nada. A barra existe para
+## montar e regular a máquina sem bater no saco cem vezes — e, ligada num
+## salão, é uma pessoa tirando 9999 sem encostar no equipamento. Ela só
+## responde com a chave da Central ligada, com a Central aberta na frente
+## do técnico, ou com `PUNCH_SIMULACAO=1` na bancada de quem desenvolve.
+func _simulador_liberado() -> bool:
+	return simulacao_bancada or central_aberta or simulacao_por_ambiente
+
 func _apertou_espaco() -> void:
 	## Na janela do soco, a barra de espaço CARREGA; fora dela, é START.
 	if state == GameDef.State.ARMED:
+		if not _simulador_liberado():
+			return
 		carga_tempo = 0.0
 		sons.play("charge")
 	else:
 		_pressionou_start()
 
 func _soltou_espaco() -> void:
-	if state != GameDef.State.ARMED:
+	if state != GameDef.State.ARMED or not _simulador_liberado():
 		_cancelar_carga()
 		return
 	var tempo_carga := carga_tempo
@@ -651,15 +701,16 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	sons.play("hit", 1.5)
 	sons.stop("charge")
 	sons.music(-32.0)
-	tremor = 10.0 + forca * 22.0
-	clarao = 0.25 + forca * 0.45
-	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
-	fx.onda(alvo, 20.0, 300.0 + forca * 260.0, Color(Paleta.CREME, 0.75), 9.0, 0.38)
-	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
-	fx.explosao(alvo, 18 + int(forca * 26.0), CORES_FESTA, 900.0 + forca * 700.0)
-	# A ESTRELA DE PANCADA precisa saber a hora exata do golpe: ela dura
-	# um terço de segundo e é o desenho que diz "bateu", antes de
-	# qualquer número aparecer.
+	# O NÍVEL MANDA NO ESPETÁCULO. Um impacto leve e um soco perfeito não
+	# podem sacudir a máquina do mesmo jeito, e é a receita do nível que
+	# diz quanto de cada coisa entra.
+	pancada_nivel = ScoreTier.de(result_score)
+	var receita := ImpactDirector.golpe(fx, alvo, pancada_nivel, CORES_FESTA)
+	tremor = float(receita["tremor"])
+	clarao = float(receita["clarao"])
+	hitstop_left = float(receita["hitstop"])
+	zoom_alvo = float(receita["zoom"])
+	zoom_impacto = float(receita["zoom"])
 	pancada_tempo = 0.0
 	pancada_forca = forca
 	plays += 1
@@ -687,36 +738,17 @@ func _disparar_veredito() -> void:
 	fundo.matiz = Color(cor, 0.10)
 	var alvo := _alvo()
 
-	match classe["faixa"] as GameDef.Faixa:
-		GameDef.Faixa.FORTE:
-			if str(classe["label"]) == "LENDÁRIO":
-				sons.play("legendary", 0.5)
-			else:
-				sons.play("win", 0.5)
-			tremor = 30.0
-			clarao = 0.85
-			# O QUE SAI DE UM SOCO NÃO É CONFETE. Brasas explodindo do
-			# ponto do impacto, raios girando junto e três anéis em
-			# sequência: a comemoração passa a ter a mesma linguagem da
-			# pancada que a provocou, e não a de uma festa de aniversário.
-			fx.explosao(alvo, 120, CORES_FESTA, 1500.0)
-			fx.raios(alvo, 16, Paleta.AMBAR, 900.0)
-			fx.chuva_de_brasas(TELA.x, 70, CORES_FESTA)
-			for i in range(3):
-				fx.onda(alvo, 60.0 + float(i) * 90.0, 900.0 + float(i) * 220.0,
-					Color(Paleta.AMBAR if i != 1 else Paleta.CREME, 0.60 - float(i) * 0.14),
-					18.0 - float(i) * 4.0, 0.9 + float(i) * 0.25)
-		GameDef.Faixa.MEDIA:
-			sons.play("medium")
-			tremor = 14.0
-			fx.explosao(alvo, 46, CORES_FESTA, 900.0)
-			fx.faiscas(alvo, 40, Paleta.AMBAR, 700.0)
-			fx.onda(alvo, 60.0, 560.0, Color(Paleta.AMBAR, 0.55), 12.0, 0.9)
-		_:
-			sons.play("lose")
-			tremor = 9.0
-			fx.estilhacos(alvo, 34, Color("6b7b98"))
-			fx.poeira(alvo + Vector2(0, 240.0), 26, Color(0.45, 0.50, 0.62, 0.45), 260.0)
+	# O SOM E A COMEMORAÇÃO SÃO DO NÍVEL, não da faixa grossa.
+	#
+	# Antes três faixas decidiam por oito níveis, e NOCAUTE, PESO-PESADO,
+	# LENDÁRIO e SOCO PERFEITO caíam todos no mesmo bloco: mesma
+	# explosão, mesmo som, só a palavra mudando. Era exatamente o que a
+	# pessoa que joga duas vezes seguidas percebe.
+	var nivel: Dictionary = classe["nivel"]
+	sons.play(str(nivel["som"]), 0.5)
+	var receita := ImpactDirector.golpe(fx, alvo, nivel, CORES_FESTA)
+	tremor = maxf(tremor, float(receita["tremor"]) * 0.8)
+	clarao = maxf(clarao, float(receita["clarao"]) * 0.7)
 
 	if posicao_no_ranking == 1:
 		for sound in ["win", "medium", "lose", "legendary"]:
@@ -823,19 +855,55 @@ func _on_serial_line(line: String) -> void:
 				msg["peak_g"],
 			]
 		"SATURATION":
-			_show_notice("SATURAÇÃO NO %s — GOLPE ACIMA DA ESCALA" % str(msg["source"]))
+			# SATURAÇÃO NÃO VIRA 9999. O sensor chegou ao fim da escala e
+			# parou de medir: a máquina não sabe quanto aquele golpe valeu,
+			# e chutar o teto seria inventar. Fica registrado para a
+			# Central, que é onde alguém pode aumentar a faixa do MPU.
+			saturacao_recente = "%s às %s" % [
+				str(msg["source"]), Time.get_time_string_from_system(true)
+			]
+			_show_notice("SATURAÇÃO NO %s — AUMENTE A FAIXA DO SENSOR" % str(msg["source"]))
 		"ERROR":
 			_show_notice("ERRO DO FIRMWARE: %s" % str(msg["code"]))
 			sons.play("error", -8.0)
 
+## TEMPO MORTO ENTRE DOIS GOLPES ACEITOS, em milissegundos.
+##
+## Depois do impacto o saco balança, e o MPU-6050 vê o balanço como uma
+## sequência de eventos menores. Sem tempo morto, um soco vira três — e o
+## segundo, mais fraco, seria o que ficaria no placar.
+const TEMPO_MORTO_MS := 900
+## Um soco de verdade dura dezenas de milissegundos. Um toque, um esbarrão
+## ou um tranco no gabinete duram muito menos.
+const DURACAO_MINIMA_MS := 12.0
+
 func _receber_hit(msg: Dictionary) -> void:
 	var speed := float(msg["speed"])
-	if state != GameDef.State.ARMED:
-		# Golpe fora de hora: registra na telemetria, não vira ponto.
-		telemetria = "último golpe: %.2f m/s, %.1fg, eixo %s" % [
-			speed, float(msg["accel"]), str(msg["axis"])
-		]
+	var pico := float(msg.get("accel", 0.0))
+	var duracao := float(msg.get("duration_ms", 0.0))
+	telemetria = "último evento: %.2f m/s, %.1fg, %.0f ms, eixo %s" % [
+		speed, pico, duracao, str(msg.get("axis", "?"))
+	]
+	# 1) FORA DE ARMED NÃO PONTUA. Nem na abertura, nem na foto, nem no
+	#    resultado, nem com a Central aberta.
+	if state != GameDef.State.ARMED or central_aberta:
 		return
+	# 2) UM GOLPE POR RODADA.
+	if golpe_registrado:
+		return
+	# 3) TEMPO MORTO: o balanço do saco depois do impacto não é um golpe.
+	if Time.get_ticks_msec() - ultimo_golpe_ms < TEMPO_MORTO_MS:
+		return
+	# 4) O EVENTO PRECISA TER FÍSICA DE SOCO. Duração e pico de aceleração
+	#    não entram na nota — eles decidem se aquilo foi um soco.
+	if duracao < DURACAO_MINIMA_MS:
+		telemetria += "  •  recusado: curto demais"
+		return
+	if pico < sensor_amin:
+		telemetria += "  •  recusado: pico abaixo de %.1fg" % sensor_amin
+		return
+	golpe_registrado = true
+	ultimo_golpe_ms = Time.get_ticks_msec()
 	_cancelar_carga()
 	_processar_golpe(speed, false)
 
@@ -864,7 +932,10 @@ func _teste_de_golpe() -> void:
 		var speed := randf_range(hit_min_speed + 1.0, hit_max_speed * 0.9)
 		_show_notice("GOLPE SIMULADO — %.1f m/s" % speed)
 		if state == GameDef.State.ARMED:
-			_receber_hit({"speed": speed, "accel": 8.0, "axis": sensor_eixo})
+			_receber_hit({
+				"speed": speed, "accel": maxf(sensor_amin, 8.0),
+				"duration_ms": 45.0, "axis": sensor_eixo,
+			})
 
 # ======================================================================
 # CENTRAL TÉCNICA (F9)
@@ -1109,11 +1180,17 @@ func _salvar() -> void:
 func _draw() -> void:
 	fundo.visible = true
 	moldura.visible = false
-	# O TREMOR SACODE A TELA INTEIRA: um deslocamento só, antes de tudo.
+	# TREMOR E ZOOM SACODEM A TELA INTEIRA: uma transformação só, antes de
+	# tudo. O zoom cresce a partir do PONTO DO SOCO e não do centro da
+	# tela — crescer pelo centro afastaria a imagem justamente do lugar
+	# onde a pessoa está olhando.
 	_deslocamento = Vector2.ZERO
 	if tremor > 0.1:
 		_deslocamento = Vector2(randf_range(-tremor, tremor), randf_range(-tremor, tremor))
-		draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
+	var escala := Vector2.ONE * zoom_impacto
+	var origem := _deslocamento + ALVO_DO_SOCO - ALVO_DO_SOCO * zoom_impacto
+	if tremor > 0.1 or zoom_impacto != 1.0:
+		draw_set_transform(origem, 0.0, escala)
 
 	if state == GameDef.State.IDLE:
 		if intro_active:
@@ -1136,60 +1213,19 @@ func _draw() -> void:
 	if central_aberta:
 		_draw_central()
 
-## A ESTRELA DE PANCADA.
+## O IMPACTO NA TELA, entregue ao diretor de efeitos.
 ##
-## O desenho que diz "BATEU" antes de qualquer número: um estrelão
-## irregular abrindo no ponto do golpe, com rachaduras saindo dele e um
-## anel de riscos convergindo. É a gramática de história em quadrinhos, e
-## ela existe porque anel e faísca sozinhos dizem "alguma coisa
-## aconteceu" — não dizem "levou um soco".
-##
-## As pontas NÃO são sorteadas por quadro: um estrelão que muda de forma
-## a cada quadro vira ruído. O molde é fixo e só a escala se move.
-const PANCADA_DURACAO := 0.40
-const PANCADA_PONTAS := 14
+## Cada nível tem o seu desenho — estrelão, rachaduras, túnel de luz,
+## palco reagindo — e a receita mora em `ScoreTier`. Aqui só se decide
+## QUANDO desenhar; o QUE desenhar é do diretor.
 func _draw_pancada() -> void:
-	if pancada_tempo < 0.0:
+	if pancada_tempo < 0.0 or pancada_nivel.is_empty():
 		return
-	var t := clampf(pancada_tempo / PANCADA_DURACAO, 0.0, 1.0)
-	var centro := _alvo()
-	var escala := lerpf(0.35, 1.0, ease(t, 0.28)) * (0.75 + pancada_forca * 0.55)
-	var some := pow(1.0 - t, 1.6)
-
-	# Riscos convergindo: chegam de fora e morrem no ponto do impacto.
-	for i in range(20):
-		var ang := float(i) * TAU / 20.0 + 0.17
-		var de := 420.0 + (1.0 - t) * 420.0
-		var ate := de - lerpf(220.0, 40.0, t)
-		draw_line(
-			centro + Vector2.from_angle(ang) * de, centro + Vector2.from_angle(ang) * ate,
-			Color(Paleta.AMBAR, some * 0.55), lerpf(8.0, 2.0, t), true
-		)
-
-	var fora := PackedVector2Array()
-	var dentro := PackedVector2Array()
-	for i in range(PANCADA_PONTAS * 2):
-		var ang := float(i) * TAU / float(PANCADA_PONTAS * 2) - PI * 0.5
-		# O denteado alterna longo/curto e ainda varia de ponta a ponta,
-		# porque um estrelão perfeitamente regular lê como engrenagem.
-		var longo := i % 2 == 0
-		var variacao := 0.82 + 0.18 * sin(float(i) * 2.7)
-		var raio := (330.0 if longo else 170.0) * variacao * escala
-		fora.append(centro + Vector2.from_angle(ang) * raio)
-		dentro.append(centro + Vector2.from_angle(ang) * raio * 0.72)
-	draw_colored_polygon(fora, Color(Paleta.VERMELHO, some * 0.85))
-	draw_colored_polygon(dentro, Color(Paleta.AMBAR, some * 0.95))
-	draw_polyline(fora + PackedVector2Array([fora[0]]), Color(Paleta.CREME, some), 5.0, true)
-
-	# Rachaduras: três traços quebrados saindo do miolo.
-	for i in range(3):
-		var ang := float(i) * TAU / 3.0 + 0.6
-		var ponta := centro
-		var caminho := PackedVector2Array([centro])
-		for k in range(3):
-			ponta += Vector2.from_angle(ang + sin(float(k) * 2.1 + float(i)) * 0.45) * (110.0 * escala)
-			caminho.append(ponta)
-		draw_polyline(caminho, Color(Paleta.CREME, some * 0.8), lerpf(9.0, 2.0, t), true)
+	ImpactDirector.desenhar(
+		self, pancada_nivel,
+		clampf(pancada_tempo / ImpactDirector.PANCADA_DURACAO, 0.0, 1.0),
+		_alvo(), pancada_forca
+	)
 
 ## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
 ## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
@@ -1318,91 +1354,63 @@ func _draw_partida() -> void:
 
 ## A TELA QUE ESPERA O SOCO.
 ##
-## Não há mais saco desenhado nem barra de tempo. O saco de pancadas é a
-## peça FÍSICA que a pessoa tem na frente do corpo; desenhar um segundo
-## saco na tela dividia a atenção entre dois alvos, e o de pixel não é o
-## que se acerta. E a barra que esvaziava contava um tempo que ninguém
-## pediu — com o crédito já debitado, ela só servia para apressar.
+## Não há saco desenhado, não há barra de tempo e — desde a escala de
+## quatro dígitos — não há mais CÍRCULO DE PLACAR aqui. O círculo é o
+## objeto que revela a nota; mostrá-lo antes do golpe, mesmo vazio,
+## promete um número que ainda não existe e ensina a pessoa a olhar para
+## o lugar errado justamente quando ela deveria estar olhando para o saco
+## de verdade.
 ##
-## No lugar entra um FAROL: o mesmo visor que vai mostrar a pontuação,
-## piscando e mandando anéis para fora, dizendo "estou armado, pode
-## vir". Quem soca vê o número nascer exatamente onde o farol estava.
+## O que fica é um ALVO: anéis concêntricos respirando no ponto onde o
+## soco aterrissa, com o farol mandando anéis para fora. Chamada, e não
+## instrumento.
 func _draw_espera_do_soco() -> void:
-	var carregando := carga_tempo >= 0.0
-	# ÂMBAR, E NÃO VERMELHO, ENQUANTO ESPERA. O painel já é vermelho
-	# sobre vermelho; um farol vermelho dentro dele desaparece a três
-	# metros, que é exatamente a distância de quem ainda está decidindo
-	# se soca. Assim que a carga começa, a cor passa a ser a da faixa.
-	var cor := Paleta.AMBAR
-	if carregando:
-		cor = GameDef.classificar(carga_pontos)["cor_faixa"] as Color
+	_draw_farol(Paleta.AMBAR)
+	var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
+	_texto_arcade("SOQUE AGORA!", 1420.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
+	_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1488.0, Color.WHITE)
+	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1556.0, Paleta.AMBAR)
 
-	_draw_farol(cor, carregando)
-
-	if carregando:
-		# CARREGANDO (teclado, sem sensor): o número exato que sai se
-		# soltar agora, no mesmo visor e no mesmo formato em que ele vai
-		# aparecer no resultado. Quem carrega não adivinha quanto vale
-		# quanto: solta quando o número que está vendo serve.
-		_rotulo("PONTOS SE SOLTAR AGORA", 785.0, cor)
-		VisorLed.desenhar(self, "%04d" % carga_pontos, ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, Color.WHITE)
-		var piscada := 0.6 + 0.4 * sin(animation_time * 9.0)
-		_texto_arcade("SOLTE!", 1430.0, 72, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
-	else:
-		_rotulo("ESTOU PRONTO", 785.0, cor)
-		VisorLed.desenhar(self, "---", ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, cor)
-		var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
-		_texto_arcade("SOQUE AGORA!", 1400.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
-		var dica := "ACERTE O ALVO COM TODA A FORÇA" if _sensor_ligado() \
-			else "SEGURE E SOLTE ESPAÇO PARA SIMULAR"
-		_rotulo(dica, 1468.0, Color.WHITE)
-		# A MARCA A BATER FICA DENTRO DO VISOR, não embaixo dele: a faixa
-		# vermelha do fundo começa perto de 1500 px e engole qualquer
-		# texto miúdo que caia ali. Dentro do vidro escuro ela é legível
-		# e, de quebra, fica ao lado do número que vai substituí-la.
-		_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1105.0, Paleta.AMBAR)
+	# O SIMULADOR DE BANCADA aparece só quando está liberado. Em salão
+	# não existe barra de espaço, e anunciá-la seria ensinar um atalho
+	# que, se existisse, seria fraude.
+	if _simulador_liberado():
+		_apoio("BANCADA: SEGURE E SOLTE ESPAÇO", 1620.0, Paleta.ROXO)
+		if carga_tempo >= 0.0:
+			_texto_arcade("%04d" % carga_pontos, 1706.0, 66, Paleta.ROXO, LARGURA_UTIL)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
 	# Nos primeiros setenta e cinco segundos não há relógio nenhum: a
-	# máquina espera calada, que é o que se pediu. Só quando ela vai
-	# mesmo desistir é que avisa — e avisa dizendo que a ficha volta,
-	# senão o aviso vira ameaça.
+	# máquina espera calada, que é o que se pediu. Só quando ela vai mesmo
+	# desistir é que avisa — e avisa dizendo que a ficha volta, senão o
+	# aviso vira ameaça.
 	if espera_left <= GameDef.AVISO_DE_VOLTA:
 		var segundos := maxi(0, int(ceil(espera_left)))
-		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1660.0, Color.WHITE)
+		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1786.0, Color.WHITE)
 
-## O FAROL: anéis saindo do alvo, em batidas.
+## O FAROL E O ALVO: anéis saindo do ponto do soco, em batidas.
 ##
-## Três anéis defasados, sempre no mesmo compasso, e um halo respirando
-## por trás. É a única coisa que se move nesta tela, e move sempre para
-## FORA — na direção de quem está olhando, chamando o soco. Anéis
-## entrando para dentro leriam como contagem regressiva, que é
-## exatamente o que esta tela deixou de ter.
-func _draw_farol(cor: Color, carregando: bool) -> void:
+## Três anéis defasados, sempre no mesmo compasso, e o alvo respirando no
+## meio. Tudo se move para FORA — na direção de quem está olhando,
+## chamando o punho. Anéis entrando leriam como contagem regressiva, que
+## é exatamente o que esta tela deixou de ter.
+func _draw_farol(cor: Color) -> void:
 	var centro := ALVO_DO_SOCO
 	var compasso := 1.15
 	for i in range(3):
 		var fase := fmod(animation_time / compasso + float(i) / 3.0, 1.0)
 		var raio := lerpf(330.0, 620.0, ease(fase, 0.45))
 		draw_arc(centro, raio, 0.0, TAU, 96, Color(cor, (1.0 - fase) * 0.55), 10.0, true)
-	# O anel do visor: correndo em volta enquanto espera, cheio conforme
-	# a carga quando alguém está simulando pelo teclado.
-	draw_circle(centro, 326.0, Color("250911"))
-	draw_arc(centro, 327.0, 0.0, TAU, 192, Color("6d2835"), 4.0, true)
-	var carga := clampf(float(carga_pontos) / float(GameDef.SCORE_MAX), 0.0, 1.0)
-	for i in range(60):
-		var angulo := float(i) / 60.0 * TAU - PI * 0.5
-		var aceso := false
-		if carregando:
-			aceso = float(i) / 60.0 <= carga
-		else:
-			# Três marcas correndo, do jeito que um letreiro de fliperama
-			# fica quando está ligado e ocioso.
-			var passo := fmod(animation_time * 0.55, 1.0)
-			var d := fmod(float(i) / 60.0 - passo + 1.0, 1.0)
-			aceso = d < 0.06 or absf(d - 0.3333) < 0.03 or absf(d - 0.6667) < 0.03
-		draw_arc(centro, 347.0, angulo, angulo + 0.065, 5, cor if aceso else Color("57212c"), 14.0, true)
+	var respiro := 0.5 + 0.5 * sin(animation_time * 2.2)
+	Icones.alvo(self, centro, lerpf(268.0, 288.0, respiro), cor)
+	# Cantos de mira em volta do alvo: dizem "é AQUI" sem escrever nada.
+	var recuo := lerpf(330.0, 348.0, respiro)
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			var canto := centro + Vector2(sx * recuo, sy * recuo)
+			draw_line(canto, canto - Vector2(sx * 70.0, 0.0), Color(cor, 0.85), 8.0, true)
+			draw_line(canto, canto - Vector2(0.0, sy * 70.0), Color(cor, 0.85), 8.0, true)
 
 ## A ABERTURA GIRA EM TRÊS CAPÍTULOS.
 ##
@@ -1506,8 +1514,12 @@ func _draw_score_hero() -> void:
 		# velocidade é o que o sensor de fato viu. Quem duvida do placar
 		# ("essa máquina está roubando") tem aqui o número cru.
 		_apoio("%.1f m/s no sensor" % result_speed, 1330.0, Paleta.TINTA_FRACA)
-		var title := "%dº LUGAR" % posicao_no_ranking if posicao_no_ranking > 0 else "BOM SOCO!"
-		_texto_arcade(title, 1430.0, 64, color, LARGURA_UTIL)
+		# O NOME DO NÍVEL VEM ANTES DA COLOCAÇÃO. A pessoa quer saber o
+		# que ela fez — "NOCAUTE" — e só depois onde isso a coloca. A
+		# ordem inversa transformava o veredito numa tabela.
+		_texto_arcade(ScoreTier.nome_de(result_score), 1440.0, 84, color, LARGURA_UTIL)
+		if posicao_no_ranking > 0:
+			_rotulo("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1520.0, Paleta.AMBAR)
 
 ## O VAZIO ATRÁS DO PLACAR ERA O MAIOR PEDAÇO DA TELA.
 ##
