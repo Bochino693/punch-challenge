@@ -29,6 +29,10 @@ var _bridge_contador_ms := 0
 ## Quantas vezes a ponte precisou ser ressuscitada. Aparece na Central:
 ## uma ponte que reinicia sozinha o tempo todo é cabo ruim, não software.
 var _bridge_reinicios := 0
+## A tarefa que lê e decodifica o JPEG fora da linha do jogo.
+var _tarefa_leitura := -1
+var _imagem_pronta: Image = null
+var _mutex_leitura := Mutex.new()
 ## TETO DE RELIGAMENTOS. Sem ele, uma máquina sem Python entra num laço:
 ## o processo morre no mesmo instante em que nasce, o jogo o ressuscita,
 ## e assim a noite inteira — com o motivo verdadeiro (falta o OpenCV)
@@ -146,25 +150,81 @@ func _process(_delta: float) -> void:
 		_bridge_contador = contador
 		_bridge_contador_ms = now
 		_bridge_reinicios = 0
-	var bytes := FileAccess.get_file_as_bytes(_bridge_path) if FileAccess.file_exists(_bridge_path) else PackedByteArray()
-	var digest := hash(bytes)
-	if not bytes.is_empty() and digest != _bridge_digest:
-		var image := Image.new()
-		if image.load_jpg_from_buffer(bytes) == OK and not image.is_empty():
-			_bridge_digest = digest
-			_last_frame_ms = now
-			_last_image = image
-			_oferecer_ao_obturador(image)
-			if _bridge_texture == null:
-				_bridge_texture = ImageTexture.create_from_image(image)
-			else:
-				_bridge_texture.update(image)
-			status = "CÂMERA CONECTADA (PONTE)"
-	elif now - _bridge_started_ms > 5000 and _bridge_texture == null:
+	# LER E DECODIFICAR O JPEG SAI DA LINHA DO JOGO.
+	#
+	# Isto era um engasgo de verdade, e periódico — o pior tipo. A cada
+	# quadro novo da ponte (quinze por segundo) a linha principal lia o
+	# arquivo inteiro do disco, calculava o resumo dele e decodificava o
+	# JPEG, tudo entre um quadro desenhado e o seguinte. Num PC de
+	# gabinete isso são alguns milissegundos QUINZE VEZES POR SEGUNDO: a
+	# animação não fica lenta, fica ENGASGADA, que é a impressão de
+	# travamento que se vê e não se consegue apontar.
+	#
+	# Agora quem lê e decodifica é uma tarefa do pool de linhas do Godot.
+	# A linha do jogo só encosta na imagem quando ela já está pronta.
+	_colher_quadro_da_ponte(now)
+	if _bridge_texture == null and now - _bridge_started_ms > 5000:
 		# A ponte escreve o motivo ao lado do JPEG; sem ler esse arquivo,
 		# todo problema virava a mesma mensagem genérica e o técnico não
 		# sabia se era OpenCV, cabo ou câmera ocupada.
 		status = _bridge_status_file()
+
+## Entrega à linha do jogo o quadro que a tarefa de leitura terminou, e
+## põe a próxima tarefa para rodar. Nunca há mais de uma no ar: com duas,
+## a mais velha poderia terminar depois da mais nova e a prévia andaria
+## para trás.
+func _colher_quadro_da_ponte(agora: int) -> void:
+	if _tarefa_leitura != -1:
+		if not WorkerThreadPool.is_task_completed(_tarefa_leitura):
+			return
+		WorkerThreadPool.wait_for_task_completion(_tarefa_leitura)
+		_tarefa_leitura = -1
+		_mutex_leitura.lock()
+		var pronta := _imagem_pronta
+		_imagem_pronta = null
+		_mutex_leitura.unlock()
+		if pronta != null and not pronta.is_empty():
+			_last_frame_ms = agora
+			_last_image = pronta
+			_oferecer_ao_obturador(pronta)
+			if _bridge_texture == null:
+				_bridge_texture = ImageTexture.create_from_image(pronta)
+			else:
+				_bridge_texture.update(pronta)
+			status = "CÂMERA CONECTADA (PONTE)"
+	if _bridge_pid > 0 and _tarefa_leitura == -1:
+		_tarefa_leitura = WorkerThreadPool.add_task(_ler_quadro, false, "camera: ler quadro")
+
+## Corpo da tarefa. Roda FORA da linha do jogo: aqui não se toca em nada
+## que o desenho leia — só no par mutex/imagem que existe para isto.
+func _ler_quadro() -> void:
+	if _bridge_path.is_empty() or not FileAccess.file_exists(_bridge_path):
+		return
+	var bytes := FileAccess.get_file_as_bytes(_bridge_path)
+	if bytes.is_empty():
+		return
+	var digest := hash(bytes)
+	if digest == _bridge_digest:
+		return
+	var imagem := Image.new()
+	if imagem.load_jpg_from_buffer(bytes) != OK or imagem.is_empty():
+		return
+	_bridge_digest = digest
+	_mutex_leitura.lock()
+	_imagem_pronta = imagem
+	_mutex_leitura.unlock()
+
+## Espera a tarefa de leitura antes de mexer no estado que ela usa.
+## Sem isto, matar a ponte enquanto uma leitura está no ar deixa a tarefa
+## lendo um arquivo que acabou de ser apagado.
+func _esperar_leitura() -> void:
+	if _tarefa_leitura == -1:
+		return
+	WorkerThreadPool.wait_for_task_completion(_tarefa_leitura)
+	_tarefa_leitura = -1
+	_mutex_leitura.lock()
+	_imagem_pronta = null
+	_mutex_leitura.unlock()
 
 ## O FEED NATIVO PRECISA PROVAR QUE FUNCIONA.
 ##
@@ -427,6 +487,7 @@ func capture_photo() -> String:
 
 func _exit_tree() -> void:
 	_stop_feed()
+	_esperar_leitura()
 
 func _stop_feed() -> void:
 	if _feed != null:
@@ -443,6 +504,7 @@ func _stop_feed() -> void:
 ## o sintoma aparece como "câmera não funciona" numa máquina em que a
 ## câmera está perfeita.
 func _matar_ponte() -> void:
+	_esperar_leitura()
 	if _bridge_pid > 0:
 		OS.kill(_bridge_pid)
 	_bridge_pid = -1

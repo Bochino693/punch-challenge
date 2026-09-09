@@ -22,10 +22,16 @@ extends RefCounted
 ## isso não cobre a escada inteira.
 const BORDA := 1.0
 
+## CHAVE DE MEDIÇÃO. Desligada, `poligono` vira `draw_colored_polygon`
+## puro — é o que permite medir quanto custa o antisserrilhado sem
+## desfazer o código todo. Nunca fica falsa numa build de salão.
+static var suavizar := true
+
 ## Polígono cheio com a aresta lisa.
 static func poligono(ci: CanvasItem, pontos: PackedVector2Array, cor: Color) -> void:
 	ci.draw_colored_polygon(pontos, cor)
-	contorno(ci, pontos, cor)
+	if suavizar:
+		contorno(ci, pontos, cor)
 
 ## Só o contorno — para quem já desenhou o miolo de outro jeito.
 static func contorno(ci: CanvasItem, pontos: PackedVector2Array, cor: Color, espessura := BORDA) -> void:

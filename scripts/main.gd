@@ -2072,6 +2072,12 @@ func _draw_partida() -> void:
 				_draw_texture_cover(camera_service.preview_texture(), rect, 1.0, camera_mirrored)
 			else:
 				_draw_avatar(rect, 1.0)
+				# A CÂMERA PODE ESTAR SÓ ABRINDO. O boneco desenhado
+				# sozinho diz "não há câmera"; com o anel girando por
+				# cima ele diz "espera, estou chegando", que é a verdade
+				# nos primeiros segundos de qualquer rodada.
+				if camera_enabled:
+					_carregando(rect.get_center() + Vector2(0.0, 210.0), 30.0, Paleta.CIANO)
 			if not pose_finished:
 				_texto_arcade(str(clampi(int(ceil(countdown_left)), 1, 3)), 1400.0, 150, Color.WHITE, LARGURA_UTIL)
 				_rotulo("OLHE PARA A CÂMERA", 1490.0, Paleta.AMBAR)
@@ -2249,13 +2255,9 @@ func _draw_score_hero() -> void:
 		draw_arc(center, 347, angle, angle + 0.065, 5, color if lit else Color("57212c"), 14.0, true)
 	draw_arc(center, 302, animation_time * 0.5, animation_time * 0.5 + 1.2, 64, Color(color, 0.55), 2.0, true)
 	_rotulo("IMPACTO" if measuring else ("SUA PONTUAÇÃO" if verdict_time >= 0.0 else "CALCULANDO"), 785.0, color)
-	# VISOR DE SETE SEGMENTOS, e não texto. Numa máquina de fliperama o
-	# placar é um painel de LED atrás de um vidro, e o que o olho
-	# reconhece não é o formato do algarismo: é o SEGMENTO APAGADO, que
-	# continua visível atrás do número. Nenhuma fonte dá isso.
-	VisorLed.desenhar(
-		self, "----" if measuring else "%04d" % int(round(displayed_score)),
-		center + Vector2(0.0, 20.0), 168.0, Color.WHITE if not measuring else color
+	_placar(
+		"– – – –" if measuring else "%04d" % int(round(displayed_score)),
+		center + Vector2(0.0, 20.0), color if measuring else Color.WHITE
 	)
 	if verdict_time >= 0.0:
 		_rotulo("PONTOS", 1110.0, color)
@@ -2270,6 +2272,70 @@ func _draw_score_hero() -> void:
 		_texto_arcade(ScoreTier.nome_de(result_score), 1440.0, 84, color, LARGURA_UTIL)
 		if posicao_no_ranking > 0:
 			_rotulo("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1520.0, Paleta.AMBAR)
+
+## O CARREGANDO: UM ANEL QUE GIRA E UMA FRASE DO QUE ESTÁ ACONTECENDO.
+##
+## Toda espera desta máquina era silenciosa. O diagnóstico da câmera podia
+## levar dois minutos instalando o OpenCV e a tela ficava idêntica à de
+## antes de apertar; a ponte podia estar subindo enquanto a tela da pose
+## já mostrava o boneco desenhado, como se não houvesse câmera nenhuma.
+## Espera sem sinal é indistinguível de defeito — e quem está na frente
+## do gabinete conclui, sempre, que apertou e não aconteceu nada.
+##
+## O anel não é enfeite: ele GIRA, e é o giro que prova que o programa
+## está vivo. Uma barra parada em 40% diria menos do que este anel.
+func _carregando(centro: Vector2, raio: float, cor: Color, texto := "") -> void:
+	draw_arc(centro, raio, 0.0, TAU, 48, Color(cor, 0.16), 5.0, true)
+	var comeco := animation_time * 3.4
+	draw_arc(centro, raio, comeco, comeco + 1.5, 24, cor, 5.0, true)
+	# Um segundo arco, mais lento e no sentido contrário: com um só, em
+	# giro constante, o olho perde a referência e o anel parece parado.
+	draw_arc(centro, raio * 0.62, -comeco * 0.7, -comeco * 0.7 + 0.9, 18, Color(cor, 0.55), 4.0, true)
+	if not texto.is_empty():
+		_texto(texto, centro.y + raio + 40.0, 18, cor, HORIZONTAL_ALIGNMENT_CENTER, centro.x - 300.0, 600.0)
+
+## O PLACAR: QUATRO ALGARISMOS, E NADA DISPUTANDO COM ELES.
+##
+## Aqui havia um visor de sete segmentos desenhado traço a traço. A ideia
+## era boa no papel — num fliperama o placar é um painel de LED atrás de
+## um vidro, e o que denuncia isso é o segmento APAGADO atrás do número.
+## Na tela ela não fecha: sete traços com catorze junções em bisel, mais
+## os apagados por baixo, produzem uma grade, e a três metros a grade
+## ganha do algarismo. Foram três desenhos diferentes e os três leram
+## como grade.
+##
+## Então o placar é tipográfico, na letra do cartaz — a mesma do
+## logotipo, a mesma do PUNCH CHALLENGE. Um número é uma forma que a
+## pessoa reconhece antes de ler, e é isso que um placar precisa ser.
+## O tratamento é o de fliperama, em quatro passadas:
+##
+##   1. um halo largo na cor da faixa, que é o vidro espalhando a luz;
+##   2. um contorno grosso quase preto, que segura o número sobre o anel
+##      aceso e sobre o clarão do soco;
+##   3. uma cópia clara alguns pixels acima, que vira o brilho do topo;
+##   4. o número.
+##
+## `tabular` importa: sem ele, cada algarismo tem a sua largura e o
+## placar DANÇA de lado enquanto sobe de 0000 a 9999.
+const PLACAR_CORPO := 190
+
+func _placar(texto: String, centro: Vector2, cor: Color) -> void:
+	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO)
+	var pos := Vector2(centro.x - medida.x * 0.5, centro.y + PLACAR_CORPO * 0.36)
+	for i in range(3):
+		draw_string_outline(
+			fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO,
+			int(PLACAR_CORPO * (0.16 + float(i) * 0.09)), Color(cor, 0.10)
+		)
+	draw_string_outline(
+		fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO,
+		int(PLACAR_CORPO * 0.085), Color(Paleta.CONTORNO, 0.95)
+	)
+	draw_string(
+		fonte, pos - Vector2(0.0, PLACAR_CORPO * 0.045), texto,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO, cor.lightened(0.5)
+	)
+	draw_string(fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO, cor)
 
 ## O VAZIO ATRÁS DO PLACAR ERA O MAIOR PEDAÇO DA TELA.
 ##
@@ -2636,6 +2702,11 @@ func _central_camera() -> void:
 	var ocupado := medico != null and medico.rodando
 	_botao(BOTOES_SIMPLES["diagnosticar"], "AGUARDE…" if ocupado else "DIAGNOSTICAR", ocupado, Paleta.CIANO, 18)
 	_botao(BOTOES_SIMPLES["instalar_camera"], "RESOLVER TUDO", false, Paleta.VERDE, 18)
+	if ocupado:
+		# O exame roda numa linha à parte e pode levar dois minutos. Sem
+		# este anel, os dois minutos são indistinguíveis de um botão que
+		# não fez nada — que foi exatamente a queixa que trouxe até aqui.
+		_carregando(Vector2(540.0, 1010.0), 26.0, Paleta.CIANO)
 	if medico == null or medico.linhas.is_empty():
 		_texto(
 			"DIAGNOSTICAR só olha: Python, OpenCV, o que o Windows vê e quais índices respondem.",
