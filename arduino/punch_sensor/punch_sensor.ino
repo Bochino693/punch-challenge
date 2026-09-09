@@ -126,7 +126,19 @@ void processarBotoes();
 void processarComandos();
 void fecharGolpe();
 bool mpuVivo();
+bool mpuResponde(uint8_t endereco);
+bool ligarMpu();
+void insistirNoMpu();
 void escreverReg(uint8_t reg, uint8_t valor);
+
+/*  A PLACA FUNCIONA COM OU SEM O SENSOR.
+
+    `mpuPronto` diz qual dos dois casos e o de agora -- e nenhum dos dois
+    impede botao, serial ou fita de funcionar.
+*/
+bool mpuPronto = false;
+unsigned long ultimaTentativaMpu = 0;
+uint8_t enderecoMpu = MPU_ADDR;   // 0x68 ou 0x69, decidido ao procurar
 
 // Escalas do MPU-6050 com a configuracao abaixo (+/-16 g, +/-2000  graus/s).
 const float LSB_POR_G = 2048.0f;
@@ -192,26 +204,55 @@ String bufferSerial = "";
     compilacao sai limpa.
 */
 void escreverReg(uint8_t reg, uint8_t valor) {
-  Wire.beginTransmission((uint8_t)MPU_ADDR);
+  Wire.beginTransmission(enderecoMpu);
   Wire.write(reg);
   Wire.write(valor);
   Wire.endTransmission();
 }
 
-bool mpuVivo() {
-  Wire.beginTransmission((uint8_t)MPU_ADDR);
+/*  PROCURA O SENSOR NOS DOIS ENDERECOS, E ACEITA QUALQUER CLONE.
+
+    Duas armadilhas moravam aqui, e as duas reprovavam modulo bom:
+
+    ENDERECO. O MPU-6050 responde em 0x68 com o pino AD0 no terra e em
+    0x69 com ele no positivo. O AD0 do GY-521 tem um resistor na placa
+    que o puxa para baixo, mas em varios clones esse resistor nao existe
+    e o pino fica solto -- e pino solto flutua. Procurar so em 0x68 e
+    apostar.
+
+    WHO_AM_I. Exigia-se que o registrador 0x75 devolvesse exatamente
+    0x68. Metade dos modulos vendidos como "MPU-6050" traz na verdade um
+    MPU-6500, um MPU-9250 ou um ICM-20608, que devolvem 0x70, 0x71, 0x73
+    ou 0x98 -- e medem aceleracao igualzinho. Exigir 0x68 era reprovar
+    hardware que funciona.
+
+    O que interessa e se ALGUEM RESPONDE no barramento. Quem responder,
+    serve.
+*/
+bool mpuResponde(uint8_t endereco) {
+  Wire.beginTransmission(endereco);
+  if (Wire.endTransmission() != 0) return false;
+  Wire.beginTransmission(endereco);
   Wire.write((uint8_t)0x75); // WHO_AM_I
   if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1);
+  Wire.requestFrom(endereco, (uint8_t)1);
   if (Wire.available() < 1) return false;
-  return Wire.read() == 0x68;
+  const uint8_t quem = (uint8_t)Wire.read();
+  // Zero e 0xFF sao barramento mudo ou em curto, nao um chip.
+  return quem != 0x00 && quem != 0xFF;
+}
+
+bool mpuVivo() {
+  if (mpuResponde(0x68)) { enderecoMpu = 0x68; return true; }
+  if (mpuResponde(0x69)) { enderecoMpu = 0x69; return true; }
+  return false;
 }
 
 bool mpuLer(float accelG[3], float gyroDps[3]) {
-  Wire.beginTransmission((uint8_t)MPU_ADDR);
+  Wire.beginTransmission(enderecoMpu);
   Wire.write((uint8_t)0x3B); // ACCEL_XOUT_H: 14 bytes seguidos (accel, temp, gyro)
   if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
+  Wire.requestFrom(enderecoMpu, (uint8_t)14);
   if (Wire.available() < 14) return false;
   int16_t bruto[7];
   for (uint8_t i = 0; i < 7; i++) {
@@ -616,34 +657,91 @@ void setup() {
 #endif
 
   Serial.begin(115200);
+
+  /*  O `READY` VEM ANTES DE TUDO, E A PLACA NUNCA TRAVA.
+
+      AQUI ESTAVA O DEFEITO QUE MATAVA A MAQUINA INTEIRA. Estava assim:
+
+          if (!mpuVivo()) {
+            Serial.println(F("ERROR,NO_MPU"));
+            while (true) { pisca o LED; }     // <- para sempre
+          }
+          ...
+          Serial.println(F("READY,..."));     // <- nunca chegava aqui
+
+      Sem o sensor respondendo, a placa entrava num laco infinito ANTES
+      de chegar ao `loop()`. Consequencia: `processarBotoes()` nunca
+      rodava, e START e CREDITO ficavam MORTOS. O `READY` tambem nunca
+      saia, entao o jogo nunca reconhecia a porta e ficava trocando de
+      COM a noite inteira. As fitas idem.
+
+      Um problema no sensor derrubava os botoes, a serial e a
+      iluminacao -- tres coisas que nao dependem dele para nada. E o LED
+      piscando em D13, unica pista que sobrava, ninguem ve dentro do
+      gabinete fechado.
+
+      A regra agora e outra: a placa SEMPRE chega ao `loop()`. Sem
+      sensor ela avisa, segue funcionando -- botoes, serial, fitas -- e
+      tenta o sensor de novo a cada dois segundos. Um fio de I2C mal
+      encaixado que alguem empurre de volta passa a funcionar sozinho,
+      sem desligar nada.
+  */
+  Serial.println(F("READY,PUNCH_MPU6050,V3"));
+
   Wire.begin();
   Wire.setClock(400000); // I2C rapido: a leitura nao pode atrasar a amostragem
 
-  if (!mpuVivo()) {
+  if (ligarMpu()) {
+    calibrar();
+  } else {
     Serial.println(F("ERROR,NO_MPU"));
-    // Sem sensor nao ha o que medir; pisca o LED ate alguem religar.
-    while (true) {
-      digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
-      delay(200);
-    }
   }
+  ultimaAmostraUs = micros();
+}
 
+/*  Acorda o MPU e o deixa na escala do jogo. Devolve falso se ele nao
+    responde -- e nesse caso a placa continua trabalhando sem ele.
+*/
+bool ligarMpu() {
+  if (!mpuVivo()) {
+    mpuPronto = false;
+    return false;
+  }
   escreverReg(0x6B, 0x01); // PWR_MGMT_1: acorda, clock do giroscopio X
   escreverReg(0x1A, 0x03); // CONFIG: DLPF ~44 Hz -- corta ruido, mantem o golpe
   escreverReg(0x1B, 0x18); // GYRO_CONFIG: +/-2000  graus/s
   escreverReg(0x1C, 0x18); // ACCEL_CONFIG: +/-16 g
-  delay(100);
+  delay(50);
+  mpuPronto = true;
+  return true;
+}
 
-  Serial.println(F("READY,PUNCH_MPU6050,V2"));
-  calibrar();
-  ultimaAmostraUs = micros();
+/*  Tenta o sensor de novo, de dois em dois segundos, enquanto ele
+    faltar. E o que permite consertar um fio com a maquina ligada.
+*/
+void insistirNoMpu() {
+  if (mpuPronto) return;
+  const unsigned long agora = millis();
+  if (agora - ultimaTentativaMpu < 2000) return;
+  ultimaTentativaMpu = agora;
+  // O LED de status pisca enquanto falta sensor: e a pista de quem esta
+  // com a tampa aberta.
+  digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
+  if (ligarMpu()) {
+    digitalWrite(LED_STATUS, LOW);
+    Serial.println(F("OK,MPU"));
+    calibrar();
+  }
 }
 
 void loop() {
+  // A ORDEM IMPORTA: botoes e serial vem PRIMEIRO, e sem condicao
+  // nenhuma. Eles nao dependem do sensor e nao podem ficar presos a ele.
   processarComandos();
   processarBotoes();
+  insistirNoMpu();
 
-  if ((long)(micros() - ultimaAmostraUs) >= (long)AMOSTRA_US) {
+  if (mpuPronto && (long)(micros() - ultimaAmostraUs) >= (long)AMOSTRA_US) {
     processarAmostra();
   }
   if (millis() - ultimaTelemetriaMs >= TELEMETRIA_MS) {

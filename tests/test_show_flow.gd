@@ -221,15 +221,32 @@ func _test_bancada_sem_sensor() -> void:
 	assert(jogo.simulacao_bancada)
 	assert(jogo._simulador_liberado())
 
-	# O sensor se apresentando desliga a chave sem ninguém pedir.
-	jogo._on_serial_line("READY,PUNCH_MPU6050,V2")
+	# PLACA ENCONTRADA NÃO É SENSOR ENCONTRADO, e a diferença importa.
+	#
+	# O firmware manda o `READY` ANTES de procurar o MPU-6050 — foi assim
+	# que os botões voltaram a funcionar com o sensor solto. Se o READY
+	# ainda desligasse a bancada, uma máquina SEM sensor perderia a barra
+	# de espaço e não sobraria jeito nenhum de jogar nela.
+	jogo._on_serial_line("READY,PUNCH_MPU6050,V3")
+	assert(jogo.simulacao_bancada)
+	assert(jogo._simulador_liberado())
+
+	# Quem desliga é a prova de que o sensor existe.
+	jogo._on_serial_line("OK,MPU")
 	assert(not jogo.simulacao_bancada)
 	assert(not jogo._simulador_liberado())
+
+	# E um golpe medido também prova, mesmo que o `OK,MPU` se perca.
+	jogo.simulacao_bancada = true
+	jogo.sensor_presente = false
+	jogo._on_serial_line("HIT,7.50,9.20,120,X")
+	assert(not jogo.simulacao_bancada)
 
 	# Mas a escolha do operador manda mais que o sensor.
 	jogo.simulacao_bancada = true
 	jogo.simulacao_escolhida = true
-	jogo._on_serial_line("READY,PUNCH_MPU6050,V2")
+	jogo.sensor_presente = false
+	jogo._on_serial_line("OK,MPU")
 	assert(jogo.simulacao_bancada)
 
 # ------------------------------------------- médico da câmera

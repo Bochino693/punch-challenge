@@ -329,6 +329,10 @@ var portas_visiveis: PackedStringArray = []
 ## Quantos apertos de botão chegaram PELA SERIAL nesta sessão. Separados
 ## dos do Zero Delay de propósito: são dois caminhos diferentes, e saber
 ## qual dos dois está mudo é metade do conserto.
+## O MPU-6050 se apresentou nesta sessão? Separado de "a placa
+## respondeu": desde que o firmware deixou de travar sem sensor, as duas
+## coisas passaram a ser independentes.
+var sensor_presente := false
 var serial_start := 0
 var serial_credito := 0
 ## Quando a porta atual foi aberta. Serve para desistir dela.
@@ -1484,16 +1488,18 @@ func _on_serial_line(line: String) -> void:
 	match str(msg["type"]):
 		"READY":
 			serial_status = "CONECTADO %s" % porta_atual
-			# O SENSOR CHEGOU: a máquina deixa de ser bancada.
+			# PLACA ENCONTRADA NÃO É SENSOR ENCONTRADO.
 			#
-			# Enquanto o operador não tiver mexido na chave, quem decide é
-			# a presença do MPU-6050. É o momento exato em que a máquina
-			# passa de "em montagem" para "em salão", e é o único momento
-			# em que ela sabe disso sozinha.
-			if simulacao_bancada and not simulacao_escolhida:
-				simulacao_bancada = false
-				_show_notice("SENSOR DETECTADO — SIMULAÇÃO DE BANCADA DESLIGADA")
-				_salvar()
+			# O firmware passou a mandar o `READY` ANTES de procurar o
+			# MPU-6050, para que a máquina se apresente mesmo com o sensor
+			# solto — foi assim que os botões voltaram a funcionar sem
+			# sensor. Mas a chave da bancada não pode mais desligar aqui:
+			# desligaria a barra de espaço numa máquina em que NÃO HÁ como
+			# socar, e aí não sobraria jeito nenhum de jogar.
+			#
+			# Quem desliga a bancada agora é a prova de que o sensor
+			# existe: o `OK,MPU` do firmware, ou o primeiro golpe medido.
+			sensor_presente = false
 			_enviar_config()
 		"PONG":
 			if not porta_atual.is_empty() and "CONECTADO" not in serial_status:
@@ -1538,8 +1544,22 @@ func _on_serial_line(line: String) -> void:
 				str(msg["source"]), Time.get_time_string_from_system(true)
 			]
 			_show_notice("SATURAÇÃO NO %s — AUMENTE A FAIXA DO SENSOR" % str(msg["source"]))
+		"OK":
+			# `OK,MPU` é o firmware avisando que o sensor apareceu — no
+			# arranque, ou depois de alguém encaixar de volta um fio do
+			# I2C com a máquina ligada.
+			if str(msg.get("detail", "")) == "MPU":
+				_sensor_apareceu()
 		"ERROR":
-			_show_notice("ERRO DO FIRMWARE: %s" % str(msg["code"]))
+			if str(msg["code"]) == "NO_MPU":
+				# SEM SENSOR A MÁQUINA CONTINUA DE PÉ: botões, crédito e
+				# serial funcionam, e a barra de espaço é o que sobra para
+				# testar. Dizer isso é melhor do que dizer "erro".
+				sensor_presente = false
+				serial_status = "PLACA OK, SEM SENSOR — CONFIRA SDA/SCL"
+				_show_notice("SENSOR NÃO ENCONTRADO — BOTÕES FUNCIONAM, USE A BARRA")
+			else:
+				_show_notice("ERRO DO FIRMWARE: %s" % str(msg["code"]))
 			sons.play("error", -8.0)
 
 ## TEMPO MORTO ENTRE DOIS GOLPES ACEITOS, em milissegundos.
@@ -1552,7 +1572,22 @@ const TEMPO_MORTO_MS := 900
 ## ou um tranco no gabinete duram muito menos.
 const DURACAO_MINIMA_MS := 12.0
 
+## O SENSOR SE ANUNCIOU. É o único momento em que a máquina sabe, sozinha,
+## que saiu da montagem e entrou em operação.
+func _sensor_apareceu() -> void:
+	if sensor_presente:
+		return
+	sensor_presente = true
+	serial_status = "CONECTADO %s" % porta_atual
+	if simulacao_bancada and not simulacao_escolhida:
+		simulacao_bancada = false
+		_show_notice("SENSOR DETECTADO — SIMULAÇÃO DE BANCADA DESLIGADA")
+		_salvar()
+
 func _receber_hit(msg: Dictionary) -> void:
+	# Golpe medido é a prova definitiva de que o sensor está lá, mesmo que
+	# o `OK,MPU` tenha se perdido no cabo.
+	_sensor_apareceu()
 	var speed := float(msg["speed"])
 	var pico := float(msg.get("accel", 0.0))
 	var duracao := float(msg.get("duration_ms", 0.0))
@@ -3227,6 +3262,15 @@ func _central_dados() -> void:
 	_texto(
 		"portas vistas: %s" % (", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "nenhuma"),
 		776.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# AS DUAS PERGUNTAS, SEPARADAS. "A placa respondeu" e "o sensor
+	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
+	# travar sem sensor — e é justamente essa separação que diz ao técnico
+	# se ele deve olhar o cabo USB ou os fios do I2C.
+	_texto(
+		"sensor MPU-6050: %s" % ("presente" if sensor_presente else "NÃO ENCONTRADO — confira SDA=A4, SCL=A5, VCC e GND"),
+		804.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 
 	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE

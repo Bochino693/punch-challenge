@@ -22,6 +22,36 @@ sketch="$raiz/arduino/punch_sensor/punch_sensor.ino"
 tmp=$(mktemp -d)
 cp "$sketch" "$tmp/sketch.cpp"
 
+# O SKETCH EXISTE E ESTA INTEIRO?
+#
+# Esta checagem parece boba e nao e: um arquivo VAZIO compila sem uma
+# reclamacao, e este verificador chegou a dar FIRMWARE_OK para um sketch
+# que um script meu tinha truncado a zero byte. "Compila" nao quer dizer
+# "existe": sem `setup()` e `loop()` nao ha firmware nenhum.
+for peca in "void setup" "void loop" "processarBotoes" "BUTTON,START" "BUTTON,CREDIT"; do
+  if ! grep -q "$peca" "$sketch"; then
+    echo "FALTA no sketch: $peca"
+    exit 1
+  fi
+done
+
+# E O LACO INFINITO DE NOVO NAO.
+#
+# O `while` sem fim por falta de sensor derrubava botoes, serial e fitas
+# junto -- o defeito mais caro que este arquivo ja teve. Se alguem
+# reintroduzir um, e aqui que se descobre.
+#
+# A busca e feita no codigo SEM COMENTARIOS: a explicacao do defeito
+# antigo cita o `while` de proposito, e um verificador que reclama do
+# proprio comentario que documenta o conserto e um verificador que se
+# aprende a ignorar.
+g++ -fpreprocessed -dD -E -P -I"$stub" -include "$stub/Arduino.h" \
+    -std=gnu++11 "$tmp/sketch.cpp" > "$tmp/sem_comentario.cpp" 2>/dev/null || true
+if grep -nE 'while *\( *(true|1) *\)' "$tmp/sem_comentario.cpp"; then
+  echo "HA UM LACO INFINITO no codigo. A placa tem de sempre chegar ao loop()."
+  exit 1
+fi
+
 # -Werror de proposito: um aviso que aparece toda vez que se grava a
 # placa e um aviso que o operador aprende a ignorar -- e no meio deles vai
 # o que importava. Aqui aviso e erro.

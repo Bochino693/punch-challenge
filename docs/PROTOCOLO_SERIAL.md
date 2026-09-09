@@ -263,3 +263,50 @@ erro**. Um aviso que aparece toda vez que se grava a placa é um aviso que
 o operador aprende a ignorar — e no meio deles vai o que importava. O
 cabeçalho falso do Wire declara as duas versões de propósito, justamente
 para essa ambiguidade ser pega aqui e não na sua tela.
+
+---
+
+## A placa nunca trava, nem sem sensor
+
+Isto foi o defeito mais caro que o firmware teve, e explica de uma vez
+START morto, CRÉDITO morto e o jogo trocando de porta a noite inteira.
+
+O `setup()` estava assim:
+
+```cpp
+if (!mpuVivo()) {
+  Serial.println(F("ERROR,NO_MPU"));
+  while (true) { pisca o LED; }     // <- para sempre
+}
+...
+Serial.println(F("READY,..."));     // <- nunca chegava aqui
+```
+
+Sem o MPU-6050 respondendo, a placa entrava num laço infinito **antes de
+chegar ao `loop()`**. `processarBotoes()` nunca rodava — e um problema no
+sensor derrubava junto os botões, a serial e as fitas, três coisas que
+não dependem dele para nada. O `READY` também nunca saía, então o jogo
+nunca reconhecia a porta.
+
+Agora:
+
+- o **`READY` sai primeiro**, antes de tocar no sensor;
+- sem sensor a placa **continua no ar** — botões, crédito, serial, fitas;
+- ela **tenta o sensor de novo a cada 2 s** e manda `OK,MPU` quando ele
+  aparece, então um fio de I2C encaixado de volta volta a funcionar sem
+  desligar nada;
+- o LED de D13 pisca enquanto faltar sensor.
+
+E o sensor é procurado nos **dois endereços** (0x68 e 0x69 — o AD0 solto
+de muitos clones flutua) aceitando **qualquer `WHO_AM_I`** que não seja
+0x00 nem 0xFF. Metade dos módulos vendidos como MPU-6050 é MPU-6500,
+MPU-9250 ou ICM-20608, devolve 0x70/0x71/0x73/0x98 e mede igual: exigir
+0x68 era reprovar hardware bom.
+
+### `READY` não quer mais dizer "sensor presente"
+
+São duas coisas diferentes agora, e a aba **DADOS** mostra as duas
+separadas. Quem desliga a simulação de bancada é o **`OK,MPU`** ou o
+primeiro golpe medido — nunca o `READY`. Se fosse o `READY`, uma máquina
+sem sensor perderia a barra de espaço e não sobraria jeito nenhum de
+jogar nela.
