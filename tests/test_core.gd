@@ -12,6 +12,26 @@ func _initialize() -> void:
 	_test_top20_guarda_vinte_e_a_foto_certa()
 	_test_statistics()
 	_test_calibracao()
+	# ---------------------------------------------- as fitas de LED
+	# O quinto campo do CONFIG e o teto das fitas, e ele e OPCIONAL nos
+	# dois lados: firmware novo tem de aceitar o CONFIG de quatro campos
+	# de um jogo antigo, e este jogo so manda o quinto quando ele existe.
+	var curto := ArduinoProtocol.build_config("X", 0.45, 1.2, 3.5)
+	assert(curto == "CONFIG,X,0.450,1.20,3.50")
+	var longo := ArduinoProtocol.build_config("Y", 0.45, 1.2, 3.5, 16.0)
+	assert(longo == "CONFIG,Y,0.450,1.20,3.50,16.00")
+	# Teto abaixo do piso nao existe: a placa dividiria por uma faixa
+	# negativa e a coluna encheria ao contrario.
+	var invertido := ArduinoProtocol.build_config("X", 0.45, 5.0, 3.5, 1.0)
+	assert(invertido == "CONFIG,X,0.450,5.00,3.50,5.50")
+
+	# A altura da coluna vai em por mil, e presa entre 0 e 1000.
+	assert(ArduinoProtocol.build_leds(0.0) == "LEDS,0")
+	assert(ArduinoProtocol.build_leds(1.0) == "LEDS,1000")
+	assert(ArduinoProtocol.build_leds(0.4567) == "LEDS,457")
+	assert(ArduinoProtocol.build_leds(-3.0) == "LEDS,0")
+	assert(ArduinoProtocol.build_leds(9.0) == "LEDS,1000")
+
 	print("CORE_TESTS_OK")
 	quit(0)
 

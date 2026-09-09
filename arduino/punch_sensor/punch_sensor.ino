@@ -7,7 +7,8 @@
   PROTOCOLO SERIAL (115200 bps, uma linha por mensagem, campos com vírgula):
     Enviados:  READY / CALIBRATING / CALIBRATED / PONG / BUTTON /
                TELEMETRY / HIT / SATURATION / ERROR / OK
-    Recebidos: PING / RESET / TEST / CALIBRATE / CONFIG,eixo,raio,vmin,amin
+    Recebidos: PING / RESET / TEST / CALIBRATE / LEDS,permil /
+               CONFIG,eixo,raio,vmin,amin[,vmax]
   Referência completa: docs/PROTOCOLO_SERIAL.md no projeto Godot.
 
   COMO MEDE: a aceleração dinâmica do eixo escolhido (bruta menos o
@@ -19,11 +20,64 @@
 */
 
 #include <Wire.h>
+#include <Adafruit_NeoPixel.h>
 
 #define MPU_ADDR 0x68
 #define PINO_BOTAO_START 2
 #define PINO_BOTAO_CREDIT 3
 #define LED_STATUS 13
+
+/*  AS DUAS FITAS DE LED DA MAQUINA
+    -------------------------------
+    Uma de cada lado do gabinete, subindo. Elas sao o placar que se le do
+    outro lado do salao: quem esta na fila nao consegue ler 9610 a dez
+    metros, mas ve a coluna de luz subir ate o topo e estourar em branco.
+    E o que faz a pessoa seguinte querer bater.
+
+    LIGACAO (WS2812B / NeoPixel, 5 V):
+      dado da fita esquerda  -> D5   (com resistor de 330 ohm em serie)
+      dado da fita direita   -> D6   (idem)
+      +5 V e GND das fitas   -> FONTE PROPRIA de 5 V, nunca pelo Arduino
+      GND da fonte           -> GND do Arduino (terra comum, obrigatorio)
+
+    Trinta LEDs por fita a brilho maximo pedem quase dois amperes: tirar
+    isso do regulador do Uno queima a placa. A fonte e separada, e o unico
+    fio que volta ao Arduino e o terra.
+
+    Um capacitor de 1000 uF entre +5 V e GND da fita, junto do primeiro
+    LED, segura o pico da ligada.
+
+    BIBLIOTECA: Adafruit NeoPixel, pelo Gerenciador de Bibliotecas da
+    IDE do Arduino (Ferramentas > Gerenciar Bibliotecas > "Adafruit
+    NeoPixel"). Sem ela este sketch nao compila.
+*/
+#define PINO_FITA_ESQ 5
+#define PINO_FITA_DIR 6
+#define LEDS_POR_FITA 30
+
+// Brilho maximo. 140 de 255 e o teto pratico com uma fonte de 2 A para as
+// duas fitas; 255 num salao escuro cega mais do que mostra.
+#define BRILHO_FITA 140
+
+Adafruit_NeoPixel fitaEsq(LEDS_POR_FITA, PINO_FITA_ESQ, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel fitaDir(LEDS_POR_FITA, PINO_FITA_DIR, NEO_GRB + NEO_KHZ800);
+
+// A altura da coluna, de 0 a 1. Quem manda nela e, por ordem de
+// prioridade, o jogo (comando LEDS) e, na falta dele, a propria medicao.
+float nivelFita = 0.0f;
+float nivelAlvo = 0.0f;
+unsigned long fitaComandadaMs = 0;   // ultimo LEDS recebido do jogo
+unsigned long ultimaFitaMs = 0;
+
+// Enquanto o jogo estiver mandando LEDS, a medicao local nao mexe na
+// coluna. Passados tres segundos sem comando, a placa volta a se virar
+// sozinha -- e a maquina continua tendo fita mesmo com o PC desligado.
+const unsigned long FITA_COMANDO_VALE_MS = 3000;
+const unsigned long FITA_QUADRO_MS = 25;      // 40 quadros por segundo
+
+// A velocidade que enche a coluna inteira. Chega pelo CONFIG; o padrao e
+// o mesmo teto de fabrica do jogo.
+float velocidadeMaxima = 16.0f;
 
 // Escalas do MPU-6050 com a configuração abaixo (±16 g, ±2000 °/s).
 const float LSB_POR_G = 2048.0f;
@@ -210,6 +264,21 @@ void processarAmostra() {
 
   ultimaVelocidade = velocidade;
   ultimoPicoG = picoG;
+
+  /*  A FITA SOBE NO MESMO INSTANTE DO GOLPE.
+
+      Sem esperar o jogo: o PC ainda vai receber a linha, calcular a
+      pontuacao e comecar a animar o placar, e sao decimos de segundo em
+      que a luz ficaria parada logo depois da pancada. Quando o comando
+      LEDS chegar, ele assume -- e o que a coluna fizer daqui ate la
+      apenas antecipa o mesmo destino.
+  */
+  const float faixa = velocidadeMaxima - velocidadeMinima;
+  float f = (faixa > 0.01f) ? (velocidade - velocidadeMinima) / faixa : 0.0f;
+  if (f < 0.0f) f = 0.0f;
+  if (f > 1.0f) f = 1.0f;
+  if (f > nivelAlvo) nivelAlvo = f;
+
   Serial.print(F("HIT,"));
   Serial.print(velocidade, 2);
   Serial.print(',');
@@ -286,6 +355,24 @@ void executarComando(String cmd) {
        soco real não, o problema é mecânico, não de software. */
     Serial.print(F("HIT,7.50,9.20,120,"));
     Serial.println(eixoMedicao);
+  } else if (cmd.startsWith("LEDS,")) {
+    /*  A COLUNA COMANDADA PELO JOGO.
+
+        `LEDS,0` a `LEDS,1000` (por mil). E o jogo que manda enquanto o
+        placar sobe na tela, e por isso a fita acompanha o NUMERO subindo
+        em vez do golpe cru: as duas coisas ficam no mesmo compasso, que
+        e o que faz a maquina parecer uma peca so em vez de um monitor com
+        uma fita pendurada.
+
+        Passados tres segundos sem comando, a placa volta a se virar
+        sozinha -- a fita continua funcionando com o PC desligado.
+    */
+    long permil = cmd.substring(5).toInt();
+    if (permil < 0) permil = 0;
+    if (permil > 1000) permil = 1000;
+    nivelAlvo = (float)permil / 1000.0f;
+    fitaComandadaMs = millis();
+    Serial.println(F("OK,LEDS"));
   } else if (cmd.startsWith("CONFIG,")) {
     configurar(cmd);
   } else {
@@ -297,12 +384,17 @@ void configurar(const String &cmd) {
   // CONFIG,eixo,raio_m,velocidade_min,accel_min_g
   char eixo = 0;
   float raio = 0, vmin = 0, amin = 0;
-  int campos = sscanf(cmd.c_str(), "CONFIG,%c,%f,%f,%f", &eixo, &raio, &vmin, &amin);
+  // O quinto campo (vmax) e OPCIONAL de proposito: uma placa nova tem de
+  // continuar aceitando o CONFIG de quatro campos de uma versao antiga do
+  // jogo, senao atualizar um lado quebra o outro.
+  float vmax = velocidadeMaxima;
+  int campos = sscanf(cmd.c_str(), "CONFIG,%c,%f,%f,%f,%f", &eixo, &raio, &vmin, &amin, &vmax);
   const bool eixoOk = (eixo == 'X' || eixo == 'Y' || eixo == 'Z');
   const bool faixaOk = raio >= 0.05f && raio <= 1.50f
                        && vmin >= 0.2f && vmin <= 20.0f
                        && amin >= 0.5f && amin <= 15.0f;
-  if (campos != 4 || !eixoOk || !faixaOk) {
+  const bool tetoOk = vmax > vmin && vmax <= 40.0f;
+  if ((campos != 4 && campos != 5) || !eixoOk || !faixaOk || !tetoOk) {
     Serial.println(F("ERROR,PARAM"));
     return;
   }
@@ -310,7 +402,108 @@ void configurar(const String &cmd) {
   raioMetros = raio;
   velocidadeMinima = vmin;
   accelMinG = amin;
+  velocidadeMaxima = vmax;
   Serial.println(F("OK,CONFIG"));
+}
+
+// ------------------------------------------------------------- as fitas
+/*  A COR DE CADA ALTURA — a mesma escala do jogo.
+    As oito faixas de pontuacao do Punch Challenge vao do azul frio ao
+    branco estourado, e a fita repete essa escala de baixo para cima. Quem
+    olha a maquina de longe aprende a ler a cor antes de ler o numero: azul
+    e "passou por aqui", vermelho e "bateu forte", branco e "chamou todo
+    mundo".
+*/
+uint32_t corDoNivel(Adafruit_NeoPixel &fita, float f) {
+  if (f < 0.25f) {           // azul-aco -> verde
+    float k = f / 0.25f;
+    return fita.Color((uint8_t)(20 * k), (uint8_t)(90 + 130 * k), (uint8_t)(180 - 120 * k));
+  }
+  if (f < 0.55f) {           // verde -> ambar
+    float k = (f - 0.25f) / 0.30f;
+    return fita.Color((uint8_t)(20 + 235 * k), (uint8_t)(220 - 40 * k), (uint8_t)(60 - 50 * k));
+  }
+  if (f < 0.85f) {           // ambar -> vermelho
+    float k = (f - 0.55f) / 0.30f;
+    return fita.Color(255, (uint8_t)(180 - 150 * k), (uint8_t)(10 + 20 * k));
+  }
+  float k = (f - 0.85f) / 0.15f;   // vermelho -> branco estourado
+  return fita.Color(255, (uint8_t)(30 + 225 * k), (uint8_t)(30 + 225 * k));
+}
+
+/*  O DESENHO DA COLUNA.
+
+    Abaixo do nivel, a cor cheia. NO nivel, um LED branco: e a ponta da
+    coluna, e sem ela o topo se confunde com o resto. Acima, apagado --
+    mas nao preto: um azul quase invisivel mantem a fita VISIVEL como
+    objeto quando esta vazia, que e o que impede a maquina desligada de
+    parecer quebrada.
+*/
+void desenharFita(Adafruit_NeoPixel &fita, float nivel) {
+  const int acesos = (int)(nivel * LEDS_POR_FITA + 0.5f);
+  for (int i = 0; i < LEDS_POR_FITA; i++) {
+    const float f = (float)i / (float)(LEDS_POR_FITA - 1);
+    if (i < acesos - 1) {
+      fita.setPixelColor(i, corDoNivel(fita, f));
+    } else if (i == acesos - 1) {
+      fita.setPixelColor(i, fita.Color(255, 255, 255));
+    } else {
+      fita.setPixelColor(i, fita.Color(0, 0, 6));
+    }
+  }
+  fita.show();
+}
+
+/*  A RESPIRACAO DE QUEM ESTA ESPERANDO.
+
+    Maquina parada com fita apagada parece maquina desligada, e ninguem
+    poe ficha em maquina desligada. Uma onda lenta subindo diz "estou
+    ligada, venha bater" sem gastar a luz que o golpe vai precisar.
+*/
+void fitaEmEspera(unsigned long agora) {
+  for (int i = 0; i < LEDS_POR_FITA; i++) {
+    const float fase = (float)i / (float)LEDS_POR_FITA;
+    float onda = sinf((agora * 0.0016f) - fase * 3.4f);
+    onda = onda > 0.0f ? onda * onda : 0.0f;
+    const uint8_t v = (uint8_t)(onda * 70.0f);
+    const uint32_t cor = fitaEsq.Color(v, (uint8_t)(v / 4), (uint8_t)(v / 3));
+    fitaEsq.setPixelColor(i, cor);
+    fitaDir.setPixelColor(i, cor);
+  }
+  fitaEsq.show();
+  fitaDir.show();
+}
+
+void atualizarFitas() {
+  const unsigned long agora = millis();
+  if (agora - ultimaFitaMs < FITA_QUADRO_MS) return;
+  ultimaFitaMs = agora;
+
+  const bool comandada = (agora - fitaComandadaMs) < FITA_COMANDO_VALE_MS;
+  if (!comandada && nivelAlvo <= 0.001f && !golpeAtivo) {
+    fitaEmEspera(agora);
+    return;
+  }
+
+  /*  A COLUNA SOBE DEPRESSA E DESCE DEVAGAR.
+
+      Subir junto com o golpe e o ponto do efeito -- se ela demorasse, a
+      luz chegaria depois do soco e ninguem ligaria uma coisa a outra.
+      Descer devagar e o que deixa a marca no ar tempo suficiente para a
+      fila ver ate onde a pessoa chegou.
+  */
+  const float passo = (nivelAlvo > nivelFita) ? 0.22f : 0.012f;
+  nivelFita += (nivelAlvo - nivelFita) * passo * 4.0f;
+  if (nivelFita < 0.0f) nivelFita = 0.0f;
+  if (nivelFita > 1.0f) nivelFita = 1.0f;
+  desenharFita(fitaEsq, nivelFita);
+  desenharFita(fitaDir, nivelFita);
+
+  // Sem comando do jogo, a coluna desinfla sozinha depois do golpe.
+  if (!comandada && !golpeAtivo) {
+    nivelAlvo -= 0.006f;
+    if (nivelAlvo < 0.0f) nivelAlvo = 0.0f;
+  }
 }
 
 // ---------------------------------------------------------------- ciclo
@@ -319,6 +512,15 @@ void setup() {
   pinMode(PINO_BOTAO_CREDIT, INPUT_PULLUP);
   pinMode(LED_STATUS, OUTPUT);
   digitalWrite(LED_STATUS, LOW);
+
+  fitaEsq.begin();
+  fitaDir.begin();
+  fitaEsq.setBrightness(BRILHO_FITA);
+  fitaDir.setBrightness(BRILHO_FITA);
+  fitaEsq.clear();
+  fitaDir.clear();
+  fitaEsq.show();
+  fitaDir.show();
 
   Serial.begin(115200);
   Wire.begin();
@@ -355,4 +557,5 @@ void loop() {
     ultimaTelemetriaMs = millis();
     enviarTelemetria();
   }
+  atualizarFitas();
 }

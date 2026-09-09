@@ -58,7 +58,41 @@ aparece só na linha de diagnóstico da Central Técnica.
 | `RESET` | `RESET` | Abandona a medição em andamento. |
 | `CALIBRATE` | `CALIBRATE` | Remede o repouso. **O saco precisa estar parado.** |
 | `TEST` | `TEST` | Devolve um `HIT` sintético (`HIT,7.50,9.20,120,<eixo>`). |
-| `CONFIG` | `CONFIG,<eixo>,<raio>,<vmin>,<amin>` | Configura a medição. |
+| `CONFIG` | `CONFIG,<eixo>,<raio>,<vmin>,<amin>[,<vmax>]` | Configura a medição. O 5º campo é opcional. |
+| `LEDS` | `LEDS,<0..1000>` | Altura da coluna das duas fitas, em por mil. |
+
+### `LEDS` e as duas fitas do gabinete
+
+O gabinete tem duas fitas endereçáveis (WS2812B), uma de cada lado,
+subindo. Elas são o placar que se lê do outro lado do salão: ninguém lê
+`9610` a dez metros, mas todo mundo vê a coluna de luz subir até o topo e
+estourar em branco.
+
+`LEDS,0` a `LEDS,1000` diz a altura da coluna. **Quem manda é o jogo,
+enquanto o placar sobe na tela** — assim a fita acompanha o *número
+subindo*, e não o golpe cru. As duas coisas no mesmo compasso é o que faz
+a máquina parecer uma peça só, em vez de um monitor com uma fita
+pendurada do lado. O jogo manda no máximo doze por segundo; a placa
+interpola entre um comando e o seguinte, então a subida sai lisa sem
+entupir a serial.
+
+**A placa se vira sozinha quando o jogo cala.** Passados 3 s sem `LEDS`,
+ela volta a mapear a própria medição entre `vmin` e `vmax` — e é por isso
+que o 5º campo do `CONFIG` existe. Com o PC desligado a máquina continua
+tendo fita: coluna que sobe no soco, desce devagar, e uma onda lenta de
+espera quando não há ninguém. Fita apagada é máquina que parece
+quebrada, e ninguém põe ficha em máquina quebrada.
+
+Ligação, e ela importa: dado da fita esquerda em `D5`, direita em `D6`,
+cada uma com 330 Ω em série. **Alimentação das fitas por fonte de 5 V
+própria, nunca pelo Arduino** — trinta LEDs por fita no brilho máximo
+pedem quase dois amperes, e tirar isso do regulador do Uno queima a
+placa. O único fio que volta ao Arduino é o **GND**, que precisa ser
+comum. Um capacitor de 1000 µF entre +5 V e GND, junto do primeiro LED,
+segura o pico da ligada.
+
+Biblioteca: **Adafruit NeoPixel**, pelo Gerenciador de Bibliotecas da IDE
+do Arduino. Sem ela o sketch não compila.
 
 ### `CONFIG` em detalhe
 

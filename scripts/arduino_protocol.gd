@@ -92,7 +92,9 @@ static func _floats(parts: PackedStringArray, from: int, count: int) -> Array:
 		out.append(parts[i].strip_edges().to_float())
 	return out
 
-static func build_config(axis: String, radius_m: float, min_speed: float, min_accel_g: float) -> String:
+static func build_config(
+	axis: String, radius_m: float, min_speed: float, min_accel_g: float, max_speed := 0.0
+) -> String:
 	# Validação idêntica à do firmware — o Arduino revalida tudo.
 	var eixo := axis.to_upper()
 	if eixo != "X" and eixo != "Y" and eixo != "Z":
@@ -100,4 +102,23 @@ static func build_config(axis: String, radius_m: float, min_speed: float, min_ac
 	var raio := clampf(radius_m, 0.05, 1.50)
 	var vmin := clampf(min_speed, 0.2, 20.0)
 	var amin := clampf(min_accel_g, 0.5, 15.0)
-	return "CONFIG,%s,%.3f,%.2f,%.2f" % [eixo, raio, vmin, amin]
+	if max_speed <= 0.0:
+		return "CONFIG,%s,%.3f,%.2f,%.2f" % [eixo, raio, vmin, amin]
+	# O QUINTO CAMPO É O TETO DAS FITAS DE LED.
+	#
+	# A placa precisa dele para saber que velocidade enche a coluna
+	# inteira quando estiver se virando sozinha — com o PC desligado, ou
+	# nos décimos de segundo entre o golpe e o primeiro `LEDS` do jogo.
+	# É opcional nos dois lados: firmware novo aceita CONFIG de quatro
+	# campos, e este método só manda o quinto quando ele existe.
+	var vmax := clampf(max_speed, vmin + 0.5, 40.0)
+	return "CONFIG,%s,%.3f,%.2f,%.2f,%.2f" % [eixo, raio, vmin, amin, vmax]
+
+## A ALTURA DA COLUNA DE LED, em por mil.
+##
+## Mandada enquanto o placar sobe na tela: assim a fita acompanha o NÚMERO
+## subindo, e não o golpe cru. As duas coisas no mesmo compasso é o que
+## faz a máquina parecer uma peça só, em vez de um monitor com uma fita
+## pendurada do lado.
+static func build_leds(fracao: float) -> String:
+	return "LEDS,%d" % clampi(int(round(clampf(fracao, 0.0, 1.0) * 1000.0)), 0, 1000)

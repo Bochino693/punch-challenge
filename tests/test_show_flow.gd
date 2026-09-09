@@ -47,6 +47,8 @@ func run() -> void:
 	_test_exame_nao_briga_com_a_ponte()
 	_test_camera_acesa_nao_apaga()
 	_test_contagem_espera_a_camera()
+	_test_laco_de_atracao()
+	_test_selo_na_foto()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -533,3 +535,54 @@ func _test_contagem_espera_a_camera() -> void:
 
 	camera.estado = camera.Estado.SUBINDO
 	jogo._entrar_em_abertura()
+
+# --------------------------- a apresentacao volta sozinha
+func _test_laco_de_atracao() -> void:
+	jogo._entrar_em_abertura()
+	jogo.intro_active = false
+	jogo.central_aberta = false
+	jogo.calib_ativo = false
+	jogo.atracao_relogio = 0.0
+
+	# Antes da hora, nada acontece.
+	jogo._laco_de_atracao(jogo.ATRACAO_INTERVALO - 1.0)
+	assert(not jogo.intro_active)
+
+	# Passado o intervalo, a entrada recomeca do primeiro quadro.
+	jogo._laco_de_atracao(2.0)
+	assert(jogo.intro_active)
+	assert(is_equal_approx(jogo.intro_time, 0.0))
+
+	# COM A CENTRAL ABERTA, NUNCA. Reiniciar a entrada por baixo do
+	# tecnico que esta configurando faz ele perder o que estava fazendo.
+	jogo.intro_active = false
+	jogo.central_aberta = true
+	jogo.atracao_relogio = 0.0
+	jogo._laco_de_atracao(jogo.ATRACAO_INTERVALO + 5.0)
+	assert(not jogo.intro_active)
+	assert(jogo.atracao_relogio == 0.0)
+	jogo.central_aberta = false
+
+# ------------------------------------- a marca da casa gravada na foto
+func _test_selo_na_foto() -> void:
+	var camera: CameraService = jogo.camera_service
+	var foto := Image.create(320, 320, false, Image.FORMAT_RGB8)
+	foto.fill(Color(0.10, 0.10, 0.10))
+	# O fundo e lido DA IMAGEM, e nao da constante que a preencheu: 0,10
+	# em ponto flutuante vira 25/255 = 0,098 dentro de um RGB8, e comparar
+	# com o valor ideal falha por uma diferenca que nao existe na imagem.
+	var fundo := foto.get_pixel(20, 20)
+	camera._assinar(foto)
+	# ALGUM pixel do canto inferior direito mudou. Nao se aponta um pixel
+	# exato: o logotipo tem margem transparente, e transparente sobre o
+	# fundo nao muda nada -- um teste preso a uma coordenada quebraria no
+	# dia em que alguem recortasse o arquivo do logotipo.
+	var marcados := 0
+	for x in range(220, 315):
+		for y in range(250, 315):
+			if not foto.get_pixel(x, y).is_equal_approx(fundo):
+				marcados += 1
+	assert(marcados > 200)
+	# E o canto oposto continua intacto -- marca de fotografo e
+	# assinatura, nao camada por cima da imagem inteira.
+	assert(foto.get_pixel(20, 20).is_equal_approx(fundo))

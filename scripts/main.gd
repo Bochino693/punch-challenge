@@ -386,6 +386,8 @@ var intro_time := 0.0
 ## existe na entrada e apareceria de um quadro para o outro. Este número
 ## faz só essa mobília entrar suave, sem tocar no que já estava na tela.
 var abertura_chegada := 1.0
+## Quanto tempo a tela de espera está no ar sem repetir a apresentação.
+var atracao_relogio := 0.0
 var _photo_cache: Dictionary = {}
 
 var fx := PunchFX.new()
@@ -530,6 +532,7 @@ func _process(delta: float) -> void:
 		return
 	desempenho.medir(delta)
 	_socorro_da_camera(delta)
+	_laco_de_atracao(delta)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
 		zoom_impacto = 1.0
@@ -701,6 +704,7 @@ func _processar_resultado(delta: float) -> void:
 	displayed_score = float(result_score) * ease(avanco, 0.42)
 
 	sons.score_progress(avanco)
+	_mandar_fitas(displayed_score / float(GameDef.SCORE_MAX))
 
 	if verdict_time < 0.0 and avanco >= 1.0:
 		_disparar_veredito()
@@ -1528,9 +1532,36 @@ func _processar_golpe(speed: float, simulado: bool) -> void:
 		return
 	_registrar_impacto(pontos, speed, simulado)
 
+## AS FITAS DA MÁQUINA ACOMPANHANDO O PLACAR.
+##
+## Vinte mensagens por segundo entupiriam a serial e atrasariam o que
+## importa, que é a linha do próximo golpe. Doze é o bastante: a coluna
+## sobe suave porque a própria placa interpola entre um comando e o
+## seguinte.
+const FITAS_INTERVALO := 0.08
+var _fitas_relogio := 0.0
+var _fitas_ultimo := -1.0
+
+func _mandar_fitas(fracao: float, agora := true) -> void:
+	if link == null or not link.is_open():
+		return
+	var f := clampf(fracao, 0.0, 1.0)
+	# Sem repetir o mesmo valor: com o placar parado no fim da contagem,
+	# repetir gasta serial para não dizer nada.
+	if not agora and is_equal_approx(f, _fitas_ultimo):
+		return
+	var t := float(Time.get_ticks_msec()) / 1000.0
+	if t - _fitas_relogio < FITAS_INTERVALO:
+		return
+	_fitas_relogio = t
+	_fitas_ultimo = f
+	link.send_line(ArduinoProtocol.build_leds(f))
+
 func _enviar_config() -> void:
 	if link != null and link.is_open():
-		link.send_line(ArduinoProtocol.build_config(sensor_eixo, sensor_raio, sensor_vmin, sensor_amin))
+		link.send_line(ArduinoProtocol.build_config(
+			sensor_eixo, sensor_raio, sensor_vmin, sensor_amin, hit_max_speed
+		))
 
 func _teste_de_golpe() -> void:
 	## Na Central Técnica (tecla T ou botão TESTAR): se a placa está
@@ -2159,11 +2190,19 @@ func _draw_partida() -> void:
 	# no mesmo corpo: são a mesma máquina, e a pessoa não deve sentir que
 	# trocou de programa ao apertar START.
 	_letreiro_centrado("PUNCH CHALLENGE", 145.0, 32, Paleta.CREME)
+	# A marca acompanha a rodada inteira, à direita e discreta — menos na
+	# contagem, onde ela é desenhada ao lado do visor da foto.
+	if state != GameDef.State.COUNTDOWN:
+		_marca_lateral(1800.0, 0.40)
 	match state:
 		GameDef.State.COUNTDOWN:
 			_texto_arcade("FAÇA SUA POSE", 340.0, 72, Paleta.CIANO, LARGURA_UTIL)
 			var rect := Rect2(180, 470, 720, 720)
 			_cartao(Rect2(170, 460, 740, 740), Color("330c16"), Paleta.CIANO, 1.0, 4.0)
+			# A MARCA DA CASA AO LADO DO VISOR, à direita, na mesma altura
+			# do enquadramento. É a assinatura de quem fez a máquina, no
+			# lugar em que ela não disputa com o rosto nem com a contagem.
+			_marca_lateral(1215.0)
 			if pose_finished:
 				_draw_player_photo(rect, result_photo_path, 1.0)
 			elif camera_service != null and camera_service.tem_imagem():
@@ -2279,6 +2318,38 @@ func _draw_farol(cor: Color) -> void:
 ## ninguém acha.
 const ABERTURA_CAPITULOS := 3
 const ABERTURA_DURACAO := 8.0
+
+## O LAÇO DE ATRAÇÃO: a apresentação volta sozinha.
+##
+## Uma máquina de salão passa a maior parte da noite sem ninguém na
+## frente, e o que ela mostra nessas horas é o que trás gente. O rodízio
+## de capítulos (marca, recordes, como jogar) prende quem já parou; quem
+## está passando a dez metros só olha se alguma coisa MEXER — e a cut
+## scene do soco é o que a máquina tem de mais chamativo.
+##
+## Um minuto e vinte é o intervalo: curto o bastante para pegar quem
+## passa duas vezes pelo corredor, longo o bastante para os três
+## capítulos rodarem inteiros antes de a entrada recomeçar.
+const ATRACAO_INTERVALO := 80.0
+
+func _laco_de_atracao(delta: float) -> void:
+	# Só na tela de espera, e nunca com a Central aberta: reiniciar a
+	# entrada por baixo do técnico que está configurando é o tipo de
+	# surpresa que faz ele perder o que estava fazendo.
+	if state != GameDef.State.IDLE or intro_active or central_aberta or calib_ativo:
+		atracao_relogio = 0.0
+		return
+	atracao_relogio += delta
+	if atracao_relogio < ATRACAO_INTERVALO:
+		return
+	atracao_relogio = 0.0
+	# A ENTRADA DE NOVO, do primeiro quadro: o selo da casa, os facões de
+	# luz, o soco chegando de lado e a montagem do letreiro.
+	intro_active = true
+	intro_time = 0.0
+	abertura_chegada = 1.0
+	fx.limpar()
+	sons.music(-18.0)
 
 func _draw_show_idle() -> void:
 	var chegada := ease(abertura_chegada, 0.4)
@@ -3570,6 +3641,22 @@ func _marca_da_casa(y: float, altura: float, alpha := 1.0) -> void:
 	var largura := altura * proporcao
 	draw_texture_rect(
 		logo, Rect2(Vector2(540.0 - largura * 0.5, y), Vector2(largura, altura)),
+		false, Color(1, 1, 1, alpha)
+	)
+
+## A MARCA DA CASA À DIREITA, discreta, na linha `y`.
+##
+## Ela NÃO entra na tela de contagem com o número grande: ali a atenção
+## tem de ir para o 3-2-1 e para a câmera, e uma marca ao lado é uma
+## segunda coisa pedindo o olho no segundo em que a pessoa está se
+## ajeitando para a foto.
+func _marca_lateral(y: float, alpha := 0.55) -> void:
+	if logo == null:
+		return
+	var altura := 54.0
+	var largura := altura * logo.get_width() / float(logo.get_height())
+	draw_texture_rect(
+		logo, Rect2(Vector2(1000.0 - largura, y), Vector2(largura, altura)),
 		false, Color(1, 1, 1, alpha)
 	)
 
