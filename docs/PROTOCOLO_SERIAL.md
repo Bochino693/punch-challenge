@@ -239,3 +239,27 @@ fitas não acendem" — era "o Arduino não faz nada".
 
 Antes de qualquer entrega, `sh tools/conferir_firmware.sh` compila o
 sketch nas duas situações, fora da IDE, e confere que ele é ASCII puro.
+
+### O vermelho que aparecia a cada gravação
+
+A IDE despejava meia tela de `note: candidate 1 / candidate 2` sobre
+`Wire.requestFrom`. **Não era erro** — o sketch compilava e gravava —, mas
+também não era ruído inofensivo: era o compilador dizendo que **não sabia
+qual das duas funções você quis**.
+
+A biblioteca Wire declara `requestFrom(int, int)` e
+`requestFrom(uint8_t, uint8_t)`. Chamando com `MPU_ADDR` (que é um
+`#define`, portanto `int`) e um `(uint8_t)` no segundo argumento, nenhuma
+das duas é melhor: a primeira precisa promover um argumento, a segunda
+precisa converter o outro. Um dia o compilador escolhe a outra, o
+endereço vira um `int` truncado, e o defeito aparece como "o sensor parou
+de ler" numa máquina que estava boa.
+
+Com os dois argumentos em `uint8_t`, só uma versão serve e a compilação
+sai limpa.
+
+E o `conferir_firmware.sh` passou a rodar com `-Werror`: **aviso ali é
+erro**. Um aviso que aparece toda vez que se grava a placa é um aviso que
+o operador aprende a ignorar — e no meio deles vai o que importava. O
+cabeçalho falso do Wire declara as duas versões de propósito, justamente
+para essa ambiguidade ser pega aqui e não na sua tela.

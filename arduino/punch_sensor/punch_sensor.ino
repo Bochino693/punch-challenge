@@ -172,31 +172,66 @@ unsigned long ultimaTelemetriaMs = 0;
 String bufferSerial = "";
 
 // ---------------------------------------------------------------- MPU-6050
+/*  POR QUE TODA CHAMADA AO Wire LEVA UM (uint8_t) NA FRENTE.
+
+    A biblioteca Wire declara DUAS versoes de `requestFrom`: uma que
+    recebe (int, int) e outra (uint8_t, uint8_t). Chamando com
+    `MPU_ADDR` -- que e um #define, ou seja, um int -- e um `(uint8_t)`
+    no segundo argumento, NENHUMA das duas e melhor que a outra: a
+    primeira precisa promover o segundo argumento, a segunda precisa
+    converter o primeiro. O compilador chama isso de ambiguidade e
+    despeja meia tela de "note: candidate 1 / candidate 2" em vermelho a
+    cada compilacao.
+
+    Nao era erro -- o sketch gravava --, mas ambiguidade e o compilador
+    dizendo que NAO SABE qual funcao voce quis. Um dia ele escolhe a
+    outra, o endereco vira 0x68 truncado de um int diferente, e o defeito
+    aparece como "o sensor parou de ler" numa maquina que estava boa.
+
+    Com os dois argumentos em uint8_t, so uma versao serve, e a
+    compilacao sai limpa.
+*/
 void escreverReg(uint8_t reg, uint8_t valor) {
-  Wire.beginTransmission(MPU_ADDR);
+  Wire.beginTransmission((uint8_t)MPU_ADDR);
   Wire.write(reg);
   Wire.write(valor);
   Wire.endTransmission();
 }
 
 bool mpuVivo() {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x75); // WHO_AM_I
+  Wire.beginTransmission((uint8_t)MPU_ADDR);
+  Wire.write((uint8_t)0x75); // WHO_AM_I
   if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom(MPU_ADDR, (uint8_t)1);
+  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)1);
   if (Wire.available() < 1) return false;
   return Wire.read() == 0x68;
 }
 
 bool mpuLer(float accelG[3], float gyroDps[3]) {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x3B); // ACCEL_XOUT_H: 14 bytes seguidos (accel, temp, gyro)
+  Wire.beginTransmission((uint8_t)MPU_ADDR);
+  Wire.write((uint8_t)0x3B); // ACCEL_XOUT_H: 14 bytes seguidos (accel, temp, gyro)
   if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom(MPU_ADDR, (uint8_t)14);
+  Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14);
   if (Wire.available() < 14) return false;
   int16_t bruto[7];
   for (uint8_t i = 0; i < 7; i++) {
-    bruto[i] = (int16_t)((Wire.read() << 8) | Wire.read());
+    /*  DOIS `Wire.read()` NA MESMA EXPRESSAO ERA UM DEFEITO ESPERANDO A
+        VEZ DELE.
+
+        Estava escrito `(Wire.read() << 8) | Wire.read()`. O C++ NAO
+        define qual dos dois roda primeiro -- e a ordem aqui e tudo: o
+        MPU-6050 manda o byte alto e depois o baixo, e trocar os dois
+        transforma uma leitura de 1,02 g num numero sem sentido. Hoje o
+        compilador do AVR calha de avaliar na ordem que da certo; uma
+        atualizacao da IDE, um nivel de otimizacao diferente, e o sensor
+        "para de funcionar" sem ninguem ter mexido no hardware.
+
+        Com duas variaveis nomeadas, a ordem esta escrita e nao depende
+        de sorte.
+    */
+    const uint8_t alto = (uint8_t)Wire.read();
+    const uint8_t baixo = (uint8_t)Wire.read();
+    bruto[i] = (int16_t)(((uint16_t)alto << 8) | (uint16_t)baixo);
   }
   for (uint8_t i = 0; i < 3; i++) {
     if (bruto[i] >= 32760 || bruto[i] <= -32760) saturouAccel = true;

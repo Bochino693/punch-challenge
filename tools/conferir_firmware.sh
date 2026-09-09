@@ -22,12 +22,15 @@ sketch="$raiz/arduino/punch_sensor/punch_sensor.ino"
 tmp=$(mktemp -d)
 cp "$sketch" "$tmp/sketch.cpp"
 
+# -Werror de proposito: um aviso que aparece toda vez que se grava a
+# placa e um aviso que o operador aprende a ignorar -- e no meio deles vai
+# o que importava. Aqui aviso e erro.
 echo "--- sem a biblioteca das fitas (placa recem-instalada) ---"
-g++ -fsyntax-only -I"$stub" -include "$stub/Arduino.h" -std=gnu++11 "$tmp/sketch.cpp"
+g++ -fsyntax-only -Werror -Wall -Wno-cpp -I"$stub" -include "$stub/Arduino.h" -std=gnu++11 "$tmp/sketch.cpp"
 echo "    compila."
 
 echo "--- com a biblioteca das fitas ---"
-g++ -fsyntax-only -I"$stub" -I"$stub/comlib" -include "$stub/Arduino.h" -std=gnu++11 "$tmp/sketch.cpp"
+g++ -fsyntax-only -Werror -Wall -Wno-cpp -I"$stub" -I"$stub/comlib" -include "$stub/Arduino.h" -std=gnu++11 "$tmp/sketch.cpp"
 echo "    compila."
 
 echo "--- o sketch e ASCII puro? ---"
