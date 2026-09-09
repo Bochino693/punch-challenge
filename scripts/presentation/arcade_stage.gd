@@ -306,7 +306,7 @@ static func _intro_assinatura(canvas: Control, time: float, morph: float) -> voi
 	# a abertura já desenha a sua própria, no lugar certo, logo em
 	# seguida.
 	var saida := 1.0 - ease(morph, 0.5)
-	canvas._texto("LAZER & SPORT", 1535.0, 27, Color(GOLD, t * saida))
+	canvas._texto("LAZER & SPORT GAMES", 1535.0, 27, Color(GOLD, t * saida))
 	canvas._texto(
 		"QUAL É A SUA FORÇA?", 1622.0, 32,
 		Color(WHITE, t * saida * (0.82 + 0.18 * sin(time * 5.0)))
@@ -405,9 +405,12 @@ static func _intro_selo(canvas: Control, time: float) -> void:
 			if recortada.size() >= 3:
 				canvas.draw_colored_polygon(recortada, Color(WHITE, (0.30 - float(camada) * 0.16) * alpha))
 
-	# Só "APRESENTA": o nome da casa já está escrito dentro do selo, e
-	# repeti-lo logo abaixo era dizer a mesma coisa duas vezes.
-	canvas._texto("APRESENTA", SELO_CENTRO.y + lado * 0.80, 24, Color(GOLD, alpha * 0.85))
+	# O SÍMBOLO EM CIMA, O NOME EMBAIXO. É a ordem da marca: quem vê de
+	# longe reconhece o alvo antes de conseguir ler qualquer coisa, e o
+	# nome confirma. Invertido, o cartaz vira uma linha de texto com um
+	# desenho pendurado.
+	canvas._texto("LAZER & SPORT GAMES", SELO_CENTRO.y + lado * 0.78, 30, Color(GOLD, alpha))
+	canvas._texto("APRESENTA", SELO_CENTRO.y + lado * 0.78 + 44.0, 20, Color(WHITE, alpha * 0.70))
 
 static func _placa_redonda(canvas: CanvasItem, rect: Rect2, raio: float, cor: Color) -> void:
 	canvas.draw_rect(Rect2(rect.position + Vector2(raio, 0.0), rect.size - Vector2(raio * 2.0, 0.0)), cor)

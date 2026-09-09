@@ -1877,7 +1877,7 @@ const ABERTURA_DURACAO := 8.0
 
 func _draw_show_idle() -> void:
 	var chegada := ease(abertura_chegada, 0.4)
-	_texto("LAZER & SPORT", 220.0, 28, Color(Paleta.CIANO, chegada))
+	_texto("LAZER & SPORT GAMES", 220.0, 28, Color(Paleta.CIANO, chegada))
 	var capitulo := int(state_time / ABERTURA_DURACAO) % ABERTURA_CAPITULOS
 	# Cada capítulo entra com o seu próprio esmaecer; sem isso só o
 	# primeiro teria entrada e os outros dariam um salto seco.

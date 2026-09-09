@@ -117,3 +117,43 @@ golpes realmente próximos da velocidade máxima.
 | `ERROR,NO_MPU` | O MPU-6050 não respondeu no I2C. Confira SDA em A4, SCL em A5 e a alimentação. |
 | `SATURATION` a cada golpe forte | O sensor está no fundo de escala. A medida sai menor que a real: afaste o sensor do ponto de impacto. |
 | `TEST` aparece na tela mas o soco real não | O caminho placa → jogo está bom. O problema é o sensor, a fixação dele ou o limiar `amin`. |
+
+## O Arduino não manda pontos
+
+O firmware manda **medida**, o Godot faz a **nota**:
+
+```
+HIT,<velocidade_m_s>,<pico_g>,<duracao_ms>,<eixo>
+```
+
+Só a velocidade entra na pontuação. O pico de aceleração e a duração
+servem para decidir se aquilo foi um soco — validam, não inflam.
+
+Isso não é preciosismo de arquitetura. Com a nota calculada no firmware,
+mudar a dificuldade da casa exigiria regravar o Arduino; a curva não
+poderia ser desenhada na tela antes de salvar; e duas máquinas com
+firmwares de épocas diferentes dariam notas diferentes para o mesmo soco.
+
+### O que o jogo recusa, e por quê
+
+| Recusa | Motivo |
+| --- | --- |
+| Fora do estado `ARMED` | Abertura, foto, contagem e resultado não pontuam. |
+| Segundo `HIT` na mesma rodada | Um soco por rodada. |
+| Menos de 900 ms desde o último aceito | O saco balança depois do impacto, e o MPU lê o balanço como uma sequência de eventos menores. |
+| Duração abaixo de 12 ms | Um toque, um esbarrão ou um tranco no gabinete duram muito menos que um soco. |
+| Pico abaixo da sensibilidade configurada | Idem. O valor sai do assistente de calibração. |
+
+### `SATURATION` não vira 9999
+
+Quando o acelerômetro chega ao fim da escala, ele **parou de medir**. A
+máquina não sabe quanto aquele golpe valeu, e chutar o teto seria
+inventar um número. A saturação fica registrada na Central Técnica, na
+página GOLPE, com a hora — é lá que alguém aumenta a faixa do MPU-6050.
+
+### `BUTTON,START` e `BUTTON,CREDIT`
+
+Os dois botões do gabinete podem chegar pela serial **ou** pela placa
+Zero Delay como controle USB. Os dois caminhos passam pelo mesmo
+antirrepique de 250 ms e pelas mesmas ações `cabinet_start` e
+`cabinet_credit`.
