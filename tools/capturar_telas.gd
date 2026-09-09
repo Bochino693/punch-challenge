@@ -39,6 +39,9 @@ func _initialize() -> void:
 		{"nome": "11_central_golpe", "fn": _central.bind(1)},
 		{"nome": "12_central_camera", "fn": _central.bind(2)},
 		{"nome": "13_central_dados", "fn": _central.bind(3)},
+		{"nome": "14_calibracao_repouso", "fn": _calibracao.bind(0)},
+		{"nome": "15_calibracao_golpes", "fn": _calibracao.bind(1)},
+		{"nome": "16_calibracao_sugestao", "fn": _calibracao.bind(3)},
 	]
 
 func _process(_delta: float) -> bool:
@@ -136,3 +139,22 @@ func _central(pagina: int) -> void:
 	_preparar(GameDef.State.IDLE)
 	jogo.central_aberta = true
 	jogo.central_pagina = pagina
+
+## O assistente de calibração, com amostras plantadas para as telas
+## saírem cheias — vazias elas não mostram o que se quer conferir.
+func _calibracao(passo: int) -> void:
+	_central(1)
+	jogo._abrir_calibracao()
+	jogo.calib_passo = passo
+	jogo.calib_repouso_left = 2.4
+	jogo.calib_ruido = 0.6
+	if passo >= 1:
+		jogo.calib_fracos.assign([2.4, 2.0, 3.1])
+		jogo.calib_picos.assign([4.0, 5.2, 9.8])
+	if passo >= 3:
+		jogo.calib_fracos.assign([2.4, 2.0, 3.1, 2.2, 2.6])
+		jogo.calib_fortes.assign([11.0, 12.5, 13.9, 12.1, 11.6])
+		jogo.calib_picos.assign([4.0, 5.2, 9.8, 4.6, 10.4, 11.0, 9.1, 12.3, 10.0, 9.4])
+		jogo.calib_sugestao = Calibracao.sugerir(
+			jogo.calib_fracos, jogo.calib_fortes, jogo.calib_picos, jogo.calib_ruido
+		)

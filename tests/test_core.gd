@@ -11,6 +11,7 @@ func _initialize() -> void:
 	_test_migracao_acontece_uma_vez()
 	_test_top20_guarda_vinte_e_a_foto_certa()
 	_test_statistics()
+	_test_calibracao()
 	print("CORE_TESTS_OK")
 	quit(0)
 
@@ -141,3 +142,43 @@ func _test_statistics() -> void:
 	assert(int(summary["average"]) == 6500)
 	assert(int(summary["best"]) == 8000)
 	assert(int(summary["top5_entries"]) == 1)
+
+# ------------------------------------------------------------ calibração
+func _test_calibracao() -> void:
+	assert(is_equal_approx(Calibracao.percentil([1.0, 2.0, 3.0], 0.5), 2.0))
+	assert(is_equal_approx(Calibracao.percentil([5.0], 0.9), 5.0))
+	assert(is_equal_approx(Calibracao.percentil([], 0.5), 0.0))
+	# Percentil é interpolado, e não o elemento mais próximo.
+	assert(is_equal_approx(Calibracao.percentil([0.0, 10.0], 0.25), 2.5))
+
+	var fracos := [2.4, 2.0, 3.1, 2.2, 2.6]
+	var fortes := [11.0, 12.5, 13.9, 12.1, 11.6]
+	var picos := [4.0, 5.2, 9.8, 4.6, 10.4, 11.0, 9.1, 12.3, 10.0, 9.4]
+	var s := Calibracao.sugerir(fracos, fortes, picos, 0.6)
+	# O piso sai ABAIXO do golpe fraco típico, e o teto ACIMA do forte
+	# típico: quem bate fraco vê algum ponto, e 9999 continua raro.
+	assert(float(s["vmin"]) < 2.4)
+	assert(float(s["vmax"]) > 12.5)
+	assert(float(s["amin"]) > 0.6)
+	assert(Calibracao.pronta(fracos, fortes))
+	assert(not Calibracao.pronta([1.0], fortes))
+
+	# UM GOLPE ESCAPADO NÃO PODE MANDAR NA CALIBRAÇÃO. Com um forte
+	# ridículo e um fraco absurdo no meio, os percentis seguram.
+	var sujo_fracos := [2.4, 2.0, 3.1, 2.2, 9.9]
+	var sujo_fortes := [11.0, 12.5, 1.2, 12.1, 11.6]
+	var t := Calibracao.sugerir(sujo_fracos, sujo_fortes, picos, 0.6)
+	assert(float(t["vmin"]) < 3.0)
+	assert(float(t["vmax"]) > 10.0)
+
+	# Se os dois grupos saírem parecidos, a escala não pode colapsar.
+	var iguais := Calibracao.sugerir([6.0, 6.1, 6.0, 5.9, 6.0], [6.2, 6.1, 6.3, 6.0, 6.2], picos, 0.4)
+	assert(float(iguais["vmax"]) - float(iguais["vmin"]) >= 3.0)
+	# E a sugestão sempre sai dentro dos limites que a Central aceita.
+	for caso in [s, t, iguais]:
+		var cfg := ScoreCurve.sanitize(
+			float(caso["vmin"]), float(caso["vmax"]),
+			ScoreCurve.DEFAULT_EXPONENT, ScoreCurve.DEFAULT_DEAD_ZONE
+		)
+		assert(is_equal_approx(cfg["min_speed"], float(caso["vmin"])))
+		assert(is_equal_approx(cfg["max_speed"], float(caso["vmax"])))

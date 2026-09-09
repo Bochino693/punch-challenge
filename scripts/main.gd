@@ -77,7 +77,7 @@ const RANKING_TAMANHO := 20
 ##
 ## Quatro páginas, cada uma com um assunto: como a máquina opera, como
 ## ela mede o golpe, o que ela vê e ouve, e o que ela guardou.
-const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA", "DADOS"]
+const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA E SOM", "DADOS"]
 
 ## Os retângulos dos botões NÃO são escritos à mão. Um par de − / + com o
 ## valor no meio é um "passo" (`_passo`), e é ele que decide onde ficam
@@ -95,6 +95,8 @@ const PASSOS := {
 	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
 	"amin": Rect2(570, 1124, 400, LADO_BOTAO),
+	"vol_musica": Rect2(110, 934, 400, LADO_BOTAO),
+	"vol_efeitos": Rect2(570, 934, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 const BOTOES_SIMPLES := {
@@ -109,10 +111,12 @@ const BOTOES_SIMPLES := {
 	"eixo": Rect2(620, 1010, 280, LADO_BOTAO),
 	"enviar_config": Rect2(110, 1300, 400, 60),
 	"testar": Rect2(570, 1300, 400, 60),
+	"calibrar": Rect2(300, 846, 480, 56),
 	# --- página CÂMERA
 	"camera": Rect2(110, 410, 260, 60),
 	"trocar_camera": Rect2(390, 410, 260, 60),
 	"foto_teste": Rect2(670, 410, 300, 60),
+	"testar_som": Rect2(300, 1046, 480, 60),
 	# --- página DADOS
 	"zerar": Rect2(110, 850, 207, 60),
 	"zerar_stats": Rect2(327, 850, 207, 60),
@@ -132,7 +136,9 @@ const PAGINA_DO_CONTROLE := {
 	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0, "simulacao": 0,
 	"vmin": 1, "vmax": 1, "curva": 1, "zona": 1,
 	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
+	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
+	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 }
 ## As abas, no topo da caixa.
@@ -230,6 +236,15 @@ var ultimo_start_ms := NUNCA_MS
 var ultimo_credito_ms := NUNCA_MS
 ## Qual página da Central está aberta.
 var central_pagina := 0
+## Volume das duas mesas que o operador regula, em dB. Vão do silêncio
+## prático (-40) a um pouco acima do nominal (+6): um salão barulhento
+## precisa de mais, e uma loja de shopping precisa de bem menos.
+var volume_musica := 0.0
+var volume_efeitos := 0.0
+## Quanto tempo faz que alguém apertou START sem saldo. Enquanto é curto,
+## o lugar do crédito pisca na abertura: apontar para onde a ficha entra
+## resolve mais do que qualquer frase.
+var aviso_de_credito := -1.0
 ## Marcado quando `_carregar` converteu marcas da escala antiga. `_ready`
 ## grava logo em seguida, e é isso que torna a conversão de uma vez só.
 var _converteu_esquema := false
@@ -330,6 +345,7 @@ func _ready() -> void:
 	camera_service.mirrored = camera_mirrored
 	add_child(camera_service)
 	simulacao_por_ambiente = OS.get_environment("PUNCH_SIMULACAO") == "1"
+	sons.set_volumes(volume_musica, volume_efeitos)
 	_aplicar_faixas()
 	if _converteu_esquema:
 		_converteu_esquema = false
@@ -420,6 +436,8 @@ func _process(delta: float) -> void:
 	if not confirm_action.is_empty() and animation_time > confirm_until:
 		confirm_action = ""
 
+	if central_aberta:
+		_processar_calibracao(delta)
 	if not central_aberta:
 		match state:
 			GameDef.State.IDLE:
@@ -466,6 +484,10 @@ func _processar_abertura(delta: float) -> void:
 			abertura_chegada = 0.0
 		return
 	abertura_chegada = minf(1.0, abertura_chegada + delta * 2.2)
+	if aviso_de_credito >= 0.0:
+		aviso_de_credito += delta
+		if aviso_de_credito > 2.6:
+			aviso_de_credito = -1.0
 	if randf() < delta * 4.0:
 		fx.poeira(
 			Vector2(randf_range(120.0, 960.0), TELA.y + 40.0),
@@ -486,6 +508,7 @@ func _processar_contagem(delta: float) -> void:
 	if atual > 0 and atual < last_count:
 		last_count = atual
 		sons.play("count")
+		sons.duck(8.0, 0.5)
 	if countdown_left <= -1.2:
 		state = GameDef.State.ARMED
 		state_time = 0.0
@@ -619,7 +642,10 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if central_aberta and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_click_central(event.position)
+		if calib_ativo:
+			_click_calibracao(event.position)
+		else:
+			_click_central(event.position)
 
 ## A BARRA DE ESPAÇO É BANCADA, NUNCA SALÃO.
 ##
@@ -747,8 +773,12 @@ func _pressionou_start() -> void:
 func _iniciar_rodada() -> void:
 	if game_mode == "credit":
 		if credits <= 0:
-			_show_notice("INSIRA 1 CRÉDITO — SELECT OU TECLA C")
-			sons.play("error", -6.0)
+			# NEGADO TEM SOM PRÓPRIO, e não o de erro genérico: faltar
+			# ficha não é defeito, e quem ouve tem de entender a
+			# diferença sem ler a tela.
+			_show_notice("INSIRA 1 CRÉDITO")
+			sons.play("start_negado", -3.0)
+			aviso_de_credito = 0.0
 			return
 		credits -= 1
 		credito_gasto = true
@@ -838,8 +868,12 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	var alvo := _alvo()
 	moldura.impacto(0.4 + forca * 0.6)
 	sons.play("hit", 1.5)
+	sons.play("subgrave", -4.0)
 	sons.stop("charge")
-	sons.music(-32.0)
+	# A TRILHA SAI DA FRENTE DO GOLPE. Não para — abaixa e volta sozinha,
+	# porque parar e recomeçar a música a cada soco é o que faz uma
+	# máquina parecer travada entre uma rodada e outra.
+	sons.duck(14.0, 2.2)
 	# O NÍVEL MANDA NO ESPETÁCULO. Um impacto leve e um soco perfeito não
 	# podem sacudir a máquina do mesmo jeito, e é a receita do nível que
 	# diz quanto de cada coisa entra.
@@ -885,6 +919,9 @@ func _disparar_veredito() -> void:
 	# pessoa que joga duas vezes seguidas percebe.
 	var nivel: Dictionary = classe["nivel"]
 	sons.play(str(nivel["som"]), 0.5)
+	# O veredito é a fala da máquina: a trilha desce por todo o tempo em
+	# que o nome do nível está sendo anunciado.
+	sons.duck(16.0, 3.0)
 	var receita := ImpactDirector.golpe(fx, alvo, nivel, CORES_FESTA)
 	tremor = maxf(tremor, float(receita["tremor"]) * 0.8)
 	clarao = maxf(clarao, float(receita["clarao"]) * 0.7)
@@ -893,6 +930,206 @@ func _disparar_veredito() -> void:
 		for sound in ["win", "medium", "lose", "legendary"]:
 			sons.stop(sound)
 		sons.play("record", -2.0)
+
+# ======================================================================
+# ASSISTENTE DE CALIBRAÇÃO
+# ======================================================================
+## CALIBRAR É MEDIR A MÁQUINA, NÃO ADIVINHAR NÚMEROS.
+##
+## Cada gabinete responde diferente: o saco, a mola, onde o sensor foi
+## parafusado, o quanto o pé da máquina cede. Regular isso por tentativa
+## e erro nos passos de − e + significa descobrir que errou depois de a
+## fila reclamar. O assistente mede: quatro passos, cinco golpes fracos,
+## cinco fortes, e a conta sai por percentis em `Calibracao`.
+const CALIB_PASSOS := ["REPOUSO", "GOLPES FRACOS", "GOLPES FORTES", "SUGESTÃO"]
+const CALIB_REPOUSO_S := 4.0
+const CALIB_BOTOES := {
+	"calib_avancar": Rect2(560, 1600, 400, 72),
+	"calib_repetir": Rect2(120, 1600, 400, 72),
+	"calib_salvar": Rect2(560, 1690, 400, 72),
+	"calib_cancelar": Rect2(120, 1690, 400, 72),
+}
+
+var calib_ativo := false
+var calib_passo := 0
+var calib_repouso_left := 0.0
+var calib_ruido := 0.0
+var calib_fracos: Array[float] = []
+var calib_fortes: Array[float] = []
+var calib_picos: Array[float] = []
+var calib_sugestao: Dictionary = {}
+
+func _abrir_calibracao() -> void:
+	calib_ativo = true
+	calib_passo = 0
+	calib_repouso_left = CALIB_REPOUSO_S
+	calib_ruido = 0.0
+	calib_fracos.clear()
+	calib_fortes.clear()
+	calib_picos.clear()
+	calib_sugestao = {}
+	_show_notice("CALIBRAÇÃO: DEIXE O SACO PARADO")
+
+func _fechar_calibracao() -> void:
+	calib_ativo = false
+	calib_sugestao = {}
+
+## O relógio do passo de repouso. Só ele corre sozinho; os outros esperam
+## golpe, e golpe não tem hora.
+func _processar_calibracao(delta: float) -> void:
+	if not calib_ativo or calib_passo != 0:
+		return
+	calib_repouso_left = maxf(0.0, calib_repouso_left - delta)
+	if calib_repouso_left <= 0.0:
+		calib_passo = 1
+		sons.play("menu", -8.0)
+
+## Um golpe chegou durante a calibração.
+##
+## Ele NÃO vira pontuação, não conta partida e não entra no ranking: a
+## Central está aberta e a máquina está sendo medida, não jogada.
+func _calibracao_recebeu(velocidade: float, pico: float) -> void:
+	match calib_passo:
+		0:
+			# Em repouso, qualquer coisa que chegue é ruído — e o ruído é
+			# justamente o que se quer medir.
+			calib_ruido = maxf(calib_ruido, pico)
+		1:
+			calib_fracos.append(velocidade)
+			calib_picos.append(pico)
+			sons.play("tick", -6.0)
+			if calib_fracos.size() >= Calibracao.AMOSTRAS:
+				calib_passo = 2
+				sons.play("menu", -8.0)
+		2:
+			calib_fortes.append(velocidade)
+			calib_picos.append(pico)
+			sons.play("tick", -3.0)
+			if calib_fortes.size() >= Calibracao.AMOSTRAS:
+				calib_passo = 3
+				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_picos, calib_ruido)
+				sons.play("record", -6.0)
+
+func _click_calibracao(p: Vector2) -> void:
+	if CALIB_BOTOES["calib_cancelar"].has_point(p):
+		_fechar_calibracao()
+		_show_notice("CALIBRAÇÃO CANCELADA — NADA FOI MUDADO")
+	elif CALIB_BOTOES["calib_repetir"].has_point(p):
+		_abrir_calibracao()
+	elif CALIB_BOTOES["calib_avancar"].has_point(p):
+		# Pular à mão serve para quem já tem o número na cabeça e só quer
+		# a parte seguinte. Nunca inventa amostra: pular deixa o passo com
+		# o que colheu, e a sugestão sai do que existe.
+		if calib_passo == 0:
+			calib_repouso_left = 0.0
+		elif calib_passo < 3:
+			calib_passo += 1
+			if calib_passo == 3:
+				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_picos, calib_ruido)
+	elif CALIB_BOTOES["calib_salvar"].has_point(p):
+		if calib_sugestao.is_empty():
+			return
+		hit_min_speed = float(calib_sugestao["vmin"])
+		hit_max_speed = float(calib_sugestao["vmax"])
+		sensor_vmin = hit_min_speed
+		sensor_amin = float(calib_sugestao["amin"])
+		_aplicar_faixas()
+		_salvar()
+		# O firmware precisa saber também: é ele que decide o que virar
+		# HIT antes de qualquer coisa chegar ao jogo.
+		_enviar_config()
+		_fechar_calibracao()
+		_show_notice("CALIBRAÇÃO SALVA E ENVIADA AO SENSOR")
+
+func _draw_calibracao() -> void:
+	var caixa := Rect2(60, 300, 960, 1500)
+	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
+	_placa(caixa.grow(-5.0), 19.0, Color("240810"))
+	_texto_arcade("CALIBRAÇÃO", 396.0, 62, Paleta.AMBAR, LARGURA_UTIL)
+
+	# A trilha dos quatro passos, com o atual aceso.
+	for i in range(CALIB_PASSOS.size()):
+		var r := Rect2(110.0 + float(i) * 220.0, 440.0, 200.0, 54.0)
+		var feito := i < calib_passo
+		var atual := i == calib_passo
+		var cor: Color = Paleta.VERDE if feito else (Paleta.AMBAR if atual else Color("4a1420"))
+		_cartao(r, cor if (feito or atual) else Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+		_texto(
+			str(CALIB_PASSOS[i]), r.position.y + 34.0, 15,
+			Color("2b0a13") if (feito or atual) else Paleta.TINTA_LEVE,
+			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+		)
+
+	match calib_passo:
+		0:
+			_texto_arcade("NÃO ENCOSTE NO SACO", 620.0, 56, Color.WHITE, LARGURA_UTIL)
+			_rotulo("medindo o ruído de repouso do sensor", 690.0, Paleta.TINTA_FRACA)
+			_texto_arcade("%.1f s" % calib_repouso_left, 820.0, 96, Paleta.AMBAR, LARGURA_UTIL)
+			_rotulo("maior pico visto: %.2f g" % calib_ruido, 900.0, Paleta.CIANO)
+		1:
+			_passo_de_golpes("CINCO GOLPES FRACOS", "bata de leve, como quem testa", calib_fracos)
+		2:
+			_passo_de_golpes("CINCO GOLPES FORTES", "bata com tudo, como o melhor cliente", calib_fortes)
+		_:
+			_resultado_da_calibracao()
+
+	var pode_avancar := calib_passo < 3
+	_botao(CALIB_BOTOES["calib_avancar"], "PULAR ESTE PASSO" if pode_avancar else "—", false, Paleta.CIANO, 19)
+	_botao(CALIB_BOTOES["calib_repetir"], "COMEÇAR DE NOVO", false, Paleta.ROXO, 19)
+	_botao(
+		CALIB_BOTOES["calib_salvar"], "SALVAR E ENVIAR AO SENSOR",
+		not calib_sugestao.is_empty(), Paleta.VERDE, 18
+	)
+	_botao(CALIB_BOTOES["calib_cancelar"], "CANCELAR", false, Paleta.VERMELHO, 19)
+
+func _passo_de_golpes(titulo: String, dica: String, amostras: Array) -> void:
+	_texto_arcade(titulo, 600.0, 52, Color.WHITE, LARGURA_UTIL)
+	_rotulo(dica, 664.0, Paleta.TINTA_FRACA)
+	# Uma casa por golpe: a pessoa que está batendo vê quantos faltam sem
+	# precisar contar de cabeça enquanto bate.
+	for i in range(Calibracao.AMOSTRAS):
+		var r := Rect2(180.0 + float(i) * 148.0, 730.0, 128.0, 128.0)
+		var tem := i < amostras.size()
+		_cartao(r, Paleta.AMBAR if tem else Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+		_texto(
+			"%.1f" % float(amostras[i]) if tem else "—", r.position.y + 76.0, 26,
+			Color("2b0a13") if tem else Paleta.TINTA_LEVE,
+			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+		)
+	_rotulo("m/s medidos pelo sensor", 900.0, Paleta.CIANO)
+
+func _resultado_da_calibracao() -> void:
+	if calib_sugestao.is_empty():
+		_texto_arcade("SEM AMOSTRAS SUFICIENTES", 620.0, 44, Paleta.VERMELHO, LARGURA_UTIL)
+		_rotulo("volte e registre os golpes", 690.0, Paleta.TINTA_FRACA)
+		return
+	_texto_arcade("SUGESTÃO", 580.0, 52, Paleta.VERDE, LARGURA_UTIL)
+	var linhas := [
+		["VELOCIDADE MÍNIMA", "%.1f m/s" % float(calib_sugestao["vmin"]), str(calib_sugestao["porque_vmin"])],
+		["VELOCIDADE MÁXIMA", "%.1f m/s" % float(calib_sugestao["vmax"]), str(calib_sugestao["porque_vmax"])],
+		["SENSIBILIDADE", "%.1f g" % float(calib_sugestao["amin"]), str(calib_sugestao["porque_amin"])],
+	]
+	for i in range(linhas.size()):
+		var y := 660.0 + float(i) * 118.0
+		_cartao(Rect2(120, y - 40.0, 840, 100), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+		_texto(str(linhas[i][0]), y, 20, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 400.0)
+		_texto(str(linhas[i][1]), y, 30, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_RIGHT, 150.0, 780.0)
+		_texto(str(linhas[i][2]), y + 30.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 780.0)
+
+	# A CURVA QUE VAI VALER, desenhada antes de salvar. É o único jeito de
+	# alguém discordar da sugestão com fundamento.
+	_rotulo("A CURVA COM ESTES NÚMEROS", 1070.0, Paleta.CREME)
+	var antes_min := hit_min_speed
+	var antes_max := hit_max_speed
+	hit_min_speed = float(calib_sugestao["vmin"])
+	hit_max_speed = float(calib_sugestao["vmax"])
+	_curva_desenhada(Rect2(120, 1100, 840, 180))
+	hit_min_speed = antes_min
+	hit_max_speed = antes_max
+	_apoio(
+		"salvando, os valores vão para a máquina E para o firmware do sensor",
+		1352.0, Paleta.TINTA_FRACA
+	)
 
 # ======================================================================
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
@@ -1023,6 +1260,11 @@ func _receber_hit(msg: Dictionary) -> void:
 	telemetria = "último evento: %.2f m/s, %.1fg, %.0f ms, eixo %s" % [
 		speed, pico, duracao, str(msg.get("axis", "?"))
 	]
+	# 0) CALIBRANDO: o golpe vira AMOSTRA, e não pontuação. Não conta
+	#    partida, não entra no ranking, não gasta ficha.
+	if calib_ativo:
+		_calibracao_recebeu(speed, pico)
+		return
 	# 1) FORA DE ARMED NÃO PONTUA. Nem na abertura, nem na foto, nem no
 	#    resultado, nem com a Central aberta.
 	if state != GameDef.State.ARMED or central_aberta:
@@ -1184,6 +1426,9 @@ func _click_central(p: Vector2) -> void:
 	elif _visivel_na_pagina("enviar_config") and BOTOES_SIMPLES["enviar_config"].has_point(p):
 		_enviar_config()
 		_show_notice("CONFIG ENVIADA AO ARDUINO")
+	elif _visivel_na_pagina("calibrar") and BOTOES_SIMPLES["calibrar"].has_point(p):
+		_abrir_calibracao()
+		return
 	elif _visivel_na_pagina("testar") and BOTOES_SIMPLES["testar"].has_point(p):
 		_teste_de_golpe()
 	elif _visivel_na_pagina("camera") and BOTOES_SIMPLES["camera"].has_point(p):
@@ -1193,6 +1438,14 @@ func _click_central(p: Vector2) -> void:
 	elif _visivel_na_pagina("trocar_camera") and BOTOES_SIMPLES["trocar_camera"].has_point(p):
 		camera_service.cycle_camera()
 		_show_notice(camera_service.status)
+	elif _visivel_na_pagina("testar_som") and BOTOES_SIMPLES["testar_som"].has_point(p):
+		# O SOCO DE TESTE DA MESA toca o impacto e o nível mais alto por
+		# cima da trilha: é o pior caso de mistura, e é nele que se regula.
+		sons.play("hit", 1.5)
+		sons.play("subgrave", -4.0)
+		sons.play("nivel_peso", 0.5)
+		sons.duck(16.0, 2.5)
+		_show_notice("SOCO DE TESTE — CONFIRA A MISTURA")
 	elif _visivel_na_pagina("foto_teste") and BOTOES_SIMPLES["foto_teste"].has_point(p):
 		var test_path := camera_service.capture_photo()
 		if test_path.is_empty():
@@ -1259,6 +1512,12 @@ func _ajustar(chave: String, direcao: int) -> void:
 			score_exponent = clampf(score_exponent + direcao * 0.05, ScoreCurve.EXPONENT_MIN, ScoreCurve.EXPONENT_MAX)
 		"zona":
 			score_dead_zone = clampf(score_dead_zone + direcao * 0.01, 0.0, ScoreCurve.DEAD_ZONE_MAX)
+		"vol_musica":
+			volume_musica = clampf(volume_musica + direcao, -40.0, 6.0)
+			sons.set_volumes(volume_musica, volume_efeitos)
+		"vol_efeitos":
+			volume_efeitos = clampf(volume_efeitos + direcao, -40.0, 6.0)
+			sons.set_volumes(volume_musica, volume_efeitos)
 		"porta":
 			_girar_porta(direcao)
 		"raio":
@@ -1325,6 +1584,8 @@ func _carregar() -> void:
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
 	simulacao_bancada = bool(data.get("simulacao_bancada", false))
+	volume_musica = float(data.get("volume_musica", volume_musica))
+	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
 	botao_credito = _mapa_de_botao(data.get("botao_credito", {}), 4)
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
@@ -1350,6 +1611,8 @@ func _salvar() -> void:
 		"sensor_vmin": sensor_vmin,
 		"sensor_amin": sensor_amin,
 		"simulacao_bancada": simulacao_bancada,
+		"volume_musica": volume_musica,
+		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
 		"botao_credito": botao_credito,
 		"camera_enabled": camera_enabled,
@@ -1395,6 +1658,12 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if central_aberta:
 		_draw_central()
+		# O ASSISTENTE COBRE A CENTRAL. Enquanto ele está no ar, mexer nos
+		# passos por baixo mudaria justamente os números que ele está
+		# medindo — e o técnico veria a sugestão brigar com o que ele
+		# acabou de ajustar.
+		if calib_ativo:
+			_draw_calibracao()
 
 ## O IMPACTO NA TELA, entregue ao diretor de efeitos.
 ##
@@ -1624,9 +1893,18 @@ func _draw_show_idle() -> void:
 	var pulse := 0.8 + 0.2 * sin(animation_time * 2.6)
 	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), chegada, 3.0)
 	_texto("PRESSIONE START", 1635.0, 46, Color(Color.WHITE, chegada))
+	# O LUGAR DO CRÉDITO PISCA quando alguém aperta START sem saldo.
+	var cor_credito := Color(Paleta.CIANO, chegada)
+	if aviso_de_credito >= 0.0:
+		var bate := 0.5 + 0.5 * sin(aviso_de_credito * 16.0)
+		cor_credito = Color(Paleta.VERMELHO.lerp(Paleta.AMBAR, bate), chegada)
+		_cartao(
+			Rect2(300, 1700, 480, 62), Color(Paleta.VERMELHO, 0.20 * bate),
+			Color(Paleta.AMBAR, bate), chegada, 3.0
+		)
 	_texto(
 		"JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits,
-		1740.0, 26, Color(Paleta.CIANO, chegada)
+		1740.0, 26, cor_credito
 	)
 	# CARIMBO DA BUILD. Discreto, mas na tela que fica ligada o dia
 	# inteiro: é ele que responde "atualizei e não mudou nada" sem
@@ -1942,10 +2220,11 @@ func _central_golpe() -> void:
 	_secao(Rect2(80, 650, 920, 260), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
 	_regua_dos_niveis(Rect2(110, 710, 860, 40))
 	_texto(
-		"As faixas dos níveis são fixas. Quem decide quanta gente chega a cada uma é a curva acima.",
-		814.0, 15, Paleta.TINTA_FRACA
+		"As faixas são fixas. Quem decide quanta gente chega a cada uma é a curva.",
+		744.0, 15, Paleta.TINTA_FRACA
 	)
-	_curva_desenhada(Rect2(110, 830, 860, 60))
+	_curva_desenhada(Rect2(110, 760, 860, 60))
+	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
 	_secao(Rect2(80, 926, 920, 300), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
@@ -2017,10 +2296,15 @@ func _central_camera() -> void:
 			818.0, 14, Paleta.AMBAR
 		)
 
-	_secao(Rect2(80, 850, 920, 200), "COMO A FOTO É USADA", Paleta.AMBAR)
-	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 916.0, 15, Paleta.TINTA_FRACA)
-	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 942.0, 15, Paleta.TINTA_FRACA)
-	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 986.0, 18, Paleta.CREME)
+	_secao(Rect2(80, 850, 920, 290), "MESA DE SOM", Paleta.VERDE)
+	_stepper("vol_musica", "%+.0f dB" % volume_musica, "TRILHA", Paleta.CIANO)
+	_stepper("vol_efeitos", "%+.0f dB" % volume_efeitos, "EFEITOS E VOZ", Paleta.AMBAR)
+	_botao(BOTOES_SIMPLES["testar_som"], "TOCAR SOCO DE TESTE", false, Paleta.VERDE, 19)
+
+	_secao(Rect2(80, 1170, 920, 170), "COMO A FOTO É USADA", Paleta.AMBAR)
+	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 1236.0, 15, Paleta.TINTA_FRACA)
+	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 1262.0, 15, Paleta.TINTA_FRACA)
+	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 1306.0, 18, Paleta.CREME)
 
 # ------------------------------------------------------------- DADOS
 func _central_dados() -> void:

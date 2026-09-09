@@ -11,12 +11,77 @@ const SONS = Catalog.FALLBACK
 var _players: Dictionary = {}
 var music_target := -80.0
 
+## OS QUATRO BARRAMENTOS, criados em tempo de execução.
+##
+## Em código e não no arquivo do projeto porque o `default_bus_layout.tres`
+## é um recurso binário que ninguém consegue revisar num diff: uma mesa de
+## som alterada por engano some sem deixar rastro. Aqui, criar um
+## barramento é uma linha que se lê.
+const MESA := ["Music", "SFX", "Impact", "UI"]
+
+## Volume de cada barramento, em dB. `Music` e `SFX` são o que o operador
+## regula na Central; `Impact` e `UI` acompanham o `SFX`.
+var volume_musica := 0.0
+var volume_efeitos := 0.0
+
+## O ABAFAMENTO DA TRILHA.
+##
+## Quando a voz da máquina fala — contagem, foto, golpe, veredito — a
+## música desce e volta sozinha. Sem isso, a trilha e o veredito disputam
+## a mesma faixa de frequência e nenhum dos dois se entende; abaixar de
+## vez seria perder o que segura a pessoa na frente da máquina.
+var _duck_db := 0.0
+var _duck_alvo := 0.0
+var _duck_ate_ms := 0
+
 func _process(delta: float) -> void:
+	# O abafamento sobe rápido e volta devagar: é assim que um compressor
+	# de rádio se comporta, e é o que o ouvido aceita sem perceber.
+	if _duck_ate_ms > 0 and Time.get_ticks_msec() > _duck_ate_ms:
+		_duck_alvo = 0.0
+		_duck_ate_ms = 0
+	var passo := delta * (60.0 if _duck_alvo < _duck_db else 14.0)
+	_duck_db = move_toward(_duck_db, _duck_alvo, passo)
+	_aplicar_volume_dos_barramentos()
+
 	var player: AudioStreamPlayer = _players.get("music")
 	if player != null:
 		player.volume_db = move_toward(player.volume_db, music_target, delta * 45.0)
 		if music_target <= -79.0 and player.volume_db <= -79.0:
 			player.stop()
+
+## Abafa a trilha por `segundos`, em `db` abaixo do normal.
+func duck(db: float, segundos: float) -> void:
+	_duck_alvo = minf(_duck_alvo, -absf(db))
+	_duck_ate_ms = maxi(_duck_ate_ms, Time.get_ticks_msec() + int(segundos * 1000.0))
+
+func set_volumes(musica_db: float, efeitos_db: float) -> void:
+	volume_musica = clampf(musica_db, -40.0, 6.0)
+	volume_efeitos = clampf(efeitos_db, -40.0, 6.0)
+	_aplicar_volume_dos_barramentos()
+
+func _aplicar_volume_dos_barramentos() -> void:
+	_set_bus_db("Music", volume_musica + _duck_db)
+	_set_bus_db("SFX", volume_efeitos)
+	# O impacto fica um pouco acima do resto dos efeitos: é o som que
+	# justifica a máquina existir, e ele precisa passar por cima da festa.
+	_set_bus_db("Impact", volume_efeitos + 1.5)
+	_set_bus_db("UI", volume_efeitos)
+
+func _set_bus_db(nome: String, db: float) -> void:
+	var i := AudioServer.get_bus_index(nome)
+	if i >= 0:
+		AudioServer.set_bus_volume_db(i, clampf(db, -60.0, 12.0))
+
+## Cria os barramentos que ainda não existem e liga todos ao Master.
+func _montar_mesa() -> void:
+	for nome in MESA:
+		if AudioServer.get_bus_index(nome) >= 0:
+			continue
+		var i := AudioServer.bus_count
+		AudioServer.add_bus(i)
+		AudioServer.set_bus_name(i, nome)
+		AudioServer.set_bus_send(i, "Master")
 
 func music(level: float) -> void:
 	music_target = level
@@ -44,6 +109,7 @@ func attract(level: float) -> void:
 func start_score_loop() -> void:
 	if not _players.has("score_loop"):
 		var player := AudioStreamPlayer.new()
+		player.bus = Catalog.bus_for("score_loop")
 		var stream := AudioStreamWAV.new()
 		stream.format = AudioStreamWAV.FORMAT_16_BITS
 		stream.mix_rate = 22050
@@ -68,12 +134,14 @@ func score_progress(progress: float) -> void:
 		player.pitch_scale = lerpf(0.85, 1.8, clampf(progress, 0.0, 1.0))
 
 func _ready() -> void:
+	_montar_mesa()
 	for nome in SONS:
 		var player := AudioStreamPlayer.new()
 		player.name = "Som_%s" % nome
 		var caminho: String = SONS[nome]
 		if ResourceLoader.exists(caminho):
 			player.stream = load(caminho)
+		player.bus = Catalog.bus_for(nome)
 		add_child(player)
 		_players[nome] = player
 	# WAVs originais; leitura direta também funciona na primeira importação.
@@ -103,6 +171,7 @@ func _ready() -> void:
 		var player: AudioStreamPlayer = _players.get(nome)
 		if player == null:
 			player = AudioStreamPlayer.new()
+			player.bus = Catalog.bus_for(nome)
 			add_child(player)
 			_players[nome] = player
 		player.stream = stream

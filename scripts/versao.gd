@@ -14,7 +14,7 @@ extends RefCounted
 
 const NUMERO := 19
 const DATA := "08/09/2026"
-const NOTA := "escala 9999, oito niveis e botoes do gabinete"
+const NOTA := "9999, oito niveis, botoes e calibracao"
 
 ## Rodapé da abertura: cabe em uma linha discreta.
 static func curta() -> String:
