@@ -1,5 +1,9 @@
 """Banco de áudio do Punch Challenge, sintetizado do zero.
 
+TODOS OS SONS DESTE BANCO SÃO SINTETIZADOS EM CÓDIGO, NESTE ARQUIVO, e
+são livres de direitos: nenhuma amostra externa, gravada ou licenciada
+entra em nenhum WAV. Senóides, ruído filtrado e envelopes — só isso.
+
 POR QUE SINTETIZAR EM VEZ DE BAIXAR. Uma máquina que fica num salão de
 festas toca os mesmos quinze sons mil vezes por dia; qualquer amostra
 licenciada vira um problema de licença multiplicado por cada gabinete
@@ -32,7 +36,10 @@ from pathlib import Path
 import wave
 import numpy as np
 
-RATE = 44100
+# 48 kHz: é a taxa que o docs/RECURSOS_ARCADE.md promete e que a suíte
+# de testes confere no stream do "hit"; 44,1 kHz era herança da versão
+# em que o banco ainda era mono.
+RATE = 48000
 OUT = Path(__file__).resolve().parents[1] / "assets" / "audio" / "arcade"
 OUT.mkdir(parents=True, exist_ok=True)
 rng = np.random.default_rng(8258)
@@ -262,6 +269,18 @@ def prato(segundos: float = 1.4) -> np.ndarray:
 
 def blip(midi: float, segundos: float, forma=quadrada, queda: float = 0.05) -> np.ndarray:
     return forma(nota(midi), segundos) * env_ad(segundos, 0.002, queda, 3.5)
+
+
+def sino(midi: float, segundos: float = 1.2) -> np.ndarray:
+    """Sino de ringue. Sino real NÃO é harmônico: os parciais desafinados
+    (2,76 e 5,4 vezes a fundamental, medidos em sinos de verdade) são o
+    que o ouvido reconhece como metal — com harmônicos inteiros sairia
+    um órgão, não um ringue de boxe."""
+    f = nota(midi)
+    saida = np.zeros(n_amostras(segundos))
+    for parcial, ganho, queda in ((1.0, 1.0, 0.45), (2.76, 0.45, 0.22), (5.40, 0.22, 0.12)):
+        saida += senoide(f * parcial, segundos) * env_ad(segundos, 0.0008, queda, 4.0) * ganho
+    return saida
 
 
 def impacto(segundos: float = 0.75, peso: float = 1.0) -> np.ndarray:

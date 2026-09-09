@@ -3,6 +3,45 @@ extends RefCounted
 
 const LIMIT := 20
 const PHOTO_DIR := "user://ranking_photos"
+## Versão do esquema de pontuação gravado em disco. 1 = legado 0–999;
+## 2 = escala atual 0–9999.
+const SCHEMA_VERSION := 2
+
+## Migração 0–999 → 0–9999, executada UMA ÚNICA VEZ por instalação.
+##
+## Multiplica por dez o ranking, o recorde antigo e os acumulados das
+## estatísticas, e grava schema_version = 2. Como a marca fica salva nas
+## configurações, abrir o jogo de novo não multiplica nada uma segunda
+## vez — chamar esta função sobre dados já migrados é um no-op.
+static func migrate_settings(data: Dictionary) -> Dictionary:
+	if int(data.get("schema_version", 1)) >= SCHEMA_VERSION:
+		return data
+	var out := data.duplicate(true)
+	var ranking_raw: Variant = out.get("ranking", [])
+	if ranking_raw is Array:
+		var migrado: Array = []
+		for item in ranking_raw:
+			if item is Dictionary:
+				var e: Dictionary = (item as Dictionary).duplicate(true)
+				e["score"] = clampi(int(e.get("score", 0)) * 10, 0, GameDef.SCORE_MAX)
+				migrado.append(e)
+			else:
+				migrado.append(clampi(int(item) * 10, 0, GameDef.SCORE_MAX))
+		out["ranking"] = migrado
+	out["best_score"] = clampi(int(out.get("best_score", 0)) * 10, 0, GameDef.SCORE_MAX)
+	var stats: Variant = out.get("statistics", {})
+	if stats is Dictionary:
+		var st: Dictionary = (stats as Dictionary).duplicate(true)
+		var days: Variant = st.get("days", {})
+		if days is Dictionary:
+			for key in (days as Dictionary).keys():
+				var day: Variant = (days as Dictionary)[key]
+				if day is Dictionary:
+					day["best"] = clampi(int(day.get("best", 0)) * 10, 0, GameDef.SCORE_MAX)
+					day["score_sum"] = int(day.get("score_sum", 0)) * 10
+		out["statistics"] = st
+	out["schema_version"] = SCHEMA_VERSION
+	return out
 
 static func migrate(raw: Variant, old_best := 0) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
