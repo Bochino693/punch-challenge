@@ -2934,11 +2934,15 @@ func _socorro_da_camera(delta: float) -> void:
 	if _socorro_relogio < SOCORRO_ESPERA or medico.rodando:
 		return
 	_socorro_feito = true
-	medico.diagnosticar(false, camera_service.caminho_da_ponte(), camera_service.caminho_do_inspetor())
+	_examinar_camera(false)
 
 func _examinar_camera(resolver: bool) -> void:
 	if medico == null or medico.rodando:
 		return
+	# A PONTE SAI DO AR ANTES DA SONDAGEM. Os dois disputando a webcam é
+	# o que fazia a imagem piscar na Central: um abre, o outro perde, o
+	# vigia religa, e assim sem parar.
+	camera_service.pausar_para_exame()
 	medico.diagnosticar(
 		resolver, camera_service.caminho_da_ponte(), camera_service.caminho_do_inspetor()
 	)
@@ -2958,6 +2962,10 @@ func _fim_do_exame() -> void:
 		camera_service.adotar_python(medico.python, medico.python_args)
 		_salvar()
 	if medico.indices.is_empty():
+		# Sem índice, a ponte volta ao ar mesmo assim: ela varre os
+		# índices sozinha, e a webcam pode ter estado ocupada só no
+		# instante da sondagem.
+		camera_service.retomar_apos_exame()
 		if camera_enabled and not medico.linhas.is_empty():
 			_show_notice(str(medico.linhas[medico.linhas.size() - 1]))
 		return
@@ -2976,6 +2984,7 @@ func _fim_do_exame() -> void:
 	camera_service.adotar_python(medico.python, medico.python_args)
 	camera_enabled = true
 	camera_service.enabled = true
+	camera_service.exame_em_curso = false
 	camera_service.refresh()
 	_salvar()
 	_show_notice("CÂMERA NO ÍNDICE %d%s — RELIGANDO" % [

@@ -44,6 +44,7 @@ func run() -> void:
 	_test_bancada_sem_sensor()
 	_test_medico_da_camera()
 	_test_interpretador_da_ponte()
+	_test_exame_nao_briga_com_a_ponte()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -398,3 +399,28 @@ func _test_interpretador_da_ponte() -> void:
 	camera._riscados.clear()
 	camera.python_exe = ""
 	camera.python_args = PackedStringArray()
+
+# ----------------------------- exame e ponte nao disputam a webcam
+func _test_exame_nao_briga_com_a_ponte() -> void:
+	var camera: CameraService = jogo.camera_service
+	assert(not camera.exame_em_curso)
+
+	# Durante o exame a ponte sai do ar e o vigia para. Sem isso, a
+	# sondagem abre a webcam, a ponte perde o dispositivo, o vigia religa
+	# a ponte, a ponte rouba de volta -- e a imagem pisca na tela.
+	camera.pausar_para_exame()
+	assert(camera.exame_em_curso)
+	assert(camera._bridge_pid <= 0)
+	# Com o exame em curso, um quadro de processo não reinicia nada.
+	camera._process(0.016)
+	assert(camera._bridge_pid <= 0)
+
+	# No fim, a ponte volta com bateria nova de tentativas.
+	camera._bridge_desistiu = true
+	camera._bridge_reinicios = 99
+	camera.enabled = false  # evita subir processo de verdade neste teste
+	camera.retomar_apos_exame()
+	assert(not camera.exame_em_curso)
+	assert(not camera._bridge_desistiu)
+	assert(camera._bridge_reinicios == 0)
+	camera.enabled = true

@@ -246,6 +246,11 @@ def main() -> int:
     parser.add_argument("--quality", type=int, default=80)
     parser.add_argument("--probe", action="store_true", help="lista as câmeras e sai")
     parser.add_argument("--backend", default="", help="back-end preferido (DSHOW, MSMF, ANY, V4L2)")
+    parser.add_argument(
+        "--fixo",
+        action="store_true",
+        help="nao passeia pelos indices: insiste no --camera informado",
+    )
     parser.add_argument("--pattern", action="store_true", help="imagem sintética")
     args = parser.parse_args()
 
@@ -328,6 +333,25 @@ def main() -> int:
                     #
                     # Duas tentativas por indice e passa para o proximo,
                     # dando a volta em 0..INDICE_MAXIMO-1.
+                    # QUANDO O INDICE JA FOI PROVADO, NAO SE PASSEIA.
+                    #
+                    # A varredura existe porque no Windows a numeracao da
+                    # camera anda sozinha. Mas depois que a sondagem
+                    # descobriu onde ela esta, passear e o contrario do
+                    # que se quer: dez indices, duas tentativas cada, tres
+                    # back-ends por tentativa -- uma volta inteira leva
+                    # mais de um minuto, e a pose dura tres segundos. A
+                    # camera existe, esta no indice certo, e o jogo chega
+                    # na hora da foto ainda procurando no indice 7.
+                    #
+                    # Com --fixo a ponte insiste no mesmo numero, meio
+                    # segundo de cada vez. Uma webcam que soltou por um
+                    # tranco no cabo volta em meio segundo em vez de sumir
+                    # por um minuto.
+                    if args.fixo:
+                        anotar(f"RECONECTANDO NO INDICE {indice}")
+                        time.sleep(0.5)
+                        continue
                     if tentativas_no_indice >= 2:
                         tentativas_no_indice = 0
                         indice = (indice + 1) % INDICE_MAXIMO

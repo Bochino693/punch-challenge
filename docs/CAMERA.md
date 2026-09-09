@@ -145,6 +145,30 @@ próprio processo, então dizem o motivo em vez de um erro genérico:
 | `PONTE SEM RESPOSTA — INSTALE OPENCV` | Python achado, mas o `pip install opencv-python` faltou. |
 | `PROCURANDO CAMERA 0` | A ponte está de pé, mas o índice não responde — aperte DIAGNOSTICAR. |
 | `FOTO COM IMAGEM DE n ms ATRÁS` | A foto saiu, mas de um quadro velho: a webcam travou sem devolver erro. |
+| `RECONECTANDO NO INDICE n` | O índice já é o certo; a ponte insiste nele em vez de procurar de novo. |
+| `EXAMINANDO A CÂMERA…` | O diagnóstico está com a webcam. A ponte volta sozinha no fim. |
+
+---
+
+## Só um programa por vez abre uma webcam
+
+É regra do sistema operacional, não do jogo, e ela explica dois defeitos
+que pareciam coisas diferentes:
+
+- **A imagem piscava na Central.** A sondagem do diagnóstico abre os
+  índices 0 a 9 em três back-ends. Enquanto ela fazia isso, a ponte
+  perdia o dispositivo, o vigia religava a ponte, a ponte tomava a
+  câmera de volta da sondagem — e os dois ficavam se atropelando. Hoje a
+  ponte **sai do ar** durante o exame e volta no fim, já com o índice, o
+  back-end e o Python que o exame descobriu.
+
+- **A câmera não aparecia na rodada.** Sem índice conhecido, a ponte
+  varre dez índices, duas tentativas cada, três back-ends por tentativa:
+  uma volta inteira passa de um minuto. A pose dura três segundos. Depois
+  que a sondagem descobre onde a câmera está, a ponte recebe `--fixo` e
+  **insiste naquele número**, meio segundo de cada vez — uma webcam que
+  soltou por um tranco no cabo volta em meio segundo em vez de sumir por
+  um minuto.
 | `CAMERA PAROU DE RESPONDER` | Cabo solto ou webcam ocupada. A ponte reconecta sozinha. |
 | `CÂMERA DESATIVADA` | Desligada de propósito na Central Técnica. |
 

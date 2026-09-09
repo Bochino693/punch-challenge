@@ -37,7 +37,14 @@ var _mutex_leitura := Mutex.new()
 ## o processo morre no mesmo instante em que nasce, o jogo o ressuscita,
 ## e assim a noite inteira — com o motivo verdadeiro (falta o OpenCV)
 ## sumindo no meio de mil reinícios.
-const MAX_RELIGAMENTOS := 6
+## TETO ALTO, E DE PROPÓSITO.
+##
+## Seis era pouco: com a ponte e o diagnóstico disputando a webcam, a
+## conta estourava em segundos e a câmera ficava desligada o resto da
+## noite. A disputa foi resolvida, mas o teto continua alto — desistir é
+## o pior desfecho possível para um recurso de que o jogo depende, e a
+## contagem zera sozinha assim que um quadro chega.
+const MAX_RELIGAMENTOS := 40
 var _bridge_desistiu := false
 ## PULA O CAMINHO NATIVO E VAI DIRETO À PONTE.
 ##
@@ -96,6 +103,22 @@ func _ready() -> void:
 	call_deferred("refresh")
 
 func _process(_delta: float) -> void:
+	# EXAME EM CURSO: A PONTE FICA FORA DO AR, E O VIGIA TAMBÉM.
+	#
+	# AQUI ESTAVA A PISCA-PISCA. Só um programa por vez consegue abrir uma
+	# webcam — é regra do sistema operacional, não do jogo. A sondagem do
+	# diagnóstico abre os índices 0 a 9 em três back-ends para descobrir
+	# onde a câmera está; enquanto ela faz isso, a ponte perde o
+	# dispositivo, publica "CAMERA PAROU DE RESPONDER", o vigia religa a
+	# ponte, a ponte rouba a câmera de volta da sondagem, e os dois ficam
+	# se atropelando. Na tela isso aparece exatamente como o operador
+	# descreveu: a imagem ligando e desligando.
+	#
+	# O conserto é combinar quem manda: durante o exame, a ponte sai do
+	# ar de propósito e ninguém a religa. Ela volta no fim, já com o
+	# índice, o back-end e o Python que o exame descobriu.
+	if exame_em_curso:
+		return
 	if _feed != null:
 		_vigiar_nativa()
 		return
@@ -147,7 +170,12 @@ func _process(_delta: float) -> void:
 	# quadro novo, não há por que tocar na imagem.
 	var contador := _bridge_frame_counter()
 	if contador >= 0 and contador == _bridge_contador:
-		if now - _bridge_contador_ms > 3000 and _bridge_texture != null:
+		# SEIS SEGUNDOS, E NÃO TRÊS. Uma webcam USB barata engasga por
+		# dois ou três segundos quando muda a exposição — e religar a
+		# ponte nesse engasgo troca uma imagem parada por uma imagem
+		# AUSENTE, que é pior. Só é congelamento de verdade quando passa
+		# de meia dúzia de segundos.
+		if now - _bridge_contador_ms > 6000 and _bridge_texture != null:
 			# IMAGEM CONGELADA COM O PROCESSO VIVO. Acontece quando a
 			# webcam trava sem devolver erro ao OpenCV: a ponte fica
 			# publicando o mesmo quadro para sempre, e a prévia mostra
@@ -571,6 +599,11 @@ func _start_bridge() -> void:
 	if not backend_preferido.is_empty():
 		args.append("--backend")
 		args.append(backend_preferido)
+		# BACK-END CONHECIDO QUER DIZER ÍNDICE PROVADO: a sondagem
+		# descobriu os dois juntos. Daí em diante a ponte insiste nesse
+		# número em vez de passear pelos dez — passear leva mais de um
+		# minuto por volta, e a pose dura três segundos.
+		args.append("--fixo")
 	if pattern_mode:
 		args.append("--pattern")
 	_bridge_pid = OS.create_process(candidato, args, false)
@@ -676,6 +709,24 @@ func caminho_da_ponte() -> String:
 	var data_dir := "user://camera_bridge"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	return _materialize_bridge_script(data_dir)
+
+## Verdadeiro enquanto o diagnóstico está usando a câmera.
+var exame_em_curso := false
+
+## Tira a ponte do ar para o exame poder abrir a webcam.
+func pausar_para_exame() -> void:
+	exame_em_curso = true
+	_matar_ponte()
+	status = "EXAMINANDO A CÂMERA…"
+
+## Devolve a ponte ao ar depois do exame. Uma bateria nova de tentativas:
+## o exame pode ter acabado de descobrir o índice certo.
+func retomar_apos_exame() -> void:
+	exame_em_curso = false
+	_bridge_desistiu = false
+	_bridge_reinicios = 0
+	if enabled and _feed == null:
+		_start_bridge()
 
 ## O DIAGNÓSTICO ENTREGA O QUE PROVOU. Índice, back-end e — o que
 ## faltava — o interpretador. Sem esta última peça o exame dizia
