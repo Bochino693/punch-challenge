@@ -1647,7 +1647,7 @@ func _click_central(p: Vector2) -> void:
 		camera_forcar_ponte = not camera_forcar_ponte
 		camera_ponte_escolhida = true
 		camera_service.forcar_ponte = camera_forcar_ponte
-		camera_service.refresh()
+		camera_service.refresh(true)
 		_show_notice(
 			"INDO DIRETO PELA PONTE PYTHON" if camera_forcar_ponte
 			else "TENTANDO O CAMINHO NATIVO PRIMEIRO"
@@ -1660,7 +1660,7 @@ func _click_central(p: Vector2) -> void:
 		# PROCURAR DE NOVO, e não só religar: `refresh` zera a desistência
 		# e refaz a enumeração inteira. É o botão de quem acabou de
 		# espetar a webcam com o jogo já aberto.
-		camera_service.refresh()
+		camera_service.refresh(true)
 		_show_notice(camera_service.status)
 	elif _tocou("trocar_camera", p):
 		camera_service.cycle_camera()
@@ -2985,7 +2985,7 @@ func _fim_do_exame() -> void:
 	camera_enabled = true
 	camera_service.enabled = true
 	camera_service.exame_em_curso = false
-	camera_service.refresh()
+	camera_service.refresh(true)
 	_salvar()
 	_show_notice("CÂMERA NO ÍNDICE %d%s — RELIGANDO" % [
 		camera_service.selected_index,

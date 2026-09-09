@@ -45,6 +45,7 @@ func run() -> void:
 	_test_medico_da_camera()
 	_test_interpretador_da_ponte()
 	_test_exame_nao_briga_com_a_ponte()
+	_test_camera_acesa_nao_apaga()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -424,3 +425,44 @@ func _test_exame_nao_briga_com_a_ponte() -> void:
 	assert(not camera._bridge_desistiu)
 	assert(camera._bridge_reinicios == 0)
 	camera.enabled = true
+
+# ------------------------------- camera acesa nao se apaga sozinha
+func _test_camera_acesa_nao_apaga() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera.exame_em_curso = false
+	camera.enabled = true
+	camera.forcar_ponte = true
+
+	# Finge uma ponte de pé, entregando quadro agora mesmo.
+	camera._bridge_pid = 999999
+	camera._bridge_texture = ImageTexture.create_from_image(
+		Image.create(8, 8, false, Image.FORMAT_RGB8)
+	)
+	camera._last_frame_ms = Time.get_ticks_msec()
+	assert(camera._ponte_saudavel())
+
+	# UM `refresh()` COMUM NÃO PODE DERRUBAR ISSO. Era daqui que vinha o
+	# acende-e-apaga: várias origens pediam "atualize" o tempo todo, e
+	# cada pedido matava a ponte que estava entregando imagem.
+	camera.refresh()
+	assert(camera._bridge_pid == 999999)
+	assert(camera._bridge_texture != null)
+
+	# O aviso de lista de câmeras do Godot também não derruba: com a
+	# ponte no ar ele é ruído, porque ela fala com a webcam por fora.
+	camera._on_camera_feeds_updated(0)
+	assert(camera._bridge_pid == 999999)
+
+	# Mas a ordem explícita do técnico derruba, que é o que ele pediu.
+	camera.enabled = false
+	camera.refresh(true)
+	assert(camera._bridge_pid <= 0)
+
+	# Quadro velho não é câmera acesa: aí atualizar é o certo.
+	camera.enabled = true
+	camera._bridge_pid = 999999
+	camera._last_frame_ms = Time.get_ticks_msec() - 9000
+	assert(not camera._ponte_saudavel())
+	camera._bridge_pid = -1
+	camera._bridge_texture = null
+	camera.forcar_ponte = false

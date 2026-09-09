@@ -366,7 +366,50 @@ func _acordar_servidor() -> void:
 	if CameraServer.has_method("set_monitoring_feeds"):
 		CameraServer.call("set_monitoring_feeds", true)
 
-func refresh() -> void:
+## LIGOU UMA VEZ, NÃO DESLIGA MAIS.
+##
+## `refresh()` DERRUBA a câmera para levantá-la de novo — e por isso ela
+## nunca deveria ter sido chamada com a câmera funcionando. Era isso que
+## fazia a imagem acender e apagar: várias origens pediam "atualize" a
+## todo momento, e cada pedido matava a ponte que estava entregando
+## quadro para subir outra do zero.
+##
+## Agora há duas defesas, e as duas foram necessárias:
+##
+##   PONTE VIVA NÃO SE MEXE. Se a ponte publicou quadro há menos de três
+##   segundos, `refresh()` não faz nada — a não ser que quem chamou diga
+##   `forcado`, que é o caso do técnico apertando PROCURAR DE NOVO ou
+##   TROCAR CÂMERA. Uma câmera acesa é o estado que se quer preservar,
+##   não um estado a ser reconstruído.
+##
+##   NÃO SE CHAMA A SI MESMA. `_acordar_servidor()` liga o monitoramento
+##   do CameraServer, e ligar o monitoramento faz o servidor enumerar as
+##   câmeras AGORA, na mesma pilha — o que emite `camera_feed_added`, que
+##   caía em `_on_camera_feeds_updated`, que chamava `refresh()` de novo.
+##   A chamada de dentro matava a ponte que a de fora estava prestes a
+##   subir. Reentrância pura, e invisível no código porque o laço passa
+##   por um sinal do motor.
+var _refrescando := false
+
+func refresh(forcado := false) -> void:
+	if _refrescando:
+		return
+	if not forcado and _ponte_saudavel():
+		return
+	_refrescando = true
+	_refrescar(forcado)
+	_refrescando = false
+
+## A ponte está de pé E entregando? Então há uma câmera acesa a preservar.
+func _ponte_saudavel() -> bool:
+	return (
+		enabled
+		and _bridge_pid > 0
+		and _bridge_texture != null
+		and Time.get_ticks_msec() - _last_frame_ms < 3000
+	)
+
+func _refrescar(_forcado: bool) -> void:
 	_stop_feed()
 	_native_ok = false
 	# Toda tentativa manual (ligar, trocar de câmera, reabrir a Central)
@@ -384,8 +427,15 @@ func refresh() -> void:
 	# "CameraServer is not actively monitoring feeds" — a lista volta
 	# vazia e a máquina conclui, errado, que não há câmera nenhuma.
 	# Ligar o monitoramento é barato e idempotente.
-	_acordar_servidor()
-	var feeds: Array = [] if forcar_ponte else CameraServer.feeds()
+	#
+	# MAS SÓ QUANDO O CAMINHO NATIVO ESTÁ EM JOGO. No Windows, onde a
+	# ponte é o caminho, acordar o servidor não traz benefício nenhum e
+	# traz o laço descrito acima — além de manter o Godot segurando
+	# descritores da webcam que a ponte quer abrir.
+	var feeds: Array = []
+	if not forcar_ponte:
+		_acordar_servidor()
+		feeds = CameraServer.feeds()
 	if feeds.is_empty():
 		# A PONTE NÃO É MAIS SÓ DO WINDOWS. Ela é a reserva para QUALQUER
 		# caso em que o Godot não enxerga a webcam — e são vários: falta
@@ -411,32 +461,46 @@ func refresh() -> void:
 	_native_started_ms = Time.get_ticks_msec()
 	status = "ABRINDO CÂMERA…"
 
+## O servidor avisou que a lista de câmeras mudou.
+##
+## Só interessa quando o caminho nativo está em uso E não há nada de pé.
+## Com a ponte no ar, este aviso é ruído: a ponte fala com a webcam por
+## fora do Godot e não liga para a lista dele.
 func _on_camera_feeds_updated(_id: int = 0) -> void:
-	if enabled and _feed == null and _bridge_pid <= 0:
+	if forcar_ponte or _refrescando or not enabled:
+		return
+	if _feed == null and _bridge_pid <= 0:
 		refresh()
 
 func set_enabled(value: bool) -> void:
 	enabled = value
-	refresh()
+	# Ligar ou desligar à mão é ordem explícita: passa por cima da
+	# proteção que preserva a ponte viva.
+	refresh(true)
 
+## TROCAR DE CÂMERA É ORDEM DO TÉCNICO: derruba a que está no ar de
+## propósito, porque é justamente isso que ele pediu.
 func cycle_camera() -> void:
-	# O GODOT 4.6 SÓ ENUMERA CÂMERAS SOB PEDIDO.
-	#
-	# Até a 4.5 `CameraServer.feeds()` já vinha preenchido; na 4.6 o
-	# servidor começa dormindo e responde
-	# "CameraServer is not actively monitoring feeds" — a lista volta
-	# vazia e a máquina conclui, errado, que não há câmera nenhuma.
-	# Ligar o monitoramento é barato e idempotente.
-	_acordar_servidor()
-	var feeds := CameraServer.feeds()
+	var feeds: Array = []
+	if not forcar_ponte:
+		# O Godot 4.6 só enumera câmeras sob pedido: até a 4.5 `feeds()`
+		# já vinha preenchido, e na 4.6 o servidor começa dormindo.
+		_acordar_servidor()
+		feeds = CameraServer.feeds()
 	if feeds.is_empty():
-		# Sem feed nativo, quem troca de câmera é a ponte: os índices
-		# 0..3 cobrem as webcams que o sistema costuma enumerar.
-		selected_index = (selected_index + 1) % 4
-		refresh()
+		# Sem feed nativo, quem troca de câmera é a ponte. Vai até o
+		# índice 9 porque é até onde a sondagem procura — parar no 3
+		# deixava de fora justamente a máquina com câmera virtual
+		# instalada, que é onde a webcam boa acaba no 6 ou no 7.
+		selected_index = (selected_index + 1) % 10
+		# Trocou de câmera, o back-end provado não vale mais para o novo
+		# índice: sem limpar, a ponte insistiria com `--fixo` num par
+		# índice/back-end que nunca foi testado junto.
+		backend_preferido = ""
+		refresh(true)
 		return
 	selected_index = (selected_index + 1) % feeds.size()
-	refresh()
+	refresh(true)
 
 func preview_texture() -> Texture2D:
 	return _texture if _texture != null else _bridge_texture
@@ -508,6 +572,12 @@ func capture_photo() -> String:
 	var image: Image = null
 	if _melhor_imagem != null and _melhor_nota >= CONTRASTE_MINIMO:
 		image = _melhor_imagem
+		# CONSOME. O melhor quadro pertence À POSE QUE O ESCOLHEU: deixá-lo
+		# guardado fazia o TESTAR FOTO da Central devolver a cara de quem
+		# jogou a partida anterior, e o técnico concluir que a câmera
+		# estava congelada quando ela estava perfeita.
+		_melhor_imagem = null
+		_melhor_nota = -1.0
 	elif available():
 		image = _texture.get_image() if _texture != null else (_last_image.duplicate() if _last_image != null else null)
 	if image == null or image.is_empty():
