@@ -1,24 +1,47 @@
 class_name ScoreCurve
 extends RefCounted
 
-## Converte a velocidade real do saco em uma nota de arcade. O smoothstep
-## tira o salto da zona morta e o expoente > 1 impede que um golpe mediano
-## chegue cedo demais às notas altas.
+## Converte a velocidade real do saco (m/s, medida pelo MPU-6050) em uma
+## nota de arcade de 0 a 9999. A VELOCIDADE é a medida principal; pico
+## de aceleração e duração validam a qualidade física do golpe no
+## firmware, não inflam a nota.
+##
+##   x = clamp((velocidade - vmin) / (vmax - vmin), 0, 1)
+##   x = 0 dentro da zona morta
+##   s = x*x*(3 - 2*x)
+##   pontos = round(9999 * pow(s, expoente))
+##
+## A curva é contínua e monotônica: o smoothstep tira o salto da zona
+## morta e o expoente > 1 impede que um golpe mediano chegue cedo às
+## notas altas. 9999 exige alcançar ou superar vmax — nunca é fixado
+## artificialmente.
 
-const EXPONENT_MIN := 1.10
-const EXPONENT_MAX := 3.00
-const DEFAULT_EXPONENT := 2.00
-const DEFAULT_DEAD_ZONE := 0.06
+const EXPONENT_MIN := 1.5
+const EXPONENT_MAX := 4.5
+const DEFAULT_EXPONENT := 2.80
+const DEAD_ZONE_MIN := 0.0
+const DEAD_ZONE_MAX := 0.25
+const DEFAULT_DEAD_ZONE := 0.08
+const VMIN_MIN := 0.2
+const VMIN_MAX := 10.0
+const VMAX_MIN := 5.0
+const VMAX_MAX := 30.0
+const DEFAULT_VMIN := 1.2
+const DEFAULT_VMAX := 16.0
 const CHARGE_MAX_SECONDS := 2.80
 
 static func sanitize(min_speed: float, max_speed: float, exponent: float, dead_zone: float) -> Dictionary:
-	var low := clampf(min_speed, 0.0, 59.0)
-	var high := clampf(max_speed, low + 0.1, 60.0)
+	var low := clampf(min_speed, VMIN_MIN, VMIN_MAX)
+	var high := clampf(max_speed, VMAX_MIN, VMAX_MAX)
+	if high <= low:
+		high = minf(low + 1.0, VMAX_MAX)
+		if high <= low:
+			low = high - 1.0
 	return {
 		"min_speed": low,
 		"max_speed": high,
 		"exponent": clampf(exponent, EXPONENT_MIN, EXPONENT_MAX),
-		"dead_zone": clampf(dead_zone, 0.0, 0.35),
+		"dead_zone": clampf(dead_zone, DEAD_ZONE_MIN, DEAD_ZONE_MAX),
 	}
 
 static func normalized(speed: float, min_speed: float, max_speed: float, dead_zone := DEFAULT_DEAD_ZONE) -> float:
@@ -62,11 +85,11 @@ static func points_from_charge(
 	)
 
 static func difficulty_name(exponent: float) -> String:
-	if exponent < 1.52:
+	if exponent < 2.2:
 		return "FÁCIL"
-	if exponent < 1.86:
+	if exponent < 2.9:
 		return "NORMAL"
-	if exponent <= 2.06:
+	if exponent <= 3.4:
 		return "DIFÍCIL"
 	return "PERSONALIZADO"
 
@@ -74,9 +97,9 @@ static func next_difficulty(exponent: float) -> float:
 	var name := difficulty_name(exponent)
 	match name:
 		"FÁCIL":
-			return 1.70
+			return 2.80
 		"NORMAL":
-			return 2.00
+			return 3.30
 		"DIFÍCIL":
-			return 2.35
-	return 1.35
+			return 3.90
+	return 1.90
