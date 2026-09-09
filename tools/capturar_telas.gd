@@ -115,7 +115,7 @@ func _resultado(pontos: int, veredito: float) -> void:
 	jogo.verdict_time = veredito
 	jogo.result_time = 1.9 if veredito >= 0.0 else 1.0
 	if veredito >= 0.0:
-		jogo.moldura.set_estado(LedFrame.RESULTADO, GameDef.classificar(pontos, jogo.limiar_fraco, jogo.limiar_forte)["cor_faixa"])
+		jogo.moldura.set_estado(LedFrame.RESULTADO, GameDef.classificar(pontos)["cor_faixa"])
 
 func _contando() -> void:
 	_resultado(903, -1.0)

@@ -82,11 +82,10 @@ const LADO_BOTAO := 64.0
 ## ou `vmax`: mexer na dificuldade mudava a velocidade, e a tela inteira
 ## parecia não responder. Cada passo tem agora a sua própria linha.
 const PASSOS := {
-	"limiar_fraco": Rect2(110, 522, 400, LADO_BOTAO),
-	"limiar_forte": Rect2(570, 522, 400, LADO_BOTAO),
-	"vmin": Rect2(110, 740, 400, LADO_BOTAO),
-	"vmax": Rect2(570, 740, 400, LADO_BOTAO),
-	"curva": Rect2(340, 856, 400, 58),
+	"vmin": Rect2(110, 470, 400, LADO_BOTAO),
+	"vmax": Rect2(570, 470, 400, LADO_BOTAO),
+	"curva": Rect2(110, 592, 400, 58),
+	"zona": Rect2(570, 592, 400, 58),
 	"porta": Rect2(110, 1036, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1150, 400, LADO_BOTAO),
 	"amin": Rect2(570, 1150, 400, LADO_BOTAO),
@@ -126,15 +125,14 @@ var plays := 0
 ## pagar a segunda ficha.
 var ranking: Array[Dictionary] = []
 ## Faixa de velocidade (m/s) que vira pontos no placar.
-var hit_min_speed := 0.8
-var hit_max_speed := 12.0
-## Expoente 2 torna os pontos altos raros; o valor anterior (0.8)
-## inflava os golpes médios e fazia a máquina parecer fácil demais.
+var hit_min_speed := ScoreCurve.DEFAULT_MIN_SPEED
+var hit_max_speed := ScoreCurve.DEFAULT_MAX_SPEED
+## O expoente é o botão de dificuldade da casa: quanto maior, mais tarde
+## a nota sobe e mais raro fica o topo da escala. Os oito níveis têm
+## faixas FIXAS, então é aqui — e só aqui — que se decide quanta gente
+## chega a cada um deles.
 var score_exponent := ScoreCurve.DEFAULT_EXPONENT
 var score_dead_zone := ScoreCurve.DEFAULT_DEAD_ZONE
-## Os dois limites que separam fraco, médio e forte no placar.
-var limiar_fraco := GameDef.LIMIAR_FRACO_PADRAO
-var limiar_forte := GameDef.LIMIAR_FORTE_PADRAO
 ## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,amin).
 var sensor_eixo := "X"
 var sensor_raio := 0.45
@@ -150,6 +148,9 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
+## Marcado quando `_carregar` converteu marcas da escala antiga. `_ready`
+## grava logo em seguida, e é isso que torna a conversão de uma vez só.
+var _converteu_esquema := false
 ## A ESTRELA DE PANCADA: quanto tempo desde o golpe, e com que força.
 ## Negativo quer dizer que não há pancada no ar.
 var pancada_tempo := -1.0
@@ -237,6 +238,10 @@ func _ready() -> void:
 	camera_service.mirrored = camera_mirrored
 	add_child(camera_service)
 	_aplicar_faixas()
+	if _converteu_esquema:
+		_converteu_esquema = false
+		_salvar()
+		_show_notice("MARCAS CONVERTIDAS PARA A ESCALA 0000 – 9999")
 	_iniciar_serial()
 	_entrar_em_abertura()
 	# A música entra baixa por baixo da entrada e sobe na virada para a
@@ -250,12 +255,18 @@ func _exit_tree() -> void:
 		link.close_port()
 	_photo_cache.clear()
 
-## Um lugar só onde as faixas chegam a quem as desenha. Régua da Central,
-## cor da moldura e veredito passam a concordar por construção.
+## Um lugar só onde os parâmetros da curva são saneados.
+##
+## Os oito níveis têm faixas fixas, então não há mais limite ajustável
+## para arrumar: o que precisa de saneamento é a curva, e ela é a mesma
+## que a Central desenha, que o placar usa e que o firmware recebe. Uma
+## passagem só por `ScoreCurve.sanitize` mantém as três concordando.
 func _aplicar_faixas() -> void:
-	var lim := GameDef.limiares(limiar_fraco, limiar_forte)
-	limiar_fraco = lim.x
-	limiar_forte = lim.y
+	var cfg := ScoreCurve.sanitize(hit_min_speed, hit_max_speed, score_exponent, score_dead_zone)
+	hit_min_speed = cfg["min_speed"]
+	hit_max_speed = cfg["max_speed"]
+	score_exponent = cfg["exponent"]
+	score_dead_zone = cfg["dead_zone"]
 
 ## A melhor marca da casa. Sai do topo do ranking, e não de uma variável
 ## paralela — duas fontes para o mesmo número é como elas divergem.
@@ -436,7 +447,7 @@ func _processar_resultado(delta: float) -> void:
 func _manter_festa(delta: float) -> void:
 	## A festa continua enquanto o veredito está na tela, e o tamanho
 	## dela é o da faixa — as mesmas três faixas da régua da Central.
-	match GameDef.faixa_de(result_score, limiar_fraco, limiar_forte):
+	match GameDef.faixa_de(result_score):
 		GameDef.Faixa.FORTE:
 			# Estouros pela tela, sempre a partir de um ponto: cada um é
 			# um eco do soco, e não um fogo de artifício solto no ar.
@@ -657,7 +668,7 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	photo_retained = posicao_no_ranking > 0
 	statistics = StatisticsStore.record(
 		statistics, result_score,
-		GameDef.faixa_de(result_score, limiar_fraco, limiar_forte),
+		GameDef.faixa_de(result_score),
 		posicao_no_ranking > 0
 	)
 	_salvar()
@@ -668,7 +679,7 @@ func _disparar_veredito() -> void:
 	## O momento em que a máquina diz quanto valeu o soco. Um por golpe.
 	verdict_time = 0.0
 	proximo_fogo = 0.0
-	var classe := GameDef.classificar(result_score, limiar_fraco, limiar_forte)
+	var classe := GameDef.classificar(result_score)
 	var cor: Color = classe["cor_faixa"]
 	moldura.set_estado(LedFrame.RESULTADO, cor)
 	# A tela inteira toma a cor da faixa, de leve: o veredito chega ao
@@ -967,15 +978,13 @@ func _click_central(p: Vector2) -> void:
 	elif BOTOES_SIMPLES["padroes"].has_point(p):
 		game_mode = "credit"
 		porta_configurada = ""
-		hit_min_speed = 0.8
-		hit_max_speed = 12.0
+		hit_min_speed = ScoreCurve.DEFAULT_MIN_SPEED
+		hit_max_speed = ScoreCurve.DEFAULT_MAX_SPEED
 		score_exponent = ScoreCurve.DEFAULT_EXPONENT
 		score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
-		limiar_fraco = GameDef.LIMIAR_FRACO_PADRAO
-		limiar_forte = GameDef.LIMIAR_FORTE_PADRAO
 		sensor_eixo = "X"
 		sensor_raio = 0.45
-		sensor_vmin = 0.8
+		sensor_vmin = ScoreCurve.DEFAULT_MIN_SPEED
 		sensor_amin = 3.5
 		_show_notice("PADRÕES RESTAURADOS")
 	else:
@@ -984,19 +993,24 @@ func _click_central(p: Vector2) -> void:
 	_salvar()
 
 ## Um clique num − ou + . Cada valor tem o seu passo e os seus limites,
-## e o saneamento das faixas fica com `GameDef.limiares`.
+## e o saneamento fica com `ScoreCurve.sanitize`, chamado por
+## `_aplicar_faixas` logo depois de qualquer ajuste.
 func _ajustar(chave: String, direcao: int) -> void:
 	match chave:
-		"limiar_fraco":
-			limiar_fraco = limiar_fraco + direcao * 10
-		"limiar_forte":
-			limiar_forte = limiar_forte + direcao * 10
 		"vmin":
-			hit_min_speed = clampf(hit_min_speed + direcao * 0.1, 0.2, hit_max_speed - 0.5)
+			hit_min_speed = clampf(
+				hit_min_speed + direcao * 0.1,
+				ScoreCurve.MIN_SPEED_MIN, minf(ScoreCurve.MIN_SPEED_MAX, hit_max_speed - 0.5)
+			)
 		"vmax":
-			hit_max_speed = clampf(hit_max_speed + direcao * 0.5, hit_min_speed + 0.5, 40.0)
+			hit_max_speed = clampf(
+				hit_max_speed + direcao * 0.5,
+				maxf(ScoreCurve.MAX_SPEED_MIN, hit_min_speed + 0.5), ScoreCurve.MAX_SPEED_MAX
+			)
 		"curva":
 			score_exponent = clampf(score_exponent + direcao * 0.05, ScoreCurve.EXPONENT_MIN, ScoreCurve.EXPONENT_MAX)
+		"zona":
+			score_dead_zone = clampf(score_dead_zone + direcao * 0.01, 0.0, ScoreCurve.DEAD_ZONE_MAX)
 		"porta":
 			_girar_porta(direcao)
 		"raio":
@@ -1040,14 +1054,24 @@ func _carregar() -> void:
 	# primeira linha do ranking, para o dono não perder a marca da casa
 	# ao atualizar o software.
 	var antigo := int(data.get("best_score", 0))
-	ranking = RankingStore.migrate(data.get("ranking", []), antigo)
+	# A versão gravada decide se as marcas ainda estão na escala antiga.
+	# Ausente quer dizer "arquivo de antes de existir versão", ou seja,
+	# escala 0 a 999 — e é essa a única vez que a conversão acontece.
+	var esquema := int(data.get("ranking_schema", RankingStore.ESQUEMA_LEGADO))
+	ranking = RankingStore.migrate(data.get("ranking", []), antigo, esquema)
+	if esquema < RankingStore.ESQUEMA:
+		# Grava a nova versão já, e não só no próximo `_salvar`: uma queda
+		# de energia entre a conversão e o primeiro salvamento converteria
+		# tudo de novo no religar.
+		# Grava a versão nova AGORA, e não só no próximo `_salvar`: uma
+		# queda de energia entre a conversão e o primeiro salvamento
+		# converteria tudo outra vez no religar.
+		_converteu_esquema = true
 	porta_configurada = str(data.get("port", porta_configurada))
 	hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
 	hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
 	score_exponent = float(data.get("score_exponent", score_exponent))
 	score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
-	limiar_fraco = int(data.get("limiar_fraco", limiar_fraco))
-	limiar_forte = int(data.get("limiar_forte", limiar_forte))
 	sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 	sensor_raio = float(data.get("sensor_raio", sensor_raio))
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
@@ -1062,6 +1086,7 @@ func _salvar() -> void:
 		"credits": credits,
 		"plays": plays,
 		"ranking": ranking,
+		"ranking_schema": RankingStore.ESQUEMA,
 		# Mantido para uma eventual volta a uma versão anterior do jogo.
 		"best_score": _melhor(),
 		"port": porta_configurada,
@@ -1069,8 +1094,6 @@ func _salvar() -> void:
 		"hit_max_speed": hit_max_speed,
 		"score_exponent": score_exponent,
 		"score_dead_zone": score_dead_zone,
-		"limiar_fraco": limiar_fraco,
-		"limiar_forte": limiar_forte,
 		"sensor_eixo": sensor_eixo,
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
@@ -1227,7 +1250,7 @@ func _pagina_recordes(alpha: float) -> void:
 			_texto("—", meio, 34, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 		else:
 			_draw_player_photo(Rect2(linha.position + Vector2(210.0, 11.0), Vector2(76.0, 76.0)), str(ranking[i].get("photo_path", "")), alpha)
-			_texto("%03d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
+			_texto("%04d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 			_texto("PONTOS", meio, 18, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 190.0)
 	_texto("POSIÇÕES %02d–%02d" % [page * 5 + 1, page * 5 + 5], 1152.0, 26, Color(Paleta.CIANO, alpha))
 
@@ -1312,7 +1335,7 @@ func _draw_espera_do_soco() -> void:
 	# se soca. Assim que a carga começa, a cor passa a ser a da faixa.
 	var cor := Paleta.AMBAR
 	if carregando:
-		cor = GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+		cor = GameDef.classificar(carga_pontos)["cor_faixa"] as Color
 
 	_draw_farol(cor, carregando)
 
@@ -1322,7 +1345,7 @@ func _draw_espera_do_soco() -> void:
 		# aparecer no resultado. Quem carrega não adivinha quanto vale
 		# quanto: solta quando o número que está vendo serve.
 		_rotulo("PONTOS SE SOLTAR AGORA", 785.0, cor)
-		VisorLed.desenhar(self, "%03d" % carga_pontos, ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, Color.WHITE)
+		VisorLed.desenhar(self, "%04d" % carga_pontos, ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, Color.WHITE)
 		var piscada := 0.6 + 0.4 * sin(animation_time * 9.0)
 		_texto_arcade("SOLTE!", 1430.0, 72, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
 	else:
@@ -1337,7 +1360,7 @@ func _draw_espera_do_soco() -> void:
 		# vermelha do fundo começa perto de 1500 px e engole qualquer
 		# texto miúdo que caia ali. Dentro do vidro escuro ela é legível
 		# e, de quebra, fica ao lado do número que vai substituí-la.
-		_rotulo("RECORDE DA CASA  %03d" % _melhor(), 1105.0, Paleta.AMBAR)
+		_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1105.0, Paleta.AMBAR)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
@@ -1425,7 +1448,7 @@ func _capitulo_da_marca(alpha: float) -> void:
 	_texto_arcade("CHALLENGE", 1010.0, 80, Color(Paleta.AMBAR, alpha), LARGURA_UTIL)
 	_texto("QUAL É A SUA FORÇA?", 1120.0, 32, Color(Color.WHITE, alpha))
 	_texto("RECORDE DA CASA", 1270.0, 24, Color(Color("d8b6a6"), alpha))
-	_texto("%03d" % _melhor(), 1400.0, 98, Color(Paleta.AMBAR, alpha))
+	_texto("%04d" % _melhor(), 1400.0, 98, Color(Paleta.AMBAR, alpha))
 
 ## Quantos capítulos existem e em qual estamos. Sem isso o rodízio parece
 ## a tela trocando sozinha por defeito.
@@ -1455,7 +1478,7 @@ func _draw_score_hero() -> void:
 	# o anel de um golpe fraco não pode ser igual ao de um nocaute.
 	var color := Paleta.CIANO
 	if verdict_time >= 0.0:
-		color = GameDef.classificar(result_score, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+		color = GameDef.classificar(result_score)["cor_faixa"] as Color
 	_draw_campo_de_forca(center, color, progress, measuring)
 	_draw_colunas_de_forca(color, progress)
 	for i in range(12):
@@ -1473,7 +1496,7 @@ func _draw_score_hero() -> void:
 	# reconhece não é o formato do algarismo: é o SEGMENTO APAGADO, que
 	# continua visível atrás do número. Nenhuma fonte dá isso.
 	VisorLed.desenhar(
-		self, "---" if measuring else "%03d" % int(round(displayed_score)),
+		self, "----" if measuring else "%04d" % int(round(displayed_score)),
 		center + Vector2(0.0, 20.0), 168.0, Color.WHITE if not measuring else color
 	)
 	if verdict_time >= 0.0:
@@ -1584,9 +1607,9 @@ func _draw_ranking_reveal() -> void:
 		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
 		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
 		_texto("VOCÊ" if selected else "JOGADOR", y + 64.0, 26, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
-		_texto("%03d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
+		_texto("%04d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
 	_rotulo("SEU SOCO", 1400.0, Paleta.TINTA_FRACA)
-	_texto_arcade("%03d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
+	_texto_arcade("%04d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
 
 # ---------------------------------------------------------------- central
@@ -1610,20 +1633,22 @@ func _draw_central() -> void:
 	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
 	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
 
-	# ---- faixas do placar
-	_secao(Rect2(80, 416, 920, 244), "FAIXAS DO PLACAR (0 – 999)", Paleta.AMBAR)
-	_regua_das_faixas(Rect2(110, 470, 860, 28))
-	_stepper("limiar_fraco", "%03d" % limiar_fraco, "ATÉ AQUI É FRACO", GameDef.COR_FRACA)
-	_stepper("limiar_forte", "%03d" % limiar_forte, "DAQUI É FORTE", GameDef.COR_FORTE)
-
-	# ---- velocidade e dificuldade, cada uma na sua linha
-	_secao(Rect2(80, 676, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
-	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
-	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
+	# ---- velocidade e dificuldade: é aqui que se regula a máquina
+	_secao(Rect2(80, 416, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
+	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
+	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
 	_stepper(
 		"curva", "γ %.2f" % score_exponent,
-		"CURVA %s  •  ZONA MORTA %.0f%%" % [ScoreCurve.difficulty_name(score_exponent), score_dead_zone * 100.0],
-		Paleta.ROXO
+		"CURVA  %s" % ScoreCurve.difficulty_name(score_exponent), Paleta.ROXO
+	)
+	_stepper("zona", "%.0f%%" % (score_dead_zone * 100.0), "ZONA MORTA", Paleta.ROXO)
+
+	# ---- os oito níveis: régua de leitura, não de regulagem
+	_secao(Rect2(80, 716, 920, 244), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
+	_regua_dos_niveis(Rect2(110, 776, 860, 40))
+	_texto(
+		"As faixas dos níveis são fixas. Quem decide quanta gente chega a cada uma é a curva acima.",
+		880.0, 15, Paleta.TINTA_FRACA
 	)
 
 	# ---- sensor e firmware
@@ -1661,7 +1686,7 @@ func _draw_central() -> void:
 	)
 	var resumo := StatisticsStore.summary(statistics)
 	_texto(
-		"Hoje %d  •  7 dias %d  •  média %03d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
+		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
 		1706.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
@@ -1691,7 +1716,7 @@ func _lista_do_ranking(rect: Rect2) -> void:
 		_cartao(celula, Paleta.tinta_clara(cor, 0.14) if tem else Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
 		_texto("%dº" % (i + 1), celula.position.y + 20.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
 		_texto(
-			"%03d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
+			"%04d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
 			Paleta.TINTA if tem else Paleta.TINTA_LEVE,
 			HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x
 		)
@@ -1717,24 +1742,33 @@ func _stepper(chave: String, valor: String, legenda: String, accent: Color) -> v
 	var r: Rect2 = PASSOS[chave]
 	_texto(legenda, r.end.y + 28.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x)
 
-## A régua das três faixas, do jeito que o cliente vai ver no placar.
-## Mexer num limite muda esta barra na hora: o técnico regula olhando o
-## resultado, não imaginando o resultado.
-func _regua_das_faixas(rect: Rect2) -> void:
-	var lim := GameDef.limiares(limiar_fraco, limiar_forte)
-	var faixas := [
-		[0.0, float(lim.x) / GameDef.SCORE_MAX, GameDef.COR_FRACA, "FRACO"],
-		[float(lim.x) / GameDef.SCORE_MAX, float(lim.y) / GameDef.SCORE_MAX, GameDef.COR_MEDIA, "MÉDIO"],
-		[float(lim.y) / GameDef.SCORE_MAX, 1.0, GameDef.COR_FORTE, "FORTE"],
-	]
-	for f in faixas:
-		var x0 := rect.position.x + rect.size.x * float(f[0])
-		var x1 := rect.position.x + rect.size.x * float(f[1])
-		var cor: Color = f[2]
-		draw_rect(Rect2(x0, rect.position.y, x1 - x0, rect.size.y), cor)
-		if x1 - x0 > 90.0:
-			_texto(str(f[3]), rect.position.y + rect.size.y * 0.70, 15, Color(1, 1, 1, 0.95), HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0)
+## A RÉGUA DOS OITO NÍVEIS, na largura de cada um.
+##
+## Ela é de LEITURA: as faixas são fixas e não há o que arrastar aqui. O
+## que ela mostra é a desproporção — os quatro níveis de cima ocupam um
+## quinto da escala, e é vendo isso que o técnico entende por que quase
+## ninguém chega ao topo, em vez de achar que a máquina está quebrada.
+func _regua_dos_niveis(rect: Rect2) -> void:
+	var teto := float(GameDef.SCORE_MAX + 1)
+	for nivel in ScoreTier.NIVEIS:
+		var x0 := rect.position.x + rect.size.x * (float(nivel["min"]) / teto)
+		var x1 := rect.position.x + rect.size.x * (float(int(nivel["max"]) + 1) / teto)
+		draw_rect(Rect2(x0, rect.position.y, x1 - x0, rect.size.y), nivel["cor"] as Color)
+		if x1 - x0 > 96.0:
+			# Preto sobre cor clara, branco sobre cor escura. A cor do
+			# nível é dado de projeto e vai de creme a azul-acinzentado:
+			# um contraste fixo apagaria metade dos nomes.
+			var cor: Color = nivel["cor"]
+			var tinta := Color.BLACK if cor.get_luminance() > 0.55 else Color.WHITE
+			_texto(
+				str(nivel["nome"]), rect.position.y + rect.size.y * 0.66, 14, tinta,
+				HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0
+			)
 	draw_rect(rect, Paleta.CARTAO_BORDA, false, 2.0)
+	# O teto da escala fica marcado à direita: é o único ponto da régua
+	# que uma pessoa pode alcançar e não é uma faixa, é um alvo.
+	_texto("9999", rect.end.y + 22.0, 15, Paleta.CREME, HORIZONTAL_ALIGNMENT_RIGHT, rect.position.x, rect.size.x)
+	_texto("0000", rect.end.y + 22.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, rect.position.x, rect.size.x)
 
 ## Retângulo de cantos redondos. O Godot só desenha retângulo de canto
 ## vivo, e canto vivo em peça grande destoa do resto da tela — a placa,

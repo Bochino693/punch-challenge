@@ -16,7 +16,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="Punch Challenge"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.4", "GL Compatibility")
+config/features=PackedStringArray("4.6", "GL Compatibility")
 boot_splash/bg_color=Color(0.098, 0.0235, 0.051, 1)
 boot_splash/image="res://assets/branding/selo_lazer.png"
 config/icon="res://assets/icon.png"
@@ -30,6 +30,7 @@ window/size/mode=3
 window/size/window_width_override=540
 window/size/window_height_override=960
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 window/handheld/orientation=1
 
 [input]
@@ -50,4 +51,4 @@ input_credito={
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 anti_aliasing/quality/msaa_2d=2
-environment/defaults/default_clear_color=Color(0.0196, 0.0314, 0.0863, 1)
+environment/defaults/default_clear_color=Color(0.098, 0.0235, 0.051, 1)
