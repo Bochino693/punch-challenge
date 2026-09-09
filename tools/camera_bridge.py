@@ -40,6 +40,23 @@ try:
     import cv2
     import numpy as np
 except ImportError:
+    # O JOGO PRECISA SABER O MOTIVO, e ele não lê a saída de erro.
+    #
+    # Sem isto, a falta do OpenCV aparecia como "o processo morreu na
+    # hora" — indistinguível de câmera ocupada, cabo solto ou Python
+    # errado. Escrever o motivo ao lado do JPEG é o que faz a Central
+    # dizer o que instalar em vez de dizer que algo deu errado.
+    for i, arg in enumerate(sys.argv):
+        if arg == "--output" and i + 1 < len(sys.argv):
+            try:
+                destino = Path(sys.argv[i + 1])
+                destino.parent.mkdir(parents=True, exist_ok=True)
+                (destino.parent / "estado.txt").write_text(
+                    "OPENCV AUSENTE - RODE tools/instalar_camera_windows.ps1|0|0",
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
     print(
         "OpenCV ausente. Instale com:  py -m pip install opencv-python",
         file=sys.stderr,
@@ -192,18 +209,37 @@ def main() -> int:
     captura = None
     nome_backend = ""
     quadros = 0
+    indice = args.camera
+    tentativas_no_indice = 0
     try:
         while True:
             if captura is None:
                 # RECONECTA SOZINHA. Uma webcam USB que dá tranco no cabo
                 # some por um segundo; se a ponte morresse nisso, o
                 # gabinete ficaria sem câmera até alguém reiniciar o jogo.
-                captura, nome_backend = abrir(args.camera, args.width, silencioso=True)
+                captura, nome_backend = abrir(indice, args.width, silencioso=True)
                 if captura is None:
-                    anotar(f"PROCURANDO CAMERA {args.camera}")
-                    time.sleep(1.5)
+                    tentativas_no_indice += 1
+                    # O ÍNDICE CONFIGURADO NÃO É SAGRADO.
+                    #
+                    # No Windows a numeracao das cameras muda com a porta
+                    # USB, com um driver de camera virtual instalado, com
+                    # a webcam do notebook. Insistir eternamente no
+                    # indice 0 e o motivo mais comum de "a camera esta
+                    # ligada e o jogo nao ve": ela esta ali, no indice 1.
+                    #
+                    # Duas tentativas por indice e passa para o proximo,
+                    # dando a volta em 0..5.
+                    if tentativas_no_indice >= 2:
+                        tentativas_no_indice = 0
+                        indice = (indice + 1) % 6
+                        anotar(f"PROCURANDO CAMERA - TESTANDO INDICE {indice}")
+                    else:
+                        anotar(f"PROCURANDO CAMERA {indice}")
+                    time.sleep(1.0)
                     continue
-                anotar(f"CONECTADA ({nome_backend})")
+                tentativas_no_indice = 0
+                anotar(f"CONECTADA ({nome_backend}) INDICE {indice}")
 
             ok, quadro = captura.read()
             if not ok or quadro is None:
@@ -222,7 +258,7 @@ def main() -> int:
                 # É ele que carrega o contador; publicado de quatro em
                 # quatro segundos, o contador não serviria para detectar
                 # travamento nenhum.
-                anotar(f"CONECTADA ({nome_backend})")
+                anotar(f"CONECTADA ({nome_backend}) INDICE {indice}")
             time.sleep(intervalo)
     except KeyboardInterrupt:
         return 0

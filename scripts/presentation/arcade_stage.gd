@@ -306,7 +306,9 @@ static func _intro_assinatura(canvas: Control, time: float, morph: float) -> voi
 	# a abertura já desenha a sua própria, no lugar certo, logo em
 	# seguida.
 	var saida := 1.0 - ease(morph, 0.5)
-	canvas._texto("LAZER & SPORT GAMES", 1535.0, 27, Color(GOLD, t * saida))
+	# A MARCA DESENHADA, e não a frase. O mesmo logotipo do selo da
+	# entrada, agora pequeno, assinando o cartaz.
+	canvas._marca_da_casa(1478.0, 104.0, t * saida)
 	canvas._texto(
 		"QUAL É A SUA FORÇA?", 1622.0, 32,
 		Color(WHITE, t * saida * (0.82 + 0.18 * sin(time * 5.0)))

@@ -29,6 +29,20 @@ var _bridge_contador_ms := 0
 ## Quantas vezes a ponte precisou ser ressuscitada. Aparece na Central:
 ## uma ponte que reinicia sozinha o tempo todo é cabo ruim, não software.
 var _bridge_reinicios := 0
+## TETO DE RELIGAMENTOS. Sem ele, uma máquina sem Python entra num laço:
+## o processo morre no mesmo instante em que nasce, o jogo o ressuscita,
+## e assim a noite inteira — com o motivo verdadeiro (falta o OpenCV)
+## sumindo no meio de mil reinícios.
+const MAX_RELIGAMENTOS := 6
+var _bridge_desistiu := false
+## PULA O CAMINHO NATIVO E VAI DIRETO À PONTE.
+##
+## No Windows é comum o Godot ENUMERAR a webcam e nunca receber quadro: a
+## máquina fica "conectada" e preta. O vigia já derruba isso em dois
+## segundos e meio, mas numa instalação em que isso acontece toda vez,
+## esperar dois segundos e meio a cada abertura é tempo perdido — e o
+## técnico que já sabe do problema tem como dizer "vá direto".
+var forcar_ponte := false
 ## Vigia do caminho nativo: quando o feed foi ativado e se ele já provou
 ## que entrega quadro.
 var _native_started_ms := 0
@@ -73,6 +87,13 @@ func _process(_delta: float) -> void:
 		_last_image = null
 		_bridge_pid = -1
 		_bridge_reinicios += 1
+		if _bridge_reinicios > MAX_RELIGAMENTOS:
+			# DESISTIR É INFORMAÇÃO. Seis mortes seguidas não são cabo
+			# solto: é o processo não conseguindo nem começar. O motivo
+			# está no arquivo de estado que a ponte deixa para trás.
+			_bridge_desistiu = true
+			status = _bridge_status_file()
+			return
 		status = "PONTE CAIU — RELIGANDO (%d)" % _bridge_reinicios
 		_start_bridge()
 		return
@@ -93,8 +114,12 @@ func _process(_delta: float) -> void:
 			_start_bridge()
 		return
 	if contador >= 0:
+		# Quadro novo: a ponte está viva de verdade, e a conta de
+		# desistência recomeça. Sem zerar, seis trancos no cabo ao longo
+		# de uma tarde acabariam desligando a câmera para sempre.
 		_bridge_contador = contador
 		_bridge_contador_ms = now
+		_bridge_reinicios = 0
 	var bytes := FileAccess.get_file_as_bytes(_bridge_path) if FileAccess.file_exists(_bridge_path) else PackedByteArray()
 	var digest := hash(bytes)
 	if not bytes.is_empty() and digest != _bridge_digest:
@@ -146,6 +171,11 @@ func _acordar_servidor() -> void:
 func refresh() -> void:
 	_stop_feed()
 	_native_ok = false
+	# Toda tentativa manual (ligar, trocar de câmera, reabrir a Central)
+	# tem direito a uma bateria nova de religamentos: quem clicou está
+	# dizendo que alguma coisa mudou.
+	_bridge_desistiu = false
+	_bridge_reinicios = 0
 	if not enabled:
 		status = "CÂMERA DESATIVADA"
 		return
@@ -157,7 +187,7 @@ func refresh() -> void:
 	# vazia e a máquina conclui, errado, que não há câmera nenhuma.
 	# Ligar o monitoramento é barato e idempotente.
 	_acordar_servidor()
-	var feeds := CameraServer.feeds()
+	var feeds: Array = [] if forcar_ponte else CameraServer.feeds()
 	if feeds.is_empty():
 		# A PONTE NÃO É MAIS SÓ DO WINDOWS. Ela é a reserva para QUALQUER
 		# caso em que o Godot não enxerga a webcam — e são vários: falta
@@ -277,7 +307,7 @@ func _matar_ponte() -> void:
 	_last_frame_ms = 0
 
 func _start_bridge() -> void:
-	if _bridge_pid > 0:
+	if _bridge_pid > 0 or _bridge_desistiu:
 		return
 	var data_dir := "user://camera_bridge"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))

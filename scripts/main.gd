@@ -116,6 +116,8 @@ const BOTOES_SIMPLES := {
 	"camera": Rect2(110, 410, 260, 60),
 	"trocar_camera": Rect2(390, 410, 260, 60),
 	"foto_teste": Rect2(670, 410, 300, 60),
+	"forcar_ponte": Rect2(110, 484, 400, 56),
+	"sondar_camera": Rect2(570, 484, 400, 56),
 	"testar_som": Rect2(300, 1046, 480, 60),
 	# --- página DADOS
 	"zerar": Rect2(110, 850, 207, 60),
@@ -138,6 +140,7 @@ const PAGINA_DO_CONTROLE := {
 	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
 	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
+	"forcar_ponte": 2, "sondar_camera": 2,
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 }
@@ -182,14 +185,23 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
-## SIMULAÇÃO DE BANCADA. Desligada de fábrica.
+## SIMULAÇÃO DE BANCADA. LIGADA ENQUANTO NÃO HOUVER SENSOR.
 ##
 ## Ligada, a barra de espaço vira um soco falso. É indispensável para
 ## montar e regular a máquina sem bater no saco cem vezes, e é fraude num
 ## salão: com ela ligada, qualquer pessoa tira 9999 sem encostar no
-## equipamento. Por isso ela não é um atalho escondido, é uma chave — e
-## uma chave que a Central mostra ligada, em vermelho, quando está.
-var simulacao_bancada := false
+## equipamento.
+##
+## Por isso ela não fica ligada por decisão de ninguém — ela DESLIGA
+## SOZINHA na primeira vez que o MPU-6050 se apresenta pela serial. Uma
+## máquina sem sensor é uma máquina em montagem, e precisa da barra; uma
+## máquina com sensor é uma máquina de salão, e a barra ali é roubo. O
+## operador continua podendo forçar os dois estados na Central, e a
+## escolha dele manda a partir de então.
+var simulacao_bancada := true
+## Se o operador mexeu na chave à mão. Enquanto for falso, o sensor
+## decide; a partir do primeiro clique, quem decide é a pessoa.
+var simulacao_escolhida := false
 ## Uma segunda porta, para a bancada de quem desenvolve: `PUNCH_SIMULACAO=1`
 ## no ambiente libera a barra sem mexer na configuração da máquina.
 var simulacao_por_ambiente := false
@@ -262,6 +274,17 @@ var hitstop_left := 0.0
 ## desenho, não na câmera, porque não há câmera — o jogo é um `_draw`.
 var zoom_impacto := 1.0
 var zoom_alvo := 1.0
+## A CORTINA ENTRE UMA TELA E OUTRA.
+##
+## Antes as telas trocavam no meio de um quadro: a foto virava o alvo, o
+## alvo virava o placar, tudo de um pixel para o outro. Num monitor de
+## fliperama isso não lê como "mudou de tela", lê como falha de imagem.
+##
+## Agora uma faixa diagonal atravessa a tela a cada troca, na cor da
+## marca, com o alvo do jogo montado nela. Meio segundo, o tempo de a
+## pessoa entender que a máquina avançou.
+var transicao := -1.0
+const TRANSICAO_DURACAO := 0.52
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -304,6 +327,10 @@ var portas_visiveis: PackedStringArray = []
 var camera_service: CameraService
 var camera_enabled := true
 var camera_mirrored := true
+## Pula o CameraServer e vai direto à ponte Python. Guardado em disco:
+## numa máquina em que o caminho nativo nunca funciona, ligar isso uma
+## vez tem de valer para sempre.
+var camera_forcar_ponte := false
 var statistics: Dictionary = {}
 var result_photo_path := ""
 var pose_finished := false
@@ -343,6 +370,7 @@ func _ready() -> void:
 	camera_service = CameraService.new()
 	camera_service.enabled = camera_enabled
 	camera_service.mirrored = camera_mirrored
+	camera_service.forcar_ponte = camera_forcar_ponte
 	add_child(camera_service)
 	# TRÊS PORTAS PARA A MESMA CHAVE, e de propósito: a da Central serve
 	# ao técnico no salão, a variável de ambiente serve à bancada de quem
@@ -429,6 +457,10 @@ func _process(delta: float) -> void:
 	fx.atualizar(delta)
 	tremor = maxf(0.0, tremor - delta * 26.0)
 	clarao = maxf(0.0, clarao - delta * 2.6)
+	if transicao >= 0.0:
+		transicao += delta
+		if transicao > TRANSICAO_DURACAO:
+			transicao = -1.0
 	if pancada_tempo >= 0.0:
 		pancada_tempo += delta
 		# O zoom volta ao normal assim que o estrelão passa da metade.
@@ -519,6 +551,7 @@ func _processar_contagem(delta: float) -> void:
 		sons.duck(8.0, 0.5)
 	if countdown_left <= -1.2:
 		state = GameDef.State.ARMED
+		_iniciar_transicao()
 		state_time = 0.0
 		espera_left = GameDef.ESPERA_DO_SOCO
 		carga_tempo = -1.0
@@ -794,6 +827,7 @@ func _iniciar_rodada() -> void:
 	intro_active = false
 	sons.stop("score_loop")
 	state = GameDef.State.COUNTDOWN
+	_iniciar_transicao()
 	posicao_no_ranking = 0
 	state_time = 0.0
 	countdown_left = 3.0
@@ -828,6 +862,10 @@ func _devolver_credito() -> void:
 	_show_notice("TEMPO ESGOTADO — CRÉDITO DEVOLVIDO  •  SALDO %02d" % credits)
 
 func _entrar_em_abertura() -> void:
+	# A volta para a abertura também é uma troca de tela, e sem cortina
+	# ela era a mais seca de todas: o Top 20 sumia e a marca aparecia.
+	if not intro_active:
+		_iniciar_transicao()
 	_discard_round_photo()
 	abertura_chegada = 1.0
 	# Corta os efeitos da rodada e deixa a música da abertura no ar. Antes
@@ -1214,6 +1252,16 @@ func _on_serial_line(line: String) -> void:
 	match str(msg["type"]):
 		"READY":
 			serial_status = "CONECTADO %s" % porta_atual
+			# O SENSOR CHEGOU: a máquina deixa de ser bancada.
+			#
+			# Enquanto o operador não tiver mexido na chave, quem decide é
+			# a presença do MPU-6050. É o momento exato em que a máquina
+			# passa de "em montagem" para "em salão", e é o único momento
+			# em que ela sabe disso sozinha.
+			if simulacao_bancada and not simulacao_escolhida:
+				simulacao_bancada = false
+				_show_notice("SENSOR DETECTADO — SIMULAÇÃO DE BANCADA DESLIGADA")
+				_salvar()
 			_enviar_config()
 		"PONG":
 			if not porta_atual.is_empty() and "CONECTADO" not in serial_status:
@@ -1420,6 +1468,7 @@ func _click_central(p: Vector2) -> void:
 		return
 	elif _visivel_na_pagina("simulacao") and BOTOES_SIMPLES["simulacao"].has_point(p):
 		simulacao_bancada = not simulacao_bancada
+		simulacao_escolhida = true
 		_show_notice(
 			"SIMULAÇÃO DE BANCADA LIGADA — DESLIGUE ANTES DE ABRIR"
 			if simulacao_bancada else "SIMULAÇÃO DE BANCADA DESLIGADA"
@@ -1442,6 +1491,20 @@ func _click_central(p: Vector2) -> void:
 	elif _visivel_na_pagina("camera") and BOTOES_SIMPLES["camera"].has_point(p):
 		camera_enabled = not camera_enabled
 		camera_service.set_enabled(camera_enabled)
+		_show_notice(camera_service.status)
+	elif _visivel_na_pagina("forcar_ponte") and BOTOES_SIMPLES["forcar_ponte"].has_point(p):
+		camera_forcar_ponte = not camera_forcar_ponte
+		camera_service.forcar_ponte = camera_forcar_ponte
+		camera_service.refresh()
+		_show_notice(
+			"INDO DIRETO PELA PONTE PYTHON" if camera_forcar_ponte
+			else "TENTANDO O CAMINHO NATIVO PRIMEIRO"
+		)
+	elif _visivel_na_pagina("sondar_camera") and BOTOES_SIMPLES["sondar_camera"].has_point(p):
+		# PROCURAR DE NOVO, e não só religar: `refresh` zera a desistência
+		# e refaz a enumeração inteira. É o botão de quem acabou de
+		# espetar a webcam com o jogo já aberto.
+		camera_service.refresh()
 		_show_notice(camera_service.status)
 	elif _visivel_na_pagina("trocar_camera") and BOTOES_SIMPLES["trocar_camera"].has_point(p):
 		camera_service.cycle_camera()
@@ -1591,12 +1654,14 @@ func _carregar() -> void:
 	sensor_raio = float(data.get("sensor_raio", sensor_raio))
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
-	simulacao_bancada = bool(data.get("simulacao_bancada", false))
+	simulacao_bancada = bool(data.get("simulacao_bancada", true))
+	simulacao_escolhida = bool(data.get("simulacao_escolhida", false))
 	volume_musica = float(data.get("volume_musica", volume_musica))
 	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
 	botao_credito = _mapa_de_botao(data.get("botao_credito", {}), 4)
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
+	camera_forcar_ponte = bool(data.get("camera_forcar_ponte", camera_forcar_ponte))
 	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
 	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
 
@@ -1619,11 +1684,13 @@ func _salvar() -> void:
 		"sensor_vmin": sensor_vmin,
 		"sensor_amin": sensor_amin,
 		"simulacao_bancada": simulacao_bancada,
+		"simulacao_escolhida": simulacao_escolhida,
 		"volume_musica": volume_musica,
 		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
 		"botao_credito": botao_credito,
 		"camera_enabled": camera_enabled,
+		"camera_forcar_ponte": camera_forcar_ponte,
 		"camera_mirrored": camera_mirrored,
 		"statistics": statistics,
 	})
@@ -1631,6 +1698,10 @@ func _salvar() -> void:
 # ======================================================================
 # DESENHO
 # ======================================================================
+## Chama a cortina. `_process` cuida do resto.
+func _iniciar_transicao() -> void:
+	transicao = 0.0
+
 func _draw() -> void:
 	fundo.visible = true
 	moldura.visible = false
@@ -1659,6 +1730,7 @@ func _draw() -> void:
 	fx.desenhar(self)
 	_draw_pancada()
 	_draw_clarao()
+	_draw_transicao()
 
 	if notice != "" and not central_aberta:
 		_draw_notice()
@@ -1686,6 +1758,51 @@ func _draw_pancada() -> void:
 		clampf(pancada_tempo / ImpactDirector.PANCADA_DURACAO, 0.0, 1.0),
 		_alvo(), pancada_forca
 	)
+
+## A CORTINA: uma faixa diagonal cruzando a tela, com o alvo montado nela.
+##
+## POR QUE DIAGONAL E POR QUE ATRAVESSANDO. Um esmaecer para o preto
+## esconde a troca, mas também esconde meio segundo de máquina — e numa
+## fila de fliperama meio segundo de tela preta parece travamento. Uma
+## faixa que ENTRA por um lado e SAI pelo outro cobre a troca e ainda diz
+## para que lado o jogo está indo.
+##
+## O corte é oblíquo porque o fundo do jogo já é feito de faixas
+## oblíquas: a cortina passa a parecer uma peça do cenário se movendo, e
+## não um retângulo estranho aparecendo por cima.
+func _draw_transicao() -> void:
+	if transicao < 0.0:
+		return
+	var t := clampf(transicao / TRANSICAO_DURACAO, 0.0, 1.0)
+	var avanco := ease(t, 0.55)
+	# A faixa é mais larga que a tela para cobrir o corte inteiro no meio
+	# do caminho; sem isso apareceria uma fresta do jogo antigo.
+	var largura := 1500.0
+	var x := lerpf(-largura, TELA.x + largura, avanco)
+	var inclinacao := 260.0
+	var faixa := PackedVector2Array([
+		Vector2(x - largura * 0.5 + inclinacao, -20.0),
+		Vector2(x + largura * 0.5 + inclinacao, -20.0),
+		Vector2(x + largura * 0.5 - inclinacao, TELA.y + 20.0),
+		Vector2(x - largura * 0.5 - inclinacao, TELA.y + 20.0),
+	])
+	draw_colored_polygon(faixa, Color("b21029"))
+	# Um fio de ouro na borda de ataque: é ele que dá velocidade ao gesto.
+	draw_line(
+		Vector2(x + largura * 0.5 + inclinacao, -20.0),
+		Vector2(x + largura * 0.5 - inclinacao, TELA.y + 20.0),
+		Paleta.AMBAR, 8.0, true
+	)
+	draw_line(
+		Vector2(x - largura * 0.5 + inclinacao, -20.0),
+		Vector2(x - largura * 0.5 - inclinacao, TELA.y + 20.0),
+		Color(Paleta.AMBAR, 0.55), 4.0, true
+	)
+	# O alvo viaja montado na faixa. É a mesma marca do jogo, e é o que
+	# faz a cortina pertencer a ESTA máquina e não a qualquer uma.
+	var centro := Vector2(x, TELA.y * 0.5)
+	if centro.x > -200.0 and centro.x < TELA.x + 200.0:
+		Icones.alvo(self, centro, 108.0, Paleta.AMBAR)
 
 ## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
 ## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
@@ -1885,7 +2002,7 @@ const ABERTURA_DURACAO := 8.0
 
 func _draw_show_idle() -> void:
 	var chegada := ease(abertura_chegada, 0.4)
-	_texto("LAZER & SPORT GAMES", 220.0, 28, Color(Paleta.CIANO, chegada))
+	_marca_da_casa(146.0, 132.0, chegada)
 	var capitulo := int(state_time / ABERTURA_DURACAO) % ABERTURA_CAPITULOS
 	# Cada capítulo entra com o seu próprio esmaecer; sem isso só o
 	# primeiro teria entrada e os outros dariam um salto seco.
@@ -2171,15 +2288,20 @@ func _central_operacao() -> void:
 		simulacao_bancada, Paleta.VERMELHO if simulacao_bancada else Paleta.ROXO, 20
 	)
 	_texto(
-		"Ligada, a barra de espaço vale como soco. Serve para montar e regular a máquina —",
+		"Ligada, a barra de espaço vale como soco. Serve para montar e regular",
 		1000.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
 	)
 	_texto(
-		"num salão, é qualquer pessoa tirando 9999 sem encostar no equipamento.",
+		"a máquina sem bater no saco cem vezes.",
 		1024.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
 	)
+	_texto(
+		"Ela DESLIGA SOZINHA quando o MPU-6050 se apresentar." if not simulacao_escolhida
+		else "Você escolheu à mão: o sensor não mexe mais nela.",
+		1056.0, 15, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
+	)
 	if simulacao_bancada:
-		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1076.0, 18, Paleta.VERMELHO)
+		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1090.0, 18, Paleta.VERMELHO)
 
 	_secao(Rect2(80, 1136, 920, 130), "SALDO", Paleta.AMBAR)
 	_texto(
@@ -2286,14 +2408,20 @@ func _central_camera() -> void:
 	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
 	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
 	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
-	var previa := Rect2(340, 500, 400, 260)
+	_botao(
+		BOTOES_SIMPLES["forcar_ponte"],
+		"PONTE FORÇADA" if camera_forcar_ponte else "USAR PONTE PYTHON",
+		camera_forcar_ponte, Paleta.VERDE, 16
+	)
+	_botao(BOTOES_SIMPLES["sondar_camera"], "PROCURAR CÂMERA DE NOVO", false, Paleta.CIANO, 16)
+	var previa := Rect2(340, 560, 400, 230)
 	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
 	if camera_service != null and camera_service.available():
 		_draw_texture_cover(camera_service.preview_texture(), previa, 1.0, camera_mirrored)
 	else:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
 	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
-	_texto(cam_status, 792.0, 16, Paleta.TINTA_FRACA)
+	_texto(cam_status, 812.0, 16, Paleta.TINTA_FRACA)
 	# QUANTAS VEZES A PONTE PRECISOU SER RELIGADA. Uma ponte que
 	# ressuscita o tempo todo é cabo ou porta USB com defeito, não
 	# software — e sem esse número ninguém tem como saber a diferença.
@@ -2301,7 +2429,7 @@ func _central_camera() -> void:
 	if religadas > 0:
 		_texto(
 			"ponte religada %d × nesta sessão — se for muito, troque o cabo ou a porta USB" % religadas,
-			818.0, 14, Paleta.AMBAR
+			836.0, 14, Paleta.AMBAR
 		)
 
 	_secao(Rect2(80, 850, 920, 290), "MESA DE SOM", Paleta.VERDE)
@@ -2629,6 +2757,28 @@ func _rotulo(texto: String, y: float, cor: Color) -> void:
 
 func _apoio(texto: String, y: float, cor: Color) -> void:
 	_letreiro_centrado(texto, y, CORPO_APOIO, cor)
+
+## A MARCA DA CASA, DESENHADA E NÃO ESCRITA.
+##
+## Escrever "LAZER & SPORT GAMES" com a fonte do jogo não é a marca: é
+## uma frase com o nome da marca. O alvo com o dardo é o que se reconhece
+## a três metros, antes de conseguir ler qualquer coisa — e é ele que
+## está no adesivo do gabinete, no cartão e na fachada.
+##
+## `y` é o TOPO do logotipo, e não a linha de base: aqui não há linha de
+## base, há uma imagem com altura própria.
+func _marca_da_casa(y: float, altura: float, alpha := 1.0) -> void:
+	if logo == null:
+		# Sem o arquivo, a frase volta — uma abertura sem marca nenhuma
+		# seria pior do que uma abertura com a marca escrita.
+		_texto("LAZER & SPORT GAMES", y + altura * 0.72, 28, Color(Paleta.CIANO, alpha))
+		return
+	var proporcao := logo.get_width() / float(logo.get_height())
+	var largura := altura * proporcao
+	draw_texture_rect(
+		logo, Rect2(Vector2(540.0 - largura * 0.5, y), Vector2(largura, altura)),
+		false, Color(1, 1, 1, alpha)
+	)
 
 ## Letreiro centrado na largura útil, sem encolher: o corpo dos rótulos é
 ## fixo de propósito, e um rótulo que não cabe é um rótulo comprido
