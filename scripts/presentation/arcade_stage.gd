@@ -483,14 +483,41 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 	# era o nome refletindo, era um retângulo luminoso passando por cima
 	# dele. O reflexo agora acontece DENTRO das letras, no sombreador de
 	# `shaders/brilho_letras.gdshader`, onde a máscara é o próprio glifo.
-	# Aqui fica só a batida do emblema, que nunca foi o problema.
-	# A batida do emblema: um anel que sai dele e se apaga.
+	# MAS TIRAR A FAIXA DEIXOU UM BURACO, e ele apareceu como "a abertura
+	# trava no fim".
+	#
+	# Este trecho é o segundo em que o letreiro já assentou e a virada
+	# para a tela de abertura ainda não começou. Era a faixa que enchia
+	# esse segundo; sem ela sobrou uma imagem parada, e imagem parada num
+	# fliperama não lê como pausa — lê como máquina travada. O conserto
+	# não é devolver o retângulo: é pôr aqui o que estava faltando desde
+	# sempre, que é a cena RESPIRANDO enquanto espera.
 	var batida := _janela(time, T_BRILHO + 0.15, 0.75)
 	if batida > 0.0 and batida < 1.0:
 		canvas.draw_arc(
 			Vector2(540.0, 760.0), lerpf(300.0, 640.0, ease(batida, 0.35)),
 			0.0, TAU, 96, Color(GOLD, (1.0 - batida) * 0.5), 5.0, true
 		)
+	# Brasas subindo do rodapé: movimento lento e contínuo, que é o que
+	# uma cena parada precisa para continuar viva sem roubar a atenção
+	# do letreiro.
+	for i in range(14):
+		var fase := fposmod(time * 0.24 + float(i) * 0.137, 1.0)
+		var x := 90.0 + fposmod(float(i) * 271.0, 900.0)
+		var y := lerpf(1780.0, 1180.0, fase)
+		var brilho := sin(fase * PI) * 0.55
+		canvas.draw_circle(
+			Vector2(x + sin(time * 1.7 + float(i)) * 22.0, y),
+			lerpf(5.0, 2.0, fase), Color(GOLD, brilho * t), true, -1.0, false
+		)
+	# E um pulso de luz atrás do emblema, no compasso de uma respiração.
+	# Sem ele o miolo da tela fica absolutamente imóvel por um segundo
+	# inteiro, que é justamente o que se sente como travamento.
+	var pulso := 0.5 + 0.5 * sin(time * 3.1)
+	canvas.draw_circle(
+		Vector2(540.0, 760.0), 250.0 + pulso * 26.0,
+		Color(RED, 0.05 * t), true, -1.0, true
+	)
 
 ## O SELO DA CASA, QUADRADO, ABRINDO A ENTRADA.
 ##

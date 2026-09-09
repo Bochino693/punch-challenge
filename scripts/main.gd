@@ -711,9 +711,41 @@ func _processar_resultado(delta: float) -> void:
 			ranking_announced = true
 			sons.play("ranking", -5.0)
 			sons.music(-24.0)
+		_marcar_atos_do_ranking()
 
 	if result_time > GameDef.RESULTADO_TIMEOUT:
 		_entrar_em_abertura()
+
+## AS DEIXAS DOS QUATRO ATOS DA ENTRADA NO RANKING.
+##
+## Som e confete pendurados no mesmo relógio que o desenho, e cada um
+## disparado UMA VEZ. É o que faz a batida da linha e o estouro do
+## confete caírem no mesmo quadro do movimento que os justifica — e não
+## meio segundo antes, que é quando a festa parece solta da tela.
+var _ato_assentou := false
+var _ato_festejou := false
+
+func _marcar_atos_do_ranking() -> void:
+	if posicao_no_ranking <= 0:
+		return
+	var t := _tempo_do_ranking()
+	# A LINHA BATE NO LUGAR: som seco e um tranco curto na tela.
+	if not _ato_assentou and t >= ATO_ANUNCIO + ATO_TABELA:
+		_ato_assentou = true
+		sons.play("hit", -6.0)
+		tremor = maxf(tremor, 9.0)
+	# E SÓ ENTÃO O CONFETE. Durante o movimento ele vira sujeira por cima
+	# da informação; depois dele, vira festa.
+	if not _ato_festejou and t >= ATO_ANUNCIO + ATO_TABELA + ATO_ASSENTA:
+		_ato_festejou = true
+		sons.play("record" if posicao_no_ranking == 1 else "win", -3.0)
+		# DE FORA DA TELA, POR CIMA. Confete que nasce dentro da tabela
+		# estoura em cima da informação e lê como sujeira; nascendo acima
+		# da borda, ele DESCE sobre a tela e vira chuva de papel picado,
+		# que é o que uma premiação tem.
+		fx.confete(Vector2(200.0, -60.0), 40, CORES_FESTA, 620.0)
+		fx.confete(Vector2(540.0, -90.0), 40, CORES_FESTA, 620.0)
+		fx.confete(Vector2(880.0, -60.0), 40, CORES_FESTA, 620.0)
 
 func _manter_festa(_delta: float) -> void:
 	## A COMEMORAÇÃO QUE CONTINUA é do nível, e o intervalo entre os
@@ -967,6 +999,8 @@ func _iniciar_rodada() -> void:
 		camera_service.abrir_obturador()
 	photo_retained = false
 	ranking_announced = false
+	_ato_assentou = false
+	_ato_festejou = false
 	displayed_score = 0.0
 	fx.limpar()
 	clarao = 1.0
@@ -2508,25 +2542,81 @@ func _cor_da_posicao(posicao: int) -> Color:
 
 ## Resultado encerra em uma cerimônia: a lista se move até a colocação
 ## conquistada, sem reduzir vinte fotos a miniaturas ilegíveis.
+## A ENTRADA NO RANKING, EM QUATRO ATOS.
+##
+## Antes era um movimento só: a tabela chegava deslizando e, no meio
+## dela, uma linha vinha destacada. Quem entrou no Top 20 descobria isso
+## lendo — e ler não é comemorar. O momento pelo qual a pessoa jogou
+## passava sem acontecer.
+##
+## Agora há uma ORDEM, e cada ato faz uma coisa só:
+##
+##   1. O ANÚNCIO. A tela inteira para no aviso. Nada de tabela ainda:
+##      primeiro a notícia, depois o contexto.
+##   2. A TABELA CHEGA. As linhas entram e a lista rola até a vizinhança
+##      da posição conquistada.
+##   3. A LINHA ASSENTA. O cartão de quem jogou desce no lugar dele e
+##      bate — é o instante em que o nome ENTRA na lista.
+##   4. O CONFETE. Depois, e não antes: confete durante o movimento vira
+##      sujeira por cima da informação; depois dele, vira festa.
+##
+## Quem NÃO entrou no Top 20 pula os atos 1, 3 e 4 e vai direto à tabela.
+## Comemorar o que não aconteceu é o jeito mais rápido de a máquina
+## perder a credibilidade.
+const ATO_ANUNCIO := 0.90
+const ATO_TABELA := 0.85
+const ATO_ASSENTA := 0.55
+
+func _tempo_do_ranking() -> float:
+	return maxf(0.0, verdict_time - 2.5)
+
 func _draw_ranking_reveal() -> void:
-	var progress := clampf((verdict_time - 2.5) / 1.6, 0.0, 1.0)
-	var eased := progress * progress * (3.0 - 2.0 * progress)
+	var t := _tempo_do_ranking()
+	var entrou := posicao_no_ranking > 0
+	# Sem entrada no ranking não há anúncio nem assentamento: a tabela é
+	# a única coisa que essa pessoa tem para ver.
+	var anuncio := ATO_ANUNCIO if entrou else 0.0
+	if entrou and t < anuncio:
+		_ranking_anuncio(t / anuncio)
+		return
+
+	var chegada := clampf((t - anuncio) / ATO_TABELA, 0.0, 1.0)
+	var eased := chegada * chegada * (3.0 - 2.0 * chegada)
+	var assenta := clampf((t - anuncio - ATO_TABELA) / ATO_ASSENTA, 0.0, 1.0)
+
+	_texto_arcade("TOP 20", 220.0, 110, Paleta.CIANO, LARGURA_UTIL)
+	var titulo := "%dº LUGAR • VOCÊ ENTROU!" % posicao_no_ranking if entrou else "TENTE SUPERAR ESSAS MARCAS"
+	_texto_cabendo(titulo, 312.0, 38, Paleta.AMBAR, LARGURA_UTIL)
+
 	var position_index := maxi(posicao_no_ranking - 1, 0)
 	var target := clampi(position_index - 2, 0, 15)
 	var offset := float(target) * 164.0 * eased
-	_texto_arcade("TOP 20", 220.0, 110, Paleta.CIANO, LARGURA_UTIL)
-	var title := "%dº LUGAR • VOCÊ ENTROU!" % posicao_no_ranking if posicao_no_ranking > 0 else "TENTE SUPERAR ESSAS MARCAS"
-	_texto_cabendo(title, 312.0, 38, Paleta.AMBAR, LARGURA_UTIL)
 	# AS VINTE VAGAS, e não só as ocupadas. Numa máquina nova a lista tem
 	# uma linha e dezenove buracos; desenhando só o que existe, a tela
 	# vira um cartão solto num vazio preto. Desenhando a vaga aberta, o
 	# mesmo vazio passa a dizer "sobrou lugar para você".
 	for i in range(RANKING_TAMANHO):
 		var y := 430.0 + float(i) * 164.0 - offset
-		if y < 425.0 or y > 1150.0:
-			continue
 		var vazia := i >= ranking.size()
 		var selected := posicao_no_ranking == i + 1
+		# A LINHA DE QUEM JOGOU CAI DE CIMA, mas de perto: 520 px a
+		# levavam para cima do cabeçalho, e a tabela ficava com o "03"
+		# flutuando acima do "01". Duzentos e sessenta é o bastante para
+		# a queda ser vista sem a linha sair da lista.
+		var descida := 0.0
+		if selected:
+			# UMA ALTURA DE LINHA, e não mais. A vaga dela já está aberta
+			# na lista — as outras linhas nunca ocuparam o lugar. Caindo
+			# de 260 px ela cruzava DUAS linhas no caminho, e cruzar
+			# linha lê como defeito de desenho, não como chegada. De 150
+			# ela desce da vizinhança do próprio lugar.
+			descida = (1.0 - _passo_com_batida(assenta)) * 150.0
+			y -= descida
+		# O RECORTE VEM DEPOIS DA QUEDA, e não antes: era por conferir a
+		# altura antes de aplicar o deslocamento que a linha escapava da
+		# janela da lista e ia parar em cima do título.
+		if y < 380.0 or y > 1150.0:
+			continue
 		var color := Paleta.AMBAR if selected else _cor_da_posicao(i + 1)
 		# AS LINHAS ENTRAM PELA ESQUERDA, nunca pela direita.
 		#
@@ -2536,12 +2626,33 @@ func _draw_ranking_reveal() -> void:
 		# ponta direita, ficava cortada durante toda a entrada. Negativo,
 		# a linha entra de fora da tela e assenta; nada some.
 		var shift := -(1.0 - eased) * (80.0 + float(i % 5) * 30.0)
+		if selected:
+			# Ela não entra pela esquerda com as outras: cai de cima e
+			# bate. É esse atraso que faz a tabela parecer ABRIR ESPAÇO
+			# para ela em vez de já vir pronta.
+			shift = 0.0
 		var card := Rect2(90.0 + shift, y, 900.0, 144.0)
 		if vazia:
 			_cartao(card, Color("1c060c"), Color("4a1420"), 1.0, 1.5)
 			_texto("%02d" % (i + 1), y + 91.0, 45, Color("4a1420"), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
 			_texto("VAGA ABERTA", y + 91.0, 30, Color("6d2835"), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
 			continue
+		if selected and assenta < 1.0:
+			# CHEGA APARECENDO, e não atravessando. Com opacidade cheia a
+			# linha passa por cima das vizinhas no caminho e o olho lê um
+			# cartão solto deslizando sobre a tabela; entrando de leve,
+			# ela se materializa no lugar dela.
+			var tinta := clampf(assenta * 1.8, 0.0, 1.0)
+			if tinta < 1.0:
+				_cartao(card, Color("b21029", tinta), Color(color, tinta), 1.0, 4.0)
+				_texto("%02d" % (i + 1), y + 91.0, 45, Color(color, tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
+				_texto("VOCÊ", y + 64.0, 26, Color(color, tinta), HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
+				_texto("%04d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Color(Paleta.TINTA, tinta), HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
+				continue
+			# No quadro em que ela assenta, um halo curto marca a batida.
+			for i2 in range(3):
+				var atras := card.grow(6.0 + float(i2) * 10.0)
+				_cartao(atras, Color(Paleta.AMBAR, 0.10 - float(i2) * 0.03), Color(Paleta.AMBAR, 0.0), 1.0, 6.0)
 		_cartao(card, Color("b21029") if selected else Color("300b16"), color, 1.0, 4.0 if selected else 1.5)
 		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
 		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
@@ -2550,6 +2661,45 @@ func _draw_ranking_reveal() -> void:
 	_rotulo("SEU SOCO", 1400.0, Paleta.TINTA_FRACA)
 	_texto_arcade("%04d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
+
+## Chegada com batida: passa do ponto e volta. É o que faz a linha
+## PARECER ter peso ao cair no lugar, em vez de deslizar até parar.
+func _passo_com_batida(t: float) -> float:
+	if t >= 1.0:
+		return 1.0
+	var p := t - 1.0
+	return p * p * ((2.4 + 1.0) * p + 2.4) + 1.0
+
+## ATO 1 — O ANÚNCIO, sozinho na tela.
+##
+## Um selo que cresce batendo, o número da posição dentro dele e nada
+## mais. A tabela vem depois: notícia primeiro, contexto depois. Um
+## anúncio dividindo a tela com vinte linhas de tabela não é um anúncio.
+func _ranking_anuncio(t: float) -> void:
+	var centro := Vector2(540.0, 820.0)
+	var abre := clampf(t * 2.2, 0.0, 1.0)
+	var escala := _passo_com_batida(abre)
+	var raio := 300.0 * escala
+
+	# Raios de luz saindo do selo, girando devagar.
+	for i in range(18):
+		var ang := float(i) * TAU / 18.0 + animation_time * 0.5
+		var perto := raio * 1.12
+		draw_line(
+			centro + Vector2.from_angle(ang) * perto,
+			centro + Vector2.from_angle(ang) * (perto + lerpf(30.0, 160.0, abre)),
+			Color(Paleta.AMBAR, 0.30 * abre), 7.0, true
+		)
+	draw_circle(centro, raio, Color(Paleta.VERMELHO, 0.9), true, -1.0, true)
+	draw_arc(centro, raio, 0.0, TAU, 72, Paleta.AMBAR, 9.0, true)
+	draw_arc(centro, raio * 0.86, 0.0, TAU, 64, Color(Paleta.CREME, 0.45), 3.0, true)
+
+	Icones.estrela(self, centro + Vector2(0.0, -raio * 0.44), raio * 0.20, Paleta.AMBAR)
+	_texto_arcade("VOCÊ ENTROU", centro.y - raio * 0.02, 74, Paleta.CREME, 620.0, 230.0)
+	_texto_arcade("NO TOP 20", centro.y + raio * 0.24, 62, Paleta.AMBAR, 620.0, 230.0)
+	# O NÚMERO DA POSIÇÃO É A INFORMAÇÃO, e por isso ele é o maior
+	# elemento do selo — não a frase.
+	_texto_arcade("%dº" % posicao_no_ranking, centro.y + raio * 0.86, 132, Paleta.CREME, LARGURA_UTIL)
 
 # ---------------------------------------------------------------- central
 const CENTRAL_FUNDO := Color("2b0a13")
@@ -3172,13 +3322,26 @@ func _draw_texture_cover(texture: Texture2D, rect: Rect2, alpha: float, mirror :
 ## Aqui é uma silhueta de ombros e cabeça, na cor da moldura, com a
 ## mira de enquadramento por cima — a mesma que uma câmera mostra.
 ## Assim o quadro vazio diz "é aqui que o seu rosto vai aparecer".
+## O LUGAR DA FOTO QUE AINDA NÃO EXISTE.
+##
+## Ele era um boneco de massa cheia num vinho forte, e vinte deles
+## empilhados na tabela do Top 20 leem como uma parede marrom na frente
+## do ranking — foi essa a queixa. O que a vaga precisa dizer é "aqui vai
+## uma foto", e para isso basta um contorno: linha fina, sem miolo, na
+## mesma cor do resto da moldura. Presente o bastante para não virar
+## buraco, discreto o bastante para não competir com nada.
 func _draw_avatar(rect: Rect2, alpha: float) -> void:
-	draw_rect(rect, Color("1c060c", 0.94 * alpha))
+	draw_rect(rect, Color("1c060c", 0.70 * alpha))
 	var center := rect.get_center()
 	var unit := minf(rect.size.x, rect.size.y)
-	var tom := Color("7a2a38", alpha)
+	var tom := Color("6d2835", 0.55 * alpha)
 
-	Icones.avatar(self, center + Vector2(0.0, unit * 0.06), unit * 0.30, tom)
+	# Só o traço: cabeça e ombros em linha, sem massa.
+	draw_arc(center + Vector2(0.0, -unit * 0.10), unit * 0.13, 0.0, TAU, 28, tom, unit * 0.035, true)
+	draw_arc(
+		center + Vector2(0.0, unit * 0.30), unit * 0.25,
+		PI * 1.08, PI * 1.92, 26, tom, unit * 0.035, true
+	)
 
 	# Cantoneiras de enquadramento, como as de um visor de câmera.
 	var margem := unit * 0.10
