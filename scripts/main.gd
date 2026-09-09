@@ -326,6 +326,13 @@ var proximo_ping := 0.0
 ## Última telemetria, exibida na Central Técnica.
 var telemetria := ""
 var portas_visiveis: PackedStringArray = []
+## Quantos apertos de botão chegaram PELA SERIAL nesta sessão. Separados
+## dos do Zero Delay de propósito: são dois caminhos diferentes, e saber
+## qual dos dois está mudo é metade do conserto.
+var serial_start := 0
+var serial_credito := 0
+## Quando a porta atual foi aberta. Serve para desistir dela.
+var _porta_aberta_em := 0.0
 
 ## Câmera e dados locais do proprietário. Nenhum deles depende da rede.
 var camera_service: CameraService
@@ -1384,6 +1391,22 @@ func _iniciar_serial() -> void:
 func _sensor_ligado() -> bool:
 	return link != null and link.is_open() and "CONECTADO" in serial_status
 
+## A PORTA CERTA SE DESCOBRE TENTANDO — não abrindo a primeira da lista.
+##
+## AQUI ESTAVA O "O ARDUINO NÃO FAZ NADA". O jogo pegava
+## `portas_visiveis[0]`, abria, e ficava esperando. Num PC de gabinete
+## quase nunca há uma porta só: o Windows inventa COM3 e COM4 para o
+## Bluetooth, o leitor de cartão traz a dele. Abrindo a errada, o READY
+## nunca chega — e o jogo NUNCA TENTAVA OUTRA. Ficava a noite inteira em
+## "AGUARDANDO READY" numa porta que não tem placa nenhuma, com START e
+## CRÉDITO mortos.
+##
+## Agora a lista é uma fila: abre, espera o tempo de a placa se
+## apresentar, e se ela não se apresentar, passa para a próxima. A porta
+## que responder fica.
+const PORTA_PACIENCIA := 3.0
+var _porta_da_vez := 0
+
 func _tentar_conectar() -> void:
 	if link == null or not link.available():
 		return
@@ -1393,16 +1416,22 @@ func _tentar_conectar() -> void:
 		if portas_visiveis.is_empty():
 			serial_status = "PROCURANDO ARDUINO…"
 			proxima_tentativa = animation_time + 4.0
+			_porta_da_vez = 0
 			return
-		porta = portas_visiveis[0]
+		# Dá a volta na lista: a placa pode ter sido espetada depois de a
+		# máquina ligar, e a porta dela entra no fim.
+		_porta_da_vez = _porta_da_vez % portas_visiveis.size()
+		porta = portas_visiveis[_porta_da_vez]
+		_porta_da_vez += 1
 	serial_status = "CONECTANDO %s" % porta
 	if link.open_port(porta, GameDef.SERIAL_BAUD):
 		porta_atual = porta
 		ultimo_sinal_ms = -1
 		proximo_ping = animation_time + 1.0
+		_porta_aberta_em = animation_time
 	else:
 		serial_status = "FALHA AO ABRIR %s" % porta
-		proxima_tentativa = animation_time + 4.0
+		proxima_tentativa = animation_time + 1.0
 
 func _poll_serial(_delta: float) -> void:
 	if link == null or not link.available():
@@ -1412,10 +1441,24 @@ func _poll_serial(_delta: float) -> void:
 		if animation_time >= proxima_tentativa:
 			_tentar_conectar()
 		return
+	if ultimo_sinal_ms < 0 and animation_time - _porta_aberta_em > PORTA_PACIENCIA:
+		# CALADA POR TRÊS SEGUNDOS: NÃO É A PLACA.
+		#
+		# Três segundos é folgado — o firmware manda `READY` no fim do
+		# `setup()`, e o Nano leva menos de dois para reiniciar quando a
+		# porta abre. Passado isso, insistir é perder a noite: fecha e
+		# tenta a próxima da fila.
+		var muda := porta_configurada.is_empty() and portas_visiveis.size() > 1
+		serial_status = "SEM RESPOSTA EM %s%s" % [
+			porta_atual, " — TENTANDO A PRÓXIMA" if muda else ""
+		]
+		link.close_port()
+		proxima_tentativa = animation_time + (0.2 if muda else 4.0)
+		return
 	if ultimo_sinal_ms < 0 and animation_time >= proximo_ping:
 		# Ainda não vimos o READY: cutuca a placa.
 		link.send_line("PING")
-		proximo_ping = animation_time + 2.0
+		proximo_ping = animation_time + 1.0
 	elif ultimo_sinal_ms >= 0 and animation_time >= proximo_ping:
 		link.send_line("PING")
 		proximo_ping = animation_time + 5.0
@@ -1461,6 +1504,17 @@ func _on_serial_line(line: String) -> void:
 			serial_status = "CONECTADO %s" % porta_atual
 			_show_notice("SENSOR CALIBRADO")
 		"BUTTON":
+			# O CONTADOR SOBE SEMPRE, inclusive com a Central aberta.
+			#
+			# É ele que prova ao técnico que o fio está certo: aperta o
+			# botão, o número sobe. Sem isso, "o botão não funciona" pode
+			# ser fio solto, pino errado, placa muda ou o jogo ignorando —
+			# quatro problemas com o mesmo sintoma. Com o contador, dois
+			# deles se descartam em um segundo.
+			if str(msg["button"]) == "CREDIT":
+				serial_credito += 1
+			else:
+				serial_start += 1
 			if central_aberta:
 				return
 			if str(msg["button"]) == "CREDIT":
@@ -3159,8 +3213,20 @@ func _central_dados() -> void:
 		692.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
-		"START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
+		"Zero Delay:  START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
 		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# APERTE O BOTÃO E OLHE ESTE NÚMERO. Se ele sobe, o fio, o pino e a
+	# placa estão certos e o problema é adiante; se não sobe, é antes.
+	_texto(
+		"Arduino (D2/D3):  START %d apertos  •  CRÉDITO %d apertos" % [serial_start, serial_credito],
+		748.0, 17,
+		Paleta.VERDE if (serial_start + serial_credito) > 0 else Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto(
+		"portas vistas: %s" % (", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "nenhuma"),
+		776.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 
 	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE

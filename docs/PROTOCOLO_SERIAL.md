@@ -191,3 +191,51 @@ Os dois botões do gabinete podem chegar pela serial **ou** pela placa
 Zero Delay como controle USB. Os dois caminhos passam pelo mesmo
 antirrepique de 250 ms e pelas mesmas ações `cabinet_start` e
 `cabinet_credit`.
+
+---
+
+## Quando o Arduino "não faz nada"
+
+Quatro problemas dão exatamente o mesmo sintoma — START e CRÉDITO mortos.
+A aba **DADOS** da Central (`F9`) separa os quatro em um segundo. Aperte o
+botão do gabinete e olhe a linha **`Arduino (D2/D3)`**:
+
+| O que acontece | O que é |
+| --- | --- |
+| O número **sobe** | Fio, pino e placa certos. Se o crédito não entra, o problema é o modo de operação (LIVRE × 1 FICHA), não o botão. |
+| O número **não sobe** e a linha diz `CONECTADO` | O fio ou o pino. START é **D2**, CRÉDITO é **D3**, o outro lado de cada botão vai ao **GND**. |
+| Diz `SEM RESPOSTA EM COMx` | Porta errada, e o jogo já está tentando a próxima sozinho. |
+| Diz `PROCURANDO ARDUINO…` | O Windows não vê a placa: driver CH340 faltando, ou cabo USB só de carga. |
+
+A linha **`portas vistas`**, logo abaixo, mostra todas as COM que o
+Windows anuncia. Se a do Nano não estiver ali, o problema é do driver e
+não do jogo.
+
+### Por que o jogo troca de porta sozinha
+
+Um PC de gabinete quase nunca tem uma porta COM só: o Windows inventa
+COM3 e COM4 para o Bluetooth, o leitor de cartão traz a dele. O jogo
+abria **a primeira da lista** e ficava esperando um `READY` que nunca
+chegava — a noite inteira, com os botões mortos.
+
+Agora a lista é uma fila, com as portas de conversor conhecido (CH340,
+FTDI, CP210x, Arduino oficial) na frente. Aberta uma porta, o jogo espera
+**três segundos** pela apresentação da placa; sem ela, fecha e vai para a
+próxima. A que responder fica.
+
+Para fixar uma porta à mão, use **PORTA SERIAL** na aba GOLPE.
+
+### O sketch compila sem a biblioteca das fitas
+
+O `#include` da Adafruit NeoPixel é condicional (`__has_include`). Numa
+IDE sem ela instalada o sketch **compila e grava assim mesmo**: o sensor
+mede, os botões respondem, e só as fitas ficam apagadas — com um aviso na
+compilação dizendo o que instalar.
+
+Isto não é conveniência, é a lição de um defeito real: enquanto o
+`#include` era incondicional, a IDE sem a biblioteca **não gerava upload
+nenhum**, a placa ficava com o firmware velho, e o sintoma não era "as
+fitas não acendem" — era "o Arduino não faz nada".
+
+Antes de qualquer entrega, `sh tools/conferir_firmware.sh` compila o
+sketch nas duas situações, fora da IDE, e confere que ele é ASCII puro.

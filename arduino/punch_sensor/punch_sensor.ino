@@ -1,26 +1,50 @@
 /*
-  PUNCH CHALLENGE — FIRMWARE V2 (MPU-6050)
+  PUNCH CHALLENGE -- FIRMWARE V2 (MPU-6050)
   Placas: Arduino Uno / Nano (ATmega328P)
-  Sensor: MPU-6050 no barramento I2C (A4 = SDA, A5 = SCL), endereço 0x68.
-  Botões: D2 = START, D3 = CREDIT (liga no GND; INPUT_PULLUP interno).
+  Sensor: MPU-6050 no barramento I2C (A4 = SDA, A5 = SCL), endereco 0x68.
+  Botoes: D2 = START, D3 = CREDIT (liga no GND; INPUT_PULLUP interno).
 
-  PROTOCOLO SERIAL (115200 bps, uma linha por mensagem, campos com vírgula):
+  PROTOCOLO SERIAL (115200 bps, uma linha por mensagem, campos com virgula):
     Enviados:  READY / CALIBRATING / CALIBRATED / PONG / BUTTON /
                TELEMETRY / HIT / SATURATION / ERROR / OK
     Recebidos: PING / RESET / TEST / CALIBRATE / LEDS,permil /
                CONFIG,eixo,raio,vmin,amin[,vmax]
-  Referência completa: docs/PROTOCOLO_SERIAL.md no projeto Godot.
+  Referencia completa: docs/PROTOCOLO_SERIAL.md no projeto Godot.
 
-  COMO MEDE: a aceleração dinâmica do eixo escolhido (bruta menos o
-  repouso calibrado) dispara a medição quando passa de ACCEL_MIN_G.
-  Durante o golpe o firmware integra a aceleração para obter a
-  velocidade de pico e guarda a aceleração máxima. O giroscópio dá uma
-  segunda estimativa (velocidade angular × raio do pêndulo); vale a
-  maior das duas. A PONTUAÇÃO é calculada no Godot — aqui sai só medida.
+  COMO MEDE: a aceleracao dinamica do eixo escolhido (bruta menos o
+  repouso calibrado) dispara a medicao quando passa de ACCEL_MIN_G.
+  Durante o golpe o firmware integra a aceleracao para obter a
+  velocidade de pico e guarda a aceleracao maxima. O giroscopio da uma
+  segunda estimativa (velocidade angular x raio do pendulo); vale a
+  maior das duas. A PONTUACAO e calculada no Godot -- aqui sai so medida.
 */
 
 #include <Wire.h>
-#include <Adafruit_NeoPixel.h>
+
+/*  AS FITAS SAO OPCIONAIS -- E O SKETCH COMPILA SEM ELAS.
+
+    AQUI ESTAVA O PIOR DEFEITO DESTE ARQUIVO. O `#include` da biblioteca
+    das fitas era incondicional: numa IDE sem a Adafruit NeoPixel
+    instalada, o sketch NAO COMPILA, nao ha upload, e a placa continua com
+    o firmware velho -- ou com nenhum. O sintoma nao e "as fitas nao
+    acendem": e "o Arduino nao faz nada", com START e CREDITO mortos
+    junto, porque nada chegou a ser gravado.
+
+    Uma peca de enfeite nunca pode impedir o botao de funcionar. Com o
+    `__has_include`, a placa sem a biblioteca grava, mede o soco e
+    responde aos botoes; quando a biblioteca for instalada, as fitas
+    entram sozinhas na proxima gravacao.
+*/
+#if defined(__has_include)
+  #if __has_include(<Adafruit_NeoPixel.h>)
+    #include <Adafruit_NeoPixel.h>
+    #define TEM_FITAS 1
+  #endif
+#endif
+#ifndef TEM_FITAS
+  #define TEM_FITAS 0
+  #warning "Adafruit NeoPixel nao encontrada: o jogo funciona, as fitas de LED ficam desligadas. Instale pelo Gerenciador de Bibliotecas para liga-las."
+#endif
 
 #define MPU_ADDR 0x68
 #define PINO_BOTAO_START 2
@@ -59,8 +83,10 @@
 // duas fitas; 255 num salao escuro cega mais do que mostra.
 #define BRILHO_FITA 140
 
+#if TEM_FITAS
 Adafruit_NeoPixel fitaEsq(LEDS_POR_FITA, PINO_FITA_ESQ, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fitaDir(LEDS_POR_FITA, PINO_FITA_DIR, NEO_GRB + NEO_KHZ800);
+#endif
 
 // A altura da coluna, de 0 a 1. Quem manda nela e, por ordem de
 // prioridade, o jogo (comando LEDS) e, na falta dele, a propria medicao.
@@ -79,7 +105,30 @@ const unsigned long FITA_QUADRO_MS = 25;      // 40 quadros por segundo
 // o mesmo teto de fabrica do jogo.
 float velocidadeMaxima = 16.0f;
 
-// Escalas do MPU-6050 com a configuração abaixo (±16 g, ±2000 °/s).
+/*  PROTOTIPOS DECLARADOS A MAO.
+
+    A IDE do Arduino gera esses prototipos sozinha antes de compilar, e
+    e por isso que o sketch funciona sem eles. Mas essa geracao e um
+    truque do preprocessador da IDE: ela falha em casos que o C++ aceita
+    (funcao que devolve tipo declarado depois, macro no meio da
+    assinatura), e quando falha o erro que aparece nao tem nada a ver com
+    a causa. Declarando a mao, o arquivo compila como C++ comum -- e da
+    para conferir a compilacao fora da IDE, que foi como este arquivo
+    passou a ser verificado antes de sair daqui.
+*/
+void executarComando(String cmd);
+void configurar(const String &cmd);
+void atualizarFitas();
+void calibrar();
+void enviarTelemetria();
+void processarAmostra();
+void processarBotoes();
+void processarComandos();
+void fecharGolpe();
+bool mpuVivo();
+void escreverReg(uint8_t reg, uint8_t valor);
+
+// Escalas do MPU-6050 com a configuracao abaixo (+/-16 g, +/-2000  graus/s).
 const float LSB_POR_G = 2048.0f;
 const float LSB_POR_DPS = 16.4f;
 
@@ -90,31 +139,31 @@ const unsigned long TELEMETRIA_MS = 250;
 // Reconhecimento do golpe.
 const float FIM_GOLPE_FATOR = 0.40f;        // encerra abaixo de 40% do limiar
 const unsigned long FIM_GOLPE_MS = 60;      // ...por este tempo
-const unsigned long GOLPE_MAX_MS = 400;     // golpe não dura mais que isso
+const unsigned long GOLPE_MAX_MS = 400;     // golpe nao dura mais que isso
 const unsigned long COOLDOWN_MS = 650;      // um golpe por vez
 
-// Configuração ativa (chega pelo comando CONFIG; padrões sensatos).
+// Configuracao ativa (chega pelo comando CONFIG; padroes sensatos).
 char eixoMedicao = 'X';
 float raioMetros = 0.45f;
-float velocidadeMinima = 0.8f;   // m/s — abaixo disso nem reporta
-float accelMinG = 3.5f;          // g — evita balanço/toque como golpe
+float velocidadeMinima = 0.8f;   // m/s -- abaixo disso nem reporta
+float accelMinG = 3.5f;          // g -- evita balanco/toque como golpe
 
-// Offsets de repouso, medidos na calibração.
+// Offsets de repouso, medidos na calibracao.
 float offAccel[3] = {0, 0, 0};   // em g
-float offGyro[3] = {0, 0, 0};    // em °/s
+float offGyro[3] = {0, 0, 0};    // em  graus/s
 
-// Estado da medição em andamento.
+// Estado da medicao em andamento.
 bool golpeAtivo = false;
 unsigned long golpeInicioMs = 0;
 unsigned long golpeAbaixoMs = 0;
 float picoG = 0.0f;
-float velocidadeIntegral = 0.0f; // m/s, integração da aceleração
+float velocidadeIntegral = 0.0f; // m/s, integracao da aceleracao
 float picoGyroDps = 0.0f;
 bool saturouAccel = false;
 bool saturouGyro = false;
 unsigned long ultimoGolpeMs = 0;
 
-// Última medida, para a telemetria.
+// Ultima medida, para a telemetria.
 float ultimaVelocidade = 0.0f;
 float ultimoPicoG = 0.0f;
 
@@ -159,8 +208,8 @@ bool mpuLer(float accelG[3], float gyroDps[3]) {
 }
 
 void calibrar() {
-  // A máquina precisa estar PARADA. A média do repouso vira o zero de
-  // cada eixo — é o que tira a gravidade e a inclinação da montagem.
+  // A maquina precisa estar PARADA. A media do repouso vira o zero de
+  // cada eixo -- e o que tira a gravidade e a inclinacao da montagem.
   const uint16_t AMOSTRAS = 400;
   double somaA[3] = {0, 0, 0};
   double somaG[3] = {0, 0, 0};
@@ -215,7 +264,7 @@ void processarAmostra() {
 
   const float aEixo = a[indiceEixo()];
   const float aAbs = fabsf(aEixo);
-  const float giroAbs = fabsf(g[0]) + fabsf(g[1]) + fabsf(g[2]); // soma = robustez à montagem torta
+  const float giroAbs = fabsf(g[0]) + fabsf(g[1]) + fabsf(g[2]); // soma = robustez a montagem torta
 
   if (!golpeAtivo) {
     if (aAbs > accelMinG && millis() - ultimoGolpeMs >= COOLDOWN_MS) {
@@ -234,7 +283,7 @@ void processarAmostra() {
 
   // Golpe em andamento: acumula velocidade e guarda os picos.
   velocidadeIntegral += aEixo * 9.81f * dt;
-  if (velocidadeIntegral < 0.0f) velocidadeIntegral = 0.0f; // pêndulo voltando não desconta
+  if (velocidadeIntegral < 0.0f) velocidadeIntegral = 0.0f; // pendulo voltando nao desconta
   if (aAbs > picoG) picoG = aAbs;
   if (giroAbs > picoGyroDps) picoGyroDps = giroAbs;
 
@@ -260,7 +309,7 @@ void processarAmostra() {
   if (saturouAccel) Serial.println(F("SATURATION,ACCEL"));
   if (saturouGyro) Serial.println(F("SATURATION,GYRO"));
 
-  if (velocidade < velocidadeMinima) return; // encostou, não socou
+  if (velocidade < velocidadeMinima) return; // encostou, nao socou
 
   ultimaVelocidade = velocidade;
   ultimoPicoG = picoG;
@@ -289,7 +338,7 @@ void processarAmostra() {
   Serial.println(eixoMedicao);
 }
 
-// ---------------------------------------------------------------- botões
+// ---------------------------------------------------------------- botoes
 void processarBotoes() {
   static bool antesStart = HIGH, antesCredit = HIGH;
   static unsigned long tStart = 0, tCredit = 0;
@@ -350,9 +399,9 @@ void executarComando(String cmd) {
     calibrar();
     Serial.println(F("OK,CALIBRATE"));
   } else if (cmd == "TEST") {
-    /* Golpe sintético: confere a corrente inteira — Arduino, serial e
-       jogo — sem ninguém socar o saco. Se o TEST aparece na tela e o
-       soco real não, o problema é mecânico, não de software. */
+    /* Golpe sintetico: confere a corrente inteira -- Arduino, serial e
+       jogo -- sem ninguem socar o saco. Se o TEST aparece na tela e o
+       soco real nao, o problema e mecanico, nao de software. */
     Serial.print(F("HIT,7.50,9.20,120,"));
     Serial.println(eixoMedicao);
   } else if (cmd.startsWith("LEDS,")) {
@@ -407,7 +456,8 @@ void configurar(const String &cmd) {
 }
 
 // ------------------------------------------------------------- as fitas
-/*  A COR DE CADA ALTURA — a mesma escala do jogo.
+#if TEM_FITAS
+/*  A COR DE CADA ALTURA -- a mesma escala do jogo.
     As oito faixas de pontuacao do Punch Challenge vao do azul frio ao
     branco estourado, e a fita repete essa escala de baixo para cima. Quem
     olha a maquina de longe aprende a ler a cor antes de ler o numero: azul
@@ -506,6 +556,12 @@ void atualizarFitas() {
   }
 }
 
+#else   // TEM_FITAS
+// Sem a biblioteca, as fitas viram uma funcao vazia. Todo o resto do
+// firmware -- sensor, botoes, serial -- continua igual.
+void atualizarFitas() {}
+#endif  // TEM_FITAS
+
 // ---------------------------------------------------------------- ciclo
 void setup() {
   pinMode(PINO_BOTAO_START, INPUT_PULLUP);
@@ -513,6 +569,7 @@ void setup() {
   pinMode(LED_STATUS, OUTPUT);
   digitalWrite(LED_STATUS, LOW);
 
+#if TEM_FITAS
   fitaEsq.begin();
   fitaDir.begin();
   fitaEsq.setBrightness(BRILHO_FITA);
@@ -521,24 +578,25 @@ void setup() {
   fitaDir.clear();
   fitaEsq.show();
   fitaDir.show();
+#endif
 
   Serial.begin(115200);
   Wire.begin();
-  Wire.setClock(400000); // I2C rápido: a leitura não pode atrasar a amostragem
+  Wire.setClock(400000); // I2C rapido: a leitura nao pode atrasar a amostragem
 
   if (!mpuVivo()) {
     Serial.println(F("ERROR,NO_MPU"));
-    // Sem sensor não há o que medir; pisca o LED até alguém religar.
+    // Sem sensor nao ha o que medir; pisca o LED ate alguem religar.
     while (true) {
       digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
       delay(200);
     }
   }
 
-  escreverReg(0x6B, 0x01); // PWR_MGMT_1: acorda, clock do giroscópio X
-  escreverReg(0x1A, 0x03); // CONFIG: DLPF ~44 Hz — corta ruído, mantém o golpe
-  escreverReg(0x1B, 0x18); // GYRO_CONFIG: ±2000 °/s
-  escreverReg(0x1C, 0x18); // ACCEL_CONFIG: ±16 g
+  escreverReg(0x6B, 0x01); // PWR_MGMT_1: acorda, clock do giroscopio X
+  escreverReg(0x1A, 0x03); // CONFIG: DLPF ~44 Hz -- corta ruido, mantem o golpe
+  escreverReg(0x1B, 0x18); // GYRO_CONFIG: +/-2000  graus/s
+  escreverReg(0x1C, 0x18); // ACCEL_CONFIG: +/-16 g
   delay(100);
 
   Serial.println(F("READY,PUNCH_MPU6050,V2"));
