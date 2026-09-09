@@ -341,7 +341,20 @@ var camera_mirrored := true
 ## Pula o CameraServer e vai direto à ponte Python. Guardado em disco:
 ## numa máquina em que o caminho nativo nunca funciona, ligar isso uma
 ## vez tem de valer para sempre.
-var camera_forcar_ponte := false
+## NO WINDOWS, A PONTE É O CAMINHO — não a reserva.
+##
+## O caminho nativo no Windows enumera a câmera, aceita ativar o feed e
+## entrega um buffer preto. O vigia derruba isso em dois segundos e meio,
+## mas esses dois segundos e meio caem justamente na abertura do jogo, e
+## a primeira pose da noite pega a câmera ainda trocando de caminho.
+## Começar pela ponte tira o problema do caminho crítico.
+##
+## `camera_ponte_escolhida` existe pela mesma razão que a chave da
+## bancada tem uma: sem ela, um arquivo de ajustes antigo com `false`
+## gravado devolveria o comportamento velho e o conserto não chegaria em
+## nenhuma máquina que já rodou o jogo uma vez.
+var camera_forcar_ponte := OS.get_name() == "Windows"
+var camera_ponte_escolhida := false
 ## Quem roda os comandos de diagnóstico e publica a resposta na tela.
 var medico: CameraDoctor
 var statistics: Dictionary = {}
@@ -694,6 +707,21 @@ func _input(event: InputEvent) -> void:
 		if central_aberta:
 			if event.keycode == KEY_T:
 				_teste_de_golpe()
+			# Setas e Page Up/Down rolam a página. O gabinete não tem
+			# mouse; o teclado que o técnico pluga para configurar tem.
+			elif event.keycode == KEY_DOWN:
+				_rolar(ROLA_SETA)
+			elif event.keycode == KEY_UP:
+				_rolar(-ROLA_SETA)
+			elif event.keycode == KEY_PAGEDOWN:
+				_rolar(CENTRAL_JANELA * 0.8)
+			elif event.keycode == KEY_PAGEUP:
+				_rolar(-CENTRAL_JANELA * 0.8)
+			elif event.keycode == KEY_HOME:
+				central_rolagem = 0.0
+			elif event.keycode == KEY_END:
+				central_rolagem = _rolagem_maxima()
+			get_viewport().set_input_as_handled()
 			return
 		# TECLADO É BANCADA. Num salão os comandos entram pelos botões do
 		# gabinete ou pela serial; deixar 5/C e 1/Enter valendo sempre é
@@ -723,6 +751,15 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventJoypadButton:
 		_botao_do_gabinete(event as InputEventJoypadButton)
 		return
+
+	if central_aberta and not calib_ativo and event is InputEventMouseButton and event.pressed:
+		var roda := event as InputEventMouseButton
+		if roda.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_rolar(-ROLA_RODA)
+			return
+		if roda.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_rolar(ROLA_RODA)
+			return
 
 	if central_aberta and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if calib_ativo:
@@ -877,6 +914,11 @@ func _iniciar_rodada() -> void:
 	result_score = 0
 	result_photo_path = ""
 	pose_finished = false
+	# O OBTURADOR ABRE COM A CONTAGEM, e não no instante em que ela zera.
+	# São três segundos de quadros para escolher o melhor, em vez de um
+	# sexagésimo de segundo de sorte.
+	if camera_service != null:
+		camera_service.abrir_obturador()
 	photo_retained = false
 	ranking_announced = false
 	displayed_score = 0.0
@@ -1469,21 +1511,70 @@ func _visivel_na_pagina(chave: String) -> bool:
 	var pagina := int(PAGINA_DO_CONTROLE.get(chave, -1))
 	return pagina < 0 or pagina == central_pagina
 
+## A JANELA QUE ROLA, dentro da Central.
+##
+## O cabeçalho (título, abas) e o rodapé (RESTAURAR, SALVAR, carimbo da
+## build) ficam PARADOS; o miolo entre os dois é que anda. É assim que um
+## aplicativo se comporta, e é a única forma de a página caber quando a
+## letra cresce: sem rolagem, cada rótulo maior empurra a última seção
+## para fora do painel — que é exatamente a sobreposição que se via.
+const CENTRAL_TOPO := 332.0
+const CENTRAL_BASE := 1762.0
+const CENTRAL_JANELA := CENTRAL_BASE - CENTRAL_TOPO
+## Quanto anda um giro da roda, uma seta, uma página.
+const ROLA_RODA := 90.0
+const ROLA_SETA := 60.0
+
+var central_rolagem := 0.0
+## A base da última seção desenhada. Medida durante o desenho, e não
+## anotada numa tabela: uma tabela de alturas por página envelhece na
+## primeira seção que alguém mover, e envelhece em silêncio.
+var central_fundo := 0.0
+
+## Quanto ainda há para rolar na página atual.
+func _rolagem_maxima() -> float:
+	return maxf(0.0, central_fundo + 30.0 - CENTRAL_BASE)
+
+func _rolar(quanto: float) -> void:
+	central_rolagem = clampf(central_rolagem + quanto, 0.0, _rolagem_maxima())
+
+## O ponto do clique NO ESPAÇO DA PÁGINA.
+##
+## Controles de página vivem num papel que rolou; os três de fora
+## (fechar, restaurar, salvar) estão colados na moldura. Sem esta
+## distinção, rolar a página faria o clique acertar o botão de cima.
+func _ponto_do_controle(chave: String, p: Vector2) -> Vector2:
+	if int(PAGINA_DO_CONTROLE.get(chave, -1)) < 0:
+		return p
+	return p + Vector2(0.0, central_rolagem)
+
+## Um clique acertou este controle? Junta as três perguntas que sempre
+## andavam juntas: está nesta página, o papel rolou, e o ponto caiu dentro.
+func _tocou(chave: String, p: Vector2) -> bool:
+	if not _visivel_na_pagina(chave):
+		return false
+	var r: Rect2 = BOTOES_SIMPLES[chave]
+	return r.has_point(_ponto_do_controle(chave, p))
+
 func _click_central(p: Vector2) -> void:
 	# As abas primeiro: elas ficam por cima de tudo.
 	if ABA_RECT.has_point(p):
 		central_pagina = clampi(int((p.x - ABA_RECT.position.x) / ABA_LARGURA), 0, PAGINAS.size() - 1)
+		# Cada aba começa do começo. Chegar numa página nova já rolada até
+		# o meio é o tipo de coisa que faz o técnico achar que faltou
+		# conteúdo em cima.
+		central_rolagem = 0.0
 		mapeando = ""
 		return
 	# Passos depois: são a maioria dos cliques.
 	for chave in PASSOS:
 		if not _visivel_na_pagina(chave):
 			continue
-		if _passo_menos(chave).has_point(p):
+		if _passo_menos(chave).has_point(_ponto_do_controle(chave, p)):
 			_ajustar(chave, -1)
 			_salvar()
 			return
-		if _passo_mais(chave).has_point(p):
+		if _passo_mais(chave).has_point(_ponto_do_controle(chave, p)):
 			_ajustar(chave, 1)
 			_salvar()
 			return
@@ -1492,74 +1583,75 @@ func _click_central(p: Vector2) -> void:
 	# quem desistiu não fica com a máquina esperando um aperto para sempre.
 	var acertou := false
 	for chave in BOTOES_SIMPLES:
-		if _visivel_na_pagina(chave) and (BOTOES_SIMPLES[chave] as Rect2).has_point(p):
+		if _tocou(str(chave), p):
 			acertou = true
 			break
 	if not acertou:
 		mapeando = ""
 		return
 
-	if BOTOES_SIMPLES["fechar"].has_point(p) or BOTOES_SIMPLES["salvar"].has_point(p):
+	if _tocou("fechar", p) or _tocou("salvar", p):
 		_fechar_central()
 		return
-	elif _visivel_na_pagina("mapear_start") and BOTOES_SIMPLES["mapear_start"].has_point(p):
+	elif _tocou("mapear_start", p):
 		mapeando = "" if mapeando == "start" else "start"
 		return
-	elif _visivel_na_pagina("mapear_credito") and BOTOES_SIMPLES["mapear_credito"].has_point(p):
+	elif _tocou("mapear_credito", p):
 		mapeando = "" if mapeando == "credito" else "credito"
 		return
-	elif _visivel_na_pagina("simulacao") and BOTOES_SIMPLES["simulacao"].has_point(p):
+	elif _tocou("simulacao", p):
 		simulacao_bancada = not simulacao_bancada
 		simulacao_escolhida = true
 		_show_notice(
 			"SIMULAÇÃO DE BANCADA LIGADA — DESLIGUE ANTES DE ABRIR"
 			if simulacao_bancada else "SIMULAÇÃO DE BANCADA DESLIGADA"
 		)
-	elif BOTOES_SIMPLES["modo_livre"].has_point(p):
+	elif _tocou("modo_livre", p):
 		game_mode = "free"
-	elif BOTOES_SIMPLES["modo_ficha"].has_point(p):
+	elif _tocou("modo_ficha", p):
 		game_mode = "credit"
-	elif _visivel_na_pagina("eixo") and BOTOES_SIMPLES["eixo"].has_point(p):
+	elif _tocou("eixo", p):
 		var eixos := ["X", "Y", "Z"]
 		sensor_eixo = eixos[(eixos.find(sensor_eixo) + 1) % 3]
-	elif _visivel_na_pagina("enviar_config") and BOTOES_SIMPLES["enviar_config"].has_point(p):
+	elif _tocou("enviar_config", p):
 		_enviar_config()
 		_show_notice("CONFIG ENVIADA AO ARDUINO")
-	elif _visivel_na_pagina("calibrar") and BOTOES_SIMPLES["calibrar"].has_point(p):
+	elif _tocou("calibrar", p):
 		_abrir_calibracao()
 		return
-	elif _visivel_na_pagina("testar") and BOTOES_SIMPLES["testar"].has_point(p):
+	elif _tocou("testar", p):
 		_teste_de_golpe()
-	elif _visivel_na_pagina("camera") and BOTOES_SIMPLES["camera"].has_point(p):
+	elif _tocou("camera", p):
 		camera_enabled = not camera_enabled
 		camera_service.set_enabled(camera_enabled)
 		_show_notice(camera_service.status)
-	elif _visivel_na_pagina("forcar_ponte") and BOTOES_SIMPLES["forcar_ponte"].has_point(p):
+	elif _tocou("forcar_ponte", p):
 		camera_forcar_ponte = not camera_forcar_ponte
+		camera_ponte_escolhida = true
 		camera_service.forcar_ponte = camera_forcar_ponte
 		camera_service.refresh()
 		_show_notice(
 			"INDO DIRETO PELA PONTE PYTHON" if camera_forcar_ponte
 			else "TENTANDO O CAMINHO NATIVO PRIMEIRO"
 		)
-	elif _visivel_na_pagina("diagnosticar") and BOTOES_SIMPLES["diagnosticar"].has_point(p):
+	elif _tocou("diagnosticar", p):
 		_examinar_camera(false)
-	elif _visivel_na_pagina("instalar_camera") and BOTOES_SIMPLES["instalar_camera"].has_point(p):
+	elif _tocou("instalar_camera", p):
 		_examinar_camera(true)
-	elif _visivel_na_pagina("sondar_camera") and BOTOES_SIMPLES["sondar_camera"].has_point(p):
+	elif _tocou("sondar_camera", p):
 		# PROCURAR DE NOVO, e não só religar: `refresh` zera a desistência
 		# e refaz a enumeração inteira. É o botão de quem acabou de
 		# espetar a webcam com o jogo já aberto.
 		camera_service.refresh()
 		_show_notice(camera_service.status)
-	elif _visivel_na_pagina("trocar_camera") and BOTOES_SIMPLES["trocar_camera"].has_point(p):
+	elif _tocou("trocar_camera", p):
 		camera_service.cycle_camera()
 		# A escolha do técnico também é descoberta e também fica guardada:
 		# senão o próximo boot volta ao índice antigo e ele troca de novo.
 		camera_index = camera_service.selected_index
 		_salvar()
 		_show_notice(camera_service.status)
-	elif _visivel_na_pagina("testar_som") and BOTOES_SIMPLES["testar_som"].has_point(p):
+	elif _tocou("testar_som", p):
 		# O SOCO DE TESTE DA MESA toca o impacto e o nível mais alto por
 		# cima da trilha: é o pior caso de mistura, e é nele que se regula.
 		sons.play("hit", 1.5)
@@ -1567,37 +1659,37 @@ func _click_central(p: Vector2) -> void:
 		sons.play("nivel_peso", 0.5)
 		sons.duck(16.0, 2.5)
 		_show_notice("SOCO DE TESTE — CONFIRA A MISTURA")
-	elif _visivel_na_pagina("foto_teste") and BOTOES_SIMPLES["foto_teste"].has_point(p):
+	elif _tocou("foto_teste", p):
 		var test_path := camera_service.capture_photo()
 		if test_path.is_empty():
 			_show_notice(camera_service.status)
 		else:
 			RankingStore.delete_photo(test_path)
 			_show_notice("CAPTURA DA CÂMERA APROVADA")
-	elif _visivel_na_pagina("zerar") and BOTOES_SIMPLES["zerar"].has_point(p):
+	elif _tocou("zerar", p):
 		if not _confirmar("contadores"):
 			return
 		credits = 0
 		plays = 0
 		_show_notice("CONTADORES ZERADOS")
-	elif _visivel_na_pagina("zerar_stats") and BOTOES_SIMPLES["zerar_stats"].has_point(p):
+	elif _tocou("zerar_stats", p):
 		if not _confirmar("estatisticas"):
 			return
 		statistics = {}
 		_show_notice("ESTATÍSTICAS ZERADAS")
-	elif _visivel_na_pagina("zerar_ranking") and BOTOES_SIMPLES["zerar_ranking"].has_point(p):
+	elif _tocou("zerar_ranking", p):
 		if not _confirmar("ranking"):
 			return
 		RankingStore.clear_photos(ranking)
 		ranking.clear()
 		_photo_cache.clear()
 		_show_notice("RANKING E FOTOS ZERADOS")
-	elif _visivel_na_pagina("reconectar") and BOTOES_SIMPLES["reconectar"].has_point(p):
+	elif _tocou("reconectar", p):
 		if link != null:
 			link.close_port()
 		_tentar_conectar()
 		_show_notice("RECONEXÃO SOLICITADA")
-	elif BOTOES_SIMPLES["padroes"].has_point(p):
+	elif _tocou("padroes", p):
 		game_mode = "credit"
 		porta_configurada = ""
 		hit_min_speed = ScoreCurve.DEFAULT_MIN_SPEED
@@ -1721,7 +1813,9 @@ func _carregar() -> void:
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
 	camera_index = int(data.get("camera_index", camera_index))
 	camera_backend = str(data.get("camera_backend", camera_backend))
-	camera_forcar_ponte = bool(data.get("camera_forcar_ponte", camera_forcar_ponte))
+	camera_ponte_escolhida = bool(data.get("camera_ponte_escolhida", false))
+	if camera_ponte_escolhida:
+		camera_forcar_ponte = bool(data.get("camera_forcar_ponte", camera_forcar_ponte))
 	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
 	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
 
@@ -1753,6 +1847,7 @@ func _salvar() -> void:
 		"camera_index": camera_index,
 		"camera_backend": camera_backend,
 		"camera_forcar_ponte": camera_forcar_ponte,
+		"camera_ponte_escolhida": camera_ponte_escolhida,
 		"camera_mirrored": camera_mirrored,
 		"statistics": statistics,
 	})
@@ -1981,10 +2076,17 @@ func _draw_partida() -> void:
 				_texto_arcade(str(clampi(int(ceil(countdown_left)), 1, 3)), 1400.0, 150, Color.WHITE, LARGURA_UTIL)
 				_rotulo("OLHE PARA A CÂMERA", 1490.0, Paleta.AMBAR)
 			else:
-				_rotulo(
-					"FOTO PRONTA" if not result_photo_path.is_empty() else "SEM CÂMERA • VAMOS JOGAR",
-					1390.0, Paleta.AMBAR
-				)
+				# O MOTIVO DE VERDADE, e não "SEM CÂMERA" para tudo. A
+				# mesma frase servia para câmera desligada na Central,
+				# Python faltando, webcam ocupada e ponte ainda subindo —
+				# e quem estava na frente da máquina não tinha como saber
+				# qual das quatro era.
+				var recado := "FOTO PRONTA"
+				var cor_recado := Paleta.AMBAR
+				if result_photo_path.is_empty():
+					recado = camera_service.motivo_curto() if camera_service != null else "SEM CÂMERA"
+					cor_recado = Paleta.VERMELHO
+				_rotulo(recado, 1390.0, cor_recado)
 				_texto_arcade("PREPARE O SOCO", 1480.0, 56, Color.WHITE, LARGURA_UTIL)
 		GameDef.State.ARMED:
 			_draw_espera_do_soco()
@@ -2273,15 +2375,21 @@ func _draw_ranking_reveal() -> void:
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
 
 # ---------------------------------------------------------------- central
+const CENTRAL_FUNDO := Color("2b0a13")
+
 func _draw_central() -> void:
 	var caixa := Rect2(40, 96, 1000, 1790)
 	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
-	_placa(caixa.grow(-5.0), 19.0, Color("2b0a13"))
-	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
-	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
-	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
-	_abas_da_central()
+	_placa(caixa.grow(-5.0), 19.0, CENTRAL_FUNDO)
 
+	# ---- O MIOLO, deslocado pela rolagem.
+	#
+	# O Godot não recorta o que um `_draw` desenha, então a página inteira
+	# é desenhada e as duas faixas — cabeçalho e rodapé — são REPINTADAS
+	# por cima logo depois. O efeito é o de uma janela com rolagem, sem
+	# precisar de um SubViewport só para isso.
+	central_fundo = 0.0
+	draw_set_transform(_deslocamento - Vector2(0.0, central_rolagem), 0.0, Vector2.ONE)
 	match central_pagina:
 		1:
 			_central_golpe()
@@ -2291,6 +2399,16 @@ func _draw_central() -> void:
 			_central_dados()
 		_:
 			_central_operacao()
+	draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
+
+	# ---- As faixas paradas, cobrindo o que a página passou por baixo.
+	draw_rect(Rect2(45, 101, 990, CENTRAL_TOPO - 101.0), CENTRAL_FUNDO)
+	draw_rect(Rect2(45, CENTRAL_BASE, 990, 1881.0 - CENTRAL_BASE), CENTRAL_FUNDO)
+	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
+	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
+	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
+	_abas_da_central()
+	_barra_de_rolagem()
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
@@ -2299,9 +2417,26 @@ func _draw_central() -> void:
 	# build entra junto porque quem abre a Central é justamente quem
 	# acabou de instalar a atualização e precisa confirmar que pegou.
 	_texto(
-		"%s     Tecla T: golpe de teste  •  ESC: fecha sem sair da rodada" % Versao.curta(),
+		"%s     Tecla T: golpe de teste  •  Roda/setas: rola a página" % Versao.curta(),
 		1872.0, 14, Paleta.TINTA_LEVE
 	)
+
+## A BARRA DE ROLAGEM, à direita do miolo.
+##
+## Ela não é enfeite: sem ela ninguém sabe que a página continua abaixo
+## do que está à vista, e a informação que sobrou embaixo é exatamente a
+## que faz falta — o diagnóstico da câmera, o saldo, as ações do
+## firmware. Some sozinha quando a página cabe inteira.
+func _barra_de_rolagem() -> void:
+	var maxima := _rolagem_maxima()
+	if maxima <= 1.0:
+		return
+	var trilho := Rect2(1014, CENTRAL_TOPO + 6.0, 8, CENTRAL_JANELA - 12.0)
+	draw_rect(trilho, Color(Paleta.CREME, 0.10))
+	var proporcao := CENTRAL_JANELA / (CENTRAL_JANELA + maxima)
+	var altura := maxf(60.0, trilho.size.y * proporcao)
+	var topo := trilho.position.y + (trilho.size.y - altura) * (central_rolagem / maxima)
+	draw_rect(Rect2(trilho.position.x, topo, trilho.size.x, altura), Color(Paleta.AMBAR, 0.85))
 
 func _abas_da_central() -> void:
 	for i in range(PAGINAS.size()):
@@ -2343,7 +2478,7 @@ func _central_operacao() -> void:
 	_ficha_do_botao(botao_credito, "CRÉDITO", Rect2(570, 706, 400, 150), contador_credito)
 
 	# ---- a chave que libera a barra de espaço
-	_secao(Rect2(80, 920, 920, 200), "SIMULAÇÃO DE BANCADA", Paleta.ROXO)
+	_secao(Rect2(80, 920, 920, 230), "SIMULAÇÃO DE BANCADA", Paleta.ROXO)
 	_botao(
 		BOTOES_SIMPLES["simulacao"],
 		"LIGADA" if simulacao_bancada else "DESLIGADA",
@@ -2365,14 +2500,14 @@ func _central_operacao() -> void:
 	if simulacao_bancada:
 		# Abaixo do botão, não em cima dele: a linha de base 1090 encostava
 		# na borda de baixo da chave (que acaba em 1078).
-		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1104.0, 16, Paleta.VERMELHO)
+		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1112.0, 16, Paleta.VERMELHO)
 
-	_secao(Rect2(80, 1136, 920, 130), "SALDO", Paleta.AMBAR)
+	_secao(Rect2(80, 1170, 920, 130), "SALDO", Paleta.AMBAR)
 	_texto(
 		"Créditos %02d  •  partidas contadas %d  •  modo %s" % [
 			credits, plays, "livre" if game_mode == "free" else "1 ficha"
 		],
-		1210.0, 20, Paleta.CREME
+		1244.0, 20, Paleta.CREME
 	)
 
 ## A ficha de um botão mapeado: qual controle, qual índice, e um contador
@@ -2412,12 +2547,15 @@ func _central_golpe() -> void:
 	_stepper("zona", "%.0f%%" % (score_dead_zone * 100.0), "ZONA MORTA", Paleta.ROXO)
 
 	_secao(Rect2(80, 650, 920, 260), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
-	_regua_dos_niveis(Rect2(110, 710, 860, 40))
+	# A régua engordou e a legenda desceu: com a letra no corpo novo, o
+	# nome do nível dentro da faixa e a legenda logo abaixo escreviam um
+	# por cima do outro.
+	_regua_dos_niveis(Rect2(110, 700, 860, 46))
 	_texto(
 		"As faixas são fixas. Quem decide quanta gente chega a cada uma é a curva.",
-		744.0, 15, Paleta.TINTA_FRACA
+		772.0, 15, Paleta.TINTA_FRACA
 	)
-	_curva_desenhada(Rect2(110, 760, 860, 60))
+	_curva_desenhada(Rect2(110, 782, 860, 56))
 	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
 
 	_secao(Rect2(80, 926, 920, 300), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
@@ -2631,6 +2769,10 @@ func _lista_do_ranking(rect: Rect2) -> void:
 ## Uma seção da Central: moldura e título, sempre no mesmo lugar em
 ## relação à caixa. Nenhuma seção precisa saber onde fica o seu rótulo.
 func _secao(rect: Rect2, titulo: String, cor := Paleta.MARINHO) -> void:
+	# A seção mais baixa da página é o que define até onde a rolagem vai.
+	# Medir aqui, e não numa tabela de alturas, é o que faz a rolagem
+	# continuar certa quando alguém mover uma seção daqui a seis meses.
+	central_fundo = maxf(central_fundo, rect.end.y)
 	_cartao(rect, Paleta.tinta_clara(Paleta.MARINHO, 0.045), Paleta.CARTAO_BORDA, 1.0, 0.0)
 	# Tarja colorida na lateral: com sete seções empilhadas, é o que deixa
 	# o técnico achar a que procura sem ler todos os títulos.
@@ -2668,7 +2810,7 @@ func _regua_dos_niveis(rect: Rect2) -> void:
 			var cor: Color = nivel["cor"]
 			var tinta := Color.BLACK if cor.get_luminance() > 0.55 else Color.WHITE
 			_texto(
-				str(nivel["nome"]), rect.position.y + rect.size.y * 0.66, 14, tinta,
+				str(nivel["nome"]), rect.position.y + rect.size.y * 0.70, 14, tinta,
 				HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0
 			)
 	draw_rect(rect, Paleta.CARTAO_BORDA, false, 2.0)
@@ -2841,10 +2983,23 @@ func _texto(
 ## porque ficou pequeno" — é a conta que faz 26 continuar valendo 26.
 const CAIXA_LEITURA := 1.047
 
+## O PISO DO CORPO DE LETRA.
+##
+## Havia texto a 14 e a 15 px numa tela de 1080 de largura, vista de pé,
+## a um metro e meio de distância. Isso não é letra miúda: é letra que
+## não se lê, e a pessoa desiste antes de tentar. Dezoito é o menor corpo
+## em que a Saira Condensed ainda separa o "0" do "O" nessa distância —
+## abaixo disso não adianta melhorar o desenho, tem de crescer.
+##
+## Quem pede menos que o piso recebe o piso. É por isso que existe um
+## piso e não uma revisão de cada chamada: com quarenta lugares pedindo
+## tamanho, a próxima linha escrita com 14 voltaria a ser ilegível.
+const CORPO_MINIMO := 18
+
 func _corpo(tamanho: int) -> int:
 	if fonte_texto == fonte:
-		return tamanho
-	return int(round(float(tamanho) * CAIXA_LEITURA))
+		return maxi(CORPO_MINIMO, tamanho)
+	return maxi(CORPO_MINIMO, int(round(float(tamanho) * CAIXA_LEITURA)))
 
 ## O maior corpo, até `tamanho_max`, em que o texto ainda cabe na
 ## largura. Sem isso, "PESO-PESADO" a 96 px sai pelos dois lados da tela

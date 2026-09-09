@@ -62,6 +62,23 @@ var status := "PROCURANDO CÂMERA"
 ## nenhuma — mesma ideia do comando TEST do firmware do sensor.
 var pattern_mode := false
 
+## O OBTURADOR ABERTO DURANTE A POSE.
+##
+## A foto era UM quadro, tirado no instante exato em que a contagem
+## zerava. Se justo naquele sexagésimo de segundo a pessoa piscou, a
+## webcam engasgou ou a ponte ainda estava subindo, a foto saía ruim ou
+## não saía — e a partida seguia sem cara nenhuma no ranking, sem
+## explicar por quê.
+##
+## Agora o jogo abre o obturador quando a contagem COMEÇA e guarda o
+## melhor quadro que passar até ela zerar. "Melhor" é o de maior
+## contraste: entre um quadro preto, um borrado de movimento e um nítido,
+## é o nítido que tem a maior distância entre o claro e o escuro. No fim
+## a máquina não tira uma foto, ela ESCOLHE uma entre umas quarenta.
+var _melhor_imagem: Image = null
+var _melhor_nota := -1.0
+var _obturador_ate_ms := 0
+
 func _ready() -> void:
 	# O CameraServer avisa por DOIS sinais (feed entrou / feed saiu), e não
 	# por um "feeds_updated" — este último não existe, e enquanto o código
@@ -137,6 +154,7 @@ func _process(_delta: float) -> void:
 			_bridge_digest = digest
 			_last_frame_ms = now
 			_last_image = image
+			_oferecer_ao_obturador(image)
 			if _bridge_texture == null:
 				_bridge_texture = ImageTexture.create_from_image(image)
 			else:
@@ -157,9 +175,24 @@ func _process(_delta: float) -> void:
 ## câmera era enumerada. Dois segundos e meio sem imagem e trocamos.
 func _vigiar_nativa() -> void:
 	if _native_ok:
+		# Já provada: daqui em diante o trabalho é só alimentar o
+		# obturador, para a foto da pose ter de onde escolher.
+		var atual := _texture.get_image() if _texture != null else null
+		if atual != null and not atual.is_empty():
+			_last_image = atual
+			_last_frame_ms = Time.get_ticks_msec()
+			_oferecer_ao_obturador(atual)
 		return
 	var imagem := _texture.get_image() if _texture != null else null
-	if imagem != null and not imagem.is_empty():
+	# NÃO BASTA A IMAGEM EXISTIR: ELA PRECISA TER ALGUMA COISA DENTRO.
+	#
+	# Este era o defeito que fazia "a cara não pegar" numa máquina com a
+	# webcam perfeita. O Godot no Windows ENUMERA a câmera, aceita ativar
+	# o feed e devolve um buffer do tamanho certo — todo preto. Como o
+	# teste era só `not is_empty()`, o jogo declarava CÂMERA CONECTADA,
+	# nunca caía para a ponte, e fotografava um quadrado preto em cima do
+	# quadrado preto anterior, a noite inteira, sem uma linha de erro.
+	if imagem != null and _imagem_util(imagem):
 		_native_ok = true
 		_last_image = imagem
 		_last_frame_ms = Time.get_ticks_msec()
@@ -169,6 +202,60 @@ func _vigiar_nativa() -> void:
 		_stop_feed()
 		status = "CÂMERA NATIVA MUDA — TENTANDO A PONTE"
 		_start_bridge()
+
+## AMOSTRAS EM GRADE, PARA SABER SE HÁ IMAGEM DE VERDADE.
+##
+## Uma cena real — uma pessoa na frente de um gabinete iluminado — nunca
+## é de uma cor só. Um buffer não inicializado, uma câmera com a tampa
+## na lente e um feed que ativou sem entregar nada SÃO de uma cor só. A
+## conta é sobre 48 pontos espalhados: se o mais claro e o mais escuro
+## estiverem a menos de 4% um do outro, não há imagem ali.
+##
+## Barato de propósito: roda a cada quadro enquanto a câmera não provou
+## que funciona, e ler a imagem inteira nesse laço custaria mais do que
+## desenhar a tela.
+const CONTRASTE_MINIMO := 0.04
+
+func _imagem_util(imagem: Image) -> bool:
+	return _nota_da_imagem(imagem) >= CONTRASTE_MINIMO
+
+## A distância entre o ponto mais claro e o mais escuro da grade. Serve
+## de duas maneiras: acima do mínimo, diz que há imagem; comparada entre
+## quadros, diz qual deles é o melhor.
+func _nota_da_imagem(imagem: Image) -> float:
+	if imagem == null or imagem.is_empty():
+		return -1.0
+	var largura := imagem.get_width()
+	var altura := imagem.get_height()
+	if largura < 8 or altura < 8:
+		return -1.0
+	var claro := 0.0
+	var escuro := 1.0
+	for gx in range(8):
+		for gy in range(6):
+			var x := int((float(gx) + 0.5) / 8.0 * float(largura))
+			var y := int((float(gy) + 0.5) / 6.0 * float(altura))
+			var v := imagem.get_pixel(x, y).get_luminance()
+			claro = maxf(claro, v)
+			escuro = minf(escuro, v)
+	return claro - escuro
+
+## Abre o obturador por `janela_ms`. Chamado quando a contagem começa.
+func abrir_obturador(janela_ms := 3200) -> void:
+	_melhor_imagem = null
+	_melhor_nota = -1.0
+	_obturador_ate_ms = Time.get_ticks_msec() + janela_ms
+
+## Oferece um quadro ao obturador. Só guarda se for melhor que o guardado
+## e se a janela ainda estiver aberta.
+func _oferecer_ao_obturador(imagem: Image) -> void:
+	if imagem == null or Time.get_ticks_msec() > _obturador_ate_ms:
+		return
+	var nota := _nota_da_imagem(imagem)
+	if nota <= _melhor_nota:
+		return
+	_melhor_nota = nota
+	_melhor_imagem = imagem.duplicate()
 
 ## Acorda o servidor de câmeras do Godot. Existe como função própria
 ## porque a 4.6 exige isso e as versões anteriores não têm o método:
@@ -264,6 +351,23 @@ func available() -> bool:
 func camera_count() -> int:
 	return CameraServer.get_feed_count()
 
+## POR QUE NÃO SAIU FOTO, em poucas palavras.
+##
+## A tela da pose dizia "SEM CÂMERA • VAMOS JOGAR" para tudo: câmera
+## desligada na Central, Python faltando, webcam ocupada, ponte subindo
+## ainda. Quem está na frente da máquina merece a frase certa — e quem vai
+## consertar precisa dela.
+func motivo_curto() -> String:
+	if not enabled:
+		return "CÂMERA DESLIGADA NA CENTRAL"
+	if _feed == null and _bridge_pid <= 0:
+		return "PONTE NÃO SUBIU — VEJA A CENTRAL"
+	if _bridge_desistiu:
+		return "PONTE DESISTIU — F9 E DIAGNOSTICAR"
+	if _bridge_texture == null and _feed == null:
+		return "AINDA ABRINDO A CÂMERA"
+	return "SEM QUADRO NOVO"
+
 ## A IDADE DO QUADRO QUE ESTÁ NA MÃO, em milissegundos.
 ##
 ## A foto da pose é tirada num instante marcado — o zero da contagem — e
@@ -280,11 +384,24 @@ func idade_do_quadro() -> int:
 	return Time.get_ticks_msec() - _last_frame_ms
 
 func capture_photo() -> String:
-	if not available():
-		return ""
-	var image: Image = _texture.get_image() if _texture != null else (_last_image.duplicate() if _last_image != null else null)
+	# O MELHOR QUADRO DA POSE VEM ANTES DE TUDO — inclusive antes de
+	# `available()`. Se a câmera parou de responder no último segundo mas
+	# entregou trinta quadros bons durante a contagem, a foto existe: sair
+	# sem foto aí seria jogar fora uma imagem boa por causa de um estado
+	# que mudou depois que ela foi feita.
+	var image: Image = null
+	if _melhor_imagem != null and _melhor_nota >= CONTRASTE_MINIMO:
+		image = _melhor_imagem
+	elif available():
+		image = _texture.get_image() if _texture != null else (_last_image.duplicate() if _last_image != null else null)
 	if image == null or image.is_empty():
-		status = "CÂMERA SEM IMAGEM"
+		status = "CÂMERA SEM IMAGEM — %s" % motivo_curto()
+		return ""
+	if not _imagem_util(image):
+		# UMA FOTO PRETA É PIOR DO QUE FOTO NENHUMA: o ranking mostra um
+		# retângulo escuro no lugar da pessoa e ninguém entende. Sem foto,
+		# ao menos a silhueta desenhada diz "não deu".
+		status = "IMAGEM SEM CONTRASTE — TAMPA DA LENTE OU SALA ESCURA"
 		return ""
 	var side := mini(image.get_width(), image.get_height())
 	if side <= 0:

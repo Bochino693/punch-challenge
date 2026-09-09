@@ -43,6 +43,8 @@ func run() -> void:
 	_test_quatro_digitos()
 	_test_bancada_sem_sensor()
 	_test_medico_da_camera()
+	_test_rolagem_da_central()
+	_test_obturador_da_pose()
 
 	jogo.queue_free()
 	await process_frame
@@ -283,3 +285,81 @@ func _test_medico_da_camera() -> void:
 	# Sem quadro nenhum, a idade é grande — e é ela que impede a máquina
 	# de anunciar "FOTO OK" para uma imagem congelada.
 	assert(jogo.camera_service.idade_do_quadro() > 2000)
+
+# --------------------------------------------------- rolagem da Central
+func _test_rolagem_da_central() -> void:
+	# Com a página curta não há barra e não há rolagem: rolar uma página
+	# que já cabe inteira é o defeito que faz o conteúdo "sumir" para
+	# cima sem nada abaixo para mostrar.
+	jogo.central_fundo = 900.0
+	assert(jogo._rolagem_maxima() == 0.0)
+	jogo._rolar(500.0)
+	assert(jogo.central_rolagem == 0.0)
+
+	# Página comprida: rola, e para no fim.
+	jogo.central_fundo = 2400.0
+	var teto: float = jogo._rolagem_maxima()
+	assert(teto > 0.0)
+	jogo._rolar(1000000.0)
+	assert(is_equal_approx(jogo.central_rolagem, teto))
+	jogo._rolar(-1000000.0)
+	assert(jogo.central_rolagem == 0.0)
+
+	# O CLIQUE ACOMPANHA O PAPEL. Um controle de página desce com a
+	# rolagem; os três de fora (fechar, restaurar, salvar) não saem do
+	# lugar. Sem essa distinção, rolar faria o clique acertar outro botão.
+	jogo.central_pagina = 0
+	jogo.central_rolagem = 0.0
+	var alvo: Rect2 = jogo.BOTOES_SIMPLES["simulacao"]
+	var meio := alvo.position + alvo.size * 0.5
+	assert(jogo._tocou("simulacao", meio))
+	jogo.central_rolagem = 120.0
+	assert(not jogo._tocou("simulacao", meio))
+	assert(jogo._tocou("simulacao", meio - Vector2(0.0, 120.0)))
+	var fixo: Rect2 = jogo.BOTOES_SIMPLES["salvar"]
+	assert(jogo._tocou("salvar", fixo.position + fixo.size * 0.5))
+
+	# Controle de outra página não responde, rolado ou não.
+	assert(not jogo._tocou("calibrar", meio))
+	jogo.central_rolagem = 0.0
+
+# ------------------------------------------------- obturador da pose
+func _test_obturador_da_pose() -> void:
+	var camera: CameraService = jogo.camera_service
+	camera.abrir_obturador(5000)
+
+	# Um quadro de uma cor só não é imagem: é buffer não inicializado,
+	# tampa na lente ou feed que ativou sem entregar nada. Era isto que
+	# fazia a máquina fotografar um quadrado preto e chamar de foto.
+	var preto := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	preto.fill(Color.BLACK)
+	assert(not camera._imagem_util(preto))
+	camera._oferecer_ao_obturador(preto)
+
+	# Um quadro com contraste entra e vira o melhor.
+	var cena := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	cena.fill(Color(0.2, 0.2, 0.2))
+	for x in range(64):
+		for y in range(24):
+			cena.set_pixel(x, y, Color.WHITE)
+	camera._oferecer_ao_obturador(cena)
+	assert(camera._melhor_imagem != null)
+	var nota_boa: float = camera._melhor_nota
+	assert(nota_boa > camera.CONTRASTE_MINIMO)
+
+	# Um quadro pior não substitui o guardado.
+	var fraco := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	fraco.fill(Color(0.5, 0.5, 0.5))
+	camera._oferecer_ao_obturador(fraco)
+	assert(is_equal_approx(camera._melhor_nota, nota_boa))
+
+	# Fechado o obturador, nada mais entra.
+	camera._obturador_ate_ms = 0
+	var outro := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	outro.fill(Color.WHITE)
+	for x in range(64):
+		outro.set_pixel(x, 0, Color.BLACK)
+	camera._oferecer_ao_obturador(outro)
+	assert(is_equal_approx(camera._melhor_nota, nota_boa))
+	camera._melhor_imagem = null
+	camera._melhor_nota = -1.0
