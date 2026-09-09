@@ -121,8 +121,8 @@ static func _estrelao(
 		var raio := (330.0 if longo else 170.0) * variacao * escala
 		fora.append(centro + Vector2.from_angle(ang) * raio)
 		dentro.append(centro + Vector2.from_angle(ang) * raio * 0.72)
-	canvas.draw_colored_polygon(fora, Color(Paleta.VERMELHO, some * 0.85))
-	canvas.draw_colored_polygon(dentro, Color(cor, some * 0.95))
+	Traco.poligono(canvas, fora, Color(Paleta.VERMELHO, some * 0.85))
+	Traco.poligono(canvas, dentro, Color(cor, some * 0.95))
 	canvas.draw_polyline(fora + PackedVector2Array([fora[0]]), Color(Paleta.CREME, some), 5.0, true)
 
 static func _rachaduras(canvas: CanvasItem, centro: Vector2, t: float, some: float) -> void:

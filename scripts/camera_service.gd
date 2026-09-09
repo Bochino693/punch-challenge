@@ -43,6 +43,15 @@ var _bridge_desistiu := false
 ## esperar dois segundos e meio a cada abertura é tempo perdido — e o
 ## técnico que já sabe do problema tem como dizer "vá direto".
 var forcar_ponte := false
+## O BACK-END QUE JÁ SE PROVOU NESTA MÁQUINA.
+##
+## A sondagem descobre se a webcam abre por DirectShow ou por Media
+## Foundation. Guardar a resposta e passá-la para a ponte evita que cada
+## religada refaça a fila inteira — e no Windows cada back-end que falha
+## custa de um a três segundos, bem na hora em que o gabinete precisa da
+## prévia para a foto.
+var backend_preferido := ""
+
 ## Vigia do caminho nativo: quando o feed foi ativado e se ele já provou
 ## que entrega quadro.
 var _native_started_ms := 0
@@ -255,6 +264,21 @@ func available() -> bool:
 func camera_count() -> int:
 	return CameraServer.get_feed_count()
 
+## A IDADE DO QUADRO QUE ESTÁ NA MÃO, em milissegundos.
+##
+## A foto da pose é tirada num instante marcado — o zero da contagem — e
+## até aqui ninguém perguntava QUÃO VELHA era a imagem usada. Uma webcam
+## que trava sem devolver erro continua entregando o mesmo quadro para
+## sempre, e o gabinete fotografa a pessoa da partida anterior sem nunca
+## dizer nada. Com a idade medida, isso vira uma linha na Central em vez
+## de um mistério no ranking.
+func idade_do_quadro() -> int:
+	if _feed != null:
+		return 0 if _native_ok else 999999
+	if _last_frame_ms <= 0:
+		return 999999
+	return Time.get_ticks_msec() - _last_frame_ms
+
 func capture_photo() -> String:
 	if not available():
 		return ""
@@ -276,6 +300,12 @@ func capture_photo() -> String:
 	if error != OK:
 		status = "ERRO AO SALVAR FOTO"
 		return ""
+	# A FOTO SAIU, MAS DE QUANDO? Guardar a foto é melhor do que não
+	# guardar nenhuma — quem joga quer a cara dele no ranking, mesmo com
+	# um terço de segundo de atraso. O que não pode é a máquina esconder
+	# que fotografou uma imagem parada.
+	var idade := idade_do_quadro()
+	status = "FOTO OK" if idade < 400 else "FOTO COM IMAGEM DE %d ms ATRÁS" % idade
 	return path
 
 func _exit_tree() -> void:
@@ -319,6 +349,9 @@ func _start_bridge() -> void:
 		status = "PONTE DE CÂMERA NÃO ENCONTRADA"
 		return
 	var args := PackedStringArray([script, "--output", _bridge_path, "--camera", str(selected_index)])
+	if not backend_preferido.is_empty():
+		args.append("--backend")
+		args.append(backend_preferido)
 	if pattern_mode:
 		args.append("--pattern")
 	# Três nomes de interpretador, porque cada instalação de Windows
@@ -369,6 +402,16 @@ func caminho_da_ponte() -> String:
 	var data_dir := "user://camera_bridge"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	return _materialize_bridge_script(data_dir)
+
+## O caminho real do inspetor do Windows (`camera_windows.ps1`), pela
+## mesma razão da ponte: num pacote exportado ele não é um arquivo que o
+## PowerShell consiga abrir.
+func caminho_do_inspetor() -> String:
+	if OS.get_name() != "Windows":
+		return ""
+	var data_dir := "user://camera_bridge"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
+	return _copiar_para_disco("res://tools/camera_windows.ps1", data_dir + "/camera_windows.ps1")
 
 ## RODA O INSTALADOR DA CÂMERA, do próprio jogo.
 ##

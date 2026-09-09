@@ -98,17 +98,17 @@ func _draw() -> void:
 		# Halo quente só na lâmpada acesa: é o que sobra de "luz" quando o
 		# fundo já é claro.
 		if acesa > 0.05:
-			draw_circle(p, raio + 7.0, Color(base, acesa * 0.22))
-		draw_circle(p, raio, cor)
+			draw_circle(p, raio + 7.0, Color(base, acesa * 0.22), true, -1.0, true)
+		draw_circle(p, raio, cor, true, -1.0, true)
 		draw_arc(p, raio, 0.0, TAU, 16, Color(Paleta.MARINHO, 0.30 + 0.35 * acesa), 1.6, true)
 		# Reflexo no vidro do bulbo, sempre no mesmo canto.
-		draw_circle(p + Vector2(-raio * 0.30, -raio * 0.30), raio * 0.26, Color(1, 1, 1, 0.55))
+		draw_circle(p + Vector2(-raio * 0.30, -raio * 0.30), raio * 0.26, Color(1, 1, 1, 0.55), true, -1.0, true)
 
 	if _flash > 0.01:
 		# O clarão acende a fieira inteira de uma vez só.
 		for i in range(total):
 			var p := _ponto_do_percurso(i, total, w, h)
-			draw_circle(p, 9.0, Color(_cor_flash, _flash * 0.85))
+			draw_circle(p, 9.0, Color(_cor_flash, _flash * 0.85), true, -1.0, true)
 		draw_rect(
 			Rect2(MARGEM - 8.0, MARGEM - 8.0, w - 2.0 * (MARGEM - 8.0), h - 2.0 * (MARGEM - 8.0)),
 			Color(_cor_flash, _flash * 0.22), false, 10.0

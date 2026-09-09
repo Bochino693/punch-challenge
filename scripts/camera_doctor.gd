@@ -32,6 +32,18 @@ var python_args: PackedStringArray = PackedStringArray()
 var tem_opencv := false
 ## Índices de câmera que responderam na sondagem.
 var indices: Array[int] = []
+## O back-end (DSHOW, MSMF, V4L2...) em que a câmera respondeu.
+var backend := ""
+## O QUE O WINDOWS RESPONDEU sobre a webcam, quando é Windows.
+##
+## Isto é o que faltava para o diagnóstico ser conclusivo. O OpenCV falha
+## igual quando não há câmera, quando a privacidade está fechada e quando
+## outro programa está com ela — e enquanto o exame só tinha a resposta
+## do OpenCV, o relatório só podia dizer "não respondeu", que manda o
+## operador trocar cabo por causa de um interruptor.
+var cameras_do_windows := -1
+var privacidade := ""
+var ocupantes := ""
 
 var _thread: Thread = null
 var _mutex := Mutex.new()
@@ -39,6 +51,7 @@ var _fila: Array[String] = []
 var _fim := false
 var _instalar := false
 var _caminho_ponte := ""
+var _caminho_inspetor := ""
 
 func _ready() -> void:
 	set_process(true)
@@ -72,15 +85,25 @@ func _exit_tree() -> void:
 		_thread.wait_to_finish()
 		_thread = null
 
-## Começa o exame. Com `instalar`, tenta instalar o OpenCV quando faltar.
-func diagnosticar(instalar: bool, caminho_ponte: String) -> void:
+## Começa o exame.
+##
+## Com `resolver`, o médico não só examina: instala o OpenCV se faltar e
+## destrava a privacidade da câmera no Windows. Sem ele, apenas relata —
+## que é o que se quer quando a máquina está no salão e ninguém autorizou
+## mexer em nada.
+func diagnosticar(resolver: bool, caminho_ponte: String, caminho_inspetor := "") -> void:
 	if rodando:
 		return
 	rodando = true
 	linhas.clear()
 	indices.clear()
-	_instalar = instalar
+	backend = ""
+	cameras_do_windows = -1
+	privacidade = ""
+	ocupantes = ""
+	_instalar = resolver
 	_caminho_ponte = caminho_ponte
+	_caminho_inspetor = caminho_inspetor
 	_thread = Thread.new()
 	_thread.start(_trabalhar)
 
@@ -124,6 +147,14 @@ func _trabalhar() -> void:
 			_terminar()
 			return
 
+	# PERGUNTA AO WINDOWS ANTES DE PERGUNTAR AO OPENCV.
+	#
+	# A ordem importa: se a privacidade estiver fechada, sondar câmeras
+	# primeiro só produz dez falhas idênticas e um relatório que culpa o
+	# cabo. Com a resposta do Windows na mão, a sondagem que vem depois
+	# já pode ser interpretada.
+	_perguntar_ao_windows()
+
 	if _caminho_ponte.is_empty():
 		_dizer("Ponte de câmera não encontrada no pacote.")
 		_terminar()
@@ -136,20 +167,89 @@ func _trabalhar() -> void:
 		var linha := str(bruta).strip_edges()
 		if linha.is_empty():
 			continue
-		# A ponte imprime `INDICE=n` para cada câmera que respondeu. É
-		# essa linha que o jogo lê — a outra, com acento e travessão, é
-		# para a pessoa, e muda quando alguém melhora o texto.
+		# A ponte imprime `INDICE=n` e `BACKEND=nome` para cada câmera que
+		# respondeu. São essas linhas que o jogo lê — as outras, com
+		# acento e travessão, são para a pessoa, e mudam quando alguém
+		# melhora o texto.
 		if linha.begins_with("INDICE="):
 			var n := linha.substr(7).strip_edges()
 			if n.is_valid_int():
 				indices.append(n.to_int())
 				achou = true
 			continue
+		if linha.begins_with("BACKEND="):
+			if backend.is_empty():
+				backend = linha.substr(8).strip_edges()
+			continue
 		_dizer(linha)
-	if not achou:
-		_dizer("NENHUMA CÂMERA RESPONDEU.")
-		_dizer("Feche Teams, Meet, OBS e o app Câmera do Windows e tente de novo.")
+	if achou:
+		_dizer("CÂMERA %d PRONTA%s." % [indices[0], "" if backend.is_empty() else " (%s)" % backend])
+	else:
+		_dizer(_veredito())
 	_terminar()
+
+## O VEREDITO: uma frase que diz de quem é a culpa.
+##
+## Antes o relatório terminava sempre igual — "nenhuma câmera respondeu,
+## feche o Teams" — desse mesmo jeito quando a webcam nem estava
+## conectada. Uma resposta que serve para tudo não serve para nada: o
+## operador tenta a única coisa que a tela sugere, não resolve, e conclui
+## que o botão não funciona. Agora a frase muda com o que se descobriu.
+func _veredito() -> String:
+	if cameras_do_windows == 0:
+		return "O WINDOWS TAMBÉM NÃO VÊ A CÂMERA: é cabo, porta USB ou driver."
+	if privacidade == "Deny":
+		return "PRIVACIDADE BLOQUEADA no Windows. Use RESOLVER TUDO."
+	if cameras_do_windows > 0:
+		if not ocupantes.is_empty() and ocupantes != "nenhum":
+			return "A CÂMERA ESTÁ COM OUTRO PROGRAMA: feche %s." % ocupantes
+		return "O WINDOWS VÊ A CÂMERA E O OPENCV NÃO ABRE: feche quem a usa e repita."
+	return "NENHUMA CÂMERA RESPONDEU. Feche Teams, Meet, OBS e o app Câmera."
+
+## Roda o inspetor de PowerShell e guarda o que ele contou.
+##
+## No Linux e no macOS não há inspetor, e não há nada a perder: o resto
+## do exame continua igual, só sem a metade que só o Windows sabe
+## responder.
+func _perguntar_ao_windows() -> void:
+	if _caminho_inspetor.is_empty():
+		return
+	_dizer("Perguntando ao Windows...")
+	var acao := "liberar" if _instalar else "listar"
+	var saida: Array = []
+	var codigo := OS.execute("powershell", PackedStringArray([
+		"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", _caminho_inspetor, "-Acao", acao,
+	]), saida, true)
+	if codigo != 0:
+		_dizer("O PowerShell não respondeu (código %d)." % codigo)
+		return
+	var nomes: Array[String] = []
+	for bruta in _linhas_de(saida):
+		var linha := str(bruta).strip_edges()
+		if linha.begins_with("DISPOSITIVO="):
+			nomes.append(linha.substr(12))
+		elif linha.begins_with("WINDOWS_CAMERAS="):
+			var n := linha.substr(16).strip_edges()
+			if n.is_valid_int():
+				cameras_do_windows = n.to_int()
+		elif linha.begins_with("PRIVACIDADE_PROGRAMAS="):
+			privacidade = linha.substr(22).strip_edges()
+		elif linha.begins_with("OCUPANTES="):
+			ocupantes = linha.substr(10).strip_edges()
+		elif linha.begins_with("LIBEROU="):
+			_dizer("Privacidade liberada: %s" % linha.substr(8))
+		elif linha.begins_with("FALHOU="):
+			_dizer("Não consegui liberar: %s" % linha.substr(7))
+	# Dos nomes, só os dois primeiros: numa máquina com câmera virtual
+	# instalada a lista tem seis entradas e come o relatório inteiro.
+	for nome in nomes.slice(0, 2):
+		_dizer("Windows vê: %s" % nome)
+	if cameras_do_windows >= 0:
+		_dizer("Câmeras no Windows: %d  •  privacidade: %s" % [
+			cameras_do_windows, privacidade if not privacidade.is_empty() else "?"
+		])
+	if not ocupantes.is_empty() and ocupantes != "nenhum":
+		_dizer("Programas que podem estar com ela: %s" % ocupantes)
 
 func _terminar() -> void:
 	_mutex.lock()

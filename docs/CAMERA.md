@@ -63,12 +63,57 @@ use --camera 0 (ou ajuste na Central Técnica do jogo)
 
 - **Se aparecer um índice**, e não for 0, use **TROCAR CÂMERA** na Central
   Técnica (`F9`) até a imagem certa aparecer no espelho.
-- **Se não aparecer nenhum**, o problema está antes do jogo: cabo,
-  porta USB, ou outro programa segurando a webcam (Teams, Meet, Camera
-  do Windows — feche todos e teste de novo).
+- **Se não aparecer nenhum**, veja a seção seguinte: "não respondeu" tem
+  três causas bem diferentes, e o botão **RESOLVER TUDO** resolve duas
+  delas sozinho.
 
 Notebooks com câmera embutida quase sempre têm a interna no índice 0 e a
-USB no 1.
+USB no 1. A varredura vai até o índice 9, e não até o 5: uma máquina com
+OBS, Teams ou DroidCam instalados pode empurrar a webcam USB para o 6 ou
+o 7 sem aviso nenhum.
+
+---
+
+## O caminho curto: DIAGNOSTICAR e RESOLVER TUDO
+
+Na Central Técnica (`F9`), aba **CÂMERA E SOM**, há dois botões, e o
+relatório dos dois aparece **na própria tela do jogo** — não numa janela
+de PowerShell que nasce atrás do jogo em tela cheia.
+
+- **DIAGNOSTICAR** só olha. Confere qual Python responde, se o OpenCV
+  está instalado, **o que o Windows enxerga** e quais índices de câmera
+  entregam quadro.
+- **RESOLVER TUDO** olha e conserta: instala o OpenCV se faltar e
+  **libera a câmera na privacidade do Windows**.
+
+No fim, se algum índice respondeu, a máquina **adota aquele índice e
+aquele back-end** e religa a câmera sozinha — e guarda os dois no arquivo
+de ajustes, então o próximo boot já abre a webcam na primeira tentativa.
+
+### As três causas de "nenhuma câmera respondeu"
+
+O OpenCV falha exatamente igual nas três, e é por isso que a resposta
+antiga ("feche o Teams") servia para tudo e não resolvia nada. O exame
+agora pergunta ao Windows antes de perguntar ao OpenCV, e a última linha
+do relatório diz qual das três é:
+
+| O que o relatório diz | O que fazer |
+| --- | --- |
+| `O WINDOWS TAMBÉM NÃO VÊ A CÂMERA` | Cabo, porta USB ou driver. Troque de porta e olhe o Gerenciador de Dispositivos. |
+| `PRIVACIDADE BLOQUEADA no Windows` | Aperte **RESOLVER TUDO**. Ou, à mão: Configurações → Privacidade → Câmera → **permitir que aplicativos de área de trabalho acessem a câmera**. |
+| `A CÂMERA ESTÁ COM OUTRO PROGRAMA` | Feche o que o relatório nomear. Só um programa por vez abre uma webcam. |
+| `CÂMERA n PRONTA (DSHOW)` | Funcionou. O índice e o back-end já ficaram guardados. |
+
+A privacidade é a causa mais traiçoeira das três: a webcam aparece
+perfeita no Gerenciador de Dispositivos, o app **Câmera** do Windows
+mostra imagem — porque é um aplicativo da Loja — e **todo** programa de
+área de trabalho recebe silêncio. É um interruptor, não um defeito.
+
+O que o **RESOLVER TUDO** grava é exatamente o mesmo valor que o
+aplicativo Configurações grava quando alguém move esse interruptor à
+mão (`HKCU\...\ConsentStore\webcam`, e o ramo `NonPackaged` embaixo
+dele). Só no ramo do usuário: nada aqui pede administrador, e tudo é
+reversível pelo próprio Configurações.
 
 ---
 
@@ -98,7 +143,8 @@ próprio processo, então dizem o motivo em vez de um erro genérico:
 | `CÂMERA CONECTADA (PONTE)` | Funcionando. |
 | `PYTHON NÃO ENCONTRADO` | Python não instalado, ou instalado sem "Add to PATH". |
 | `PONTE SEM RESPOSTA — INSTALE OPENCV` | Python achado, mas o `pip install opencv-python` faltou. |
-| `PROCURANDO CAMERA 0` | A ponte está de pé, mas o índice não responde — rode `--probe`. |
+| `PROCURANDO CAMERA 0` | A ponte está de pé, mas o índice não responde — aperte DIAGNOSTICAR. |
+| `FOTO COM IMAGEM DE n ms ATRÁS` | A foto saiu, mas de um quadro velho: a webcam travou sem devolver erro. |
 | `CAMERA PAROU DE RESPONDER` | Cabo solto ou webcam ocupada. A ponte reconecta sozinha. |
 | `CÂMERA DESATIVADA` | Desligada de propósito na Central Técnica. |
 

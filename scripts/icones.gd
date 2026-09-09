@@ -22,7 +22,7 @@ static func trofeu(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> 
 		centro + Vector2(0.0, r * 0.26),
 		centro + Vector2(-r * 0.40, -r * 0.06),
 	])
-	ci.draw_colored_polygon(taca, cor)
+	Traco.poligono(ci, taca, cor)
 	# Alças dos dois lados, abertas para fora.
 	for lado in [-1.0, 1.0]:
 		ci.draw_arc(
@@ -69,8 +69,8 @@ static func luva_vulto(ci: CanvasItem, centro: Vector2, raio: float, cor: Color)
 
 ## Punho, palma, dedão e cano da luva, todos crescidos de `folga`.
 static func _massa_da_luva(ci: CanvasItem, centro: Vector2, r: float, folga: float, cor: Color) -> void:
-	ci.draw_circle(centro + Vector2(r * 0.10, -r * 0.26), r * 0.64 + folga, cor)
-	ci.draw_circle(centro + Vector2(-r * 0.58, r * 0.02), r * 0.30 + folga, cor)
+	ci.draw_circle(centro + Vector2(r * 0.10, -r * 0.26), r * 0.64 + folga, cor, true, -1.0, true)
+	ci.draw_circle(centro + Vector2(-r * 0.58, r * 0.02), r * 0.30 + folga, cor, true, -1.0, true)
 	_caixa_redonda(ci, Rect2(
 		centro + Vector2(-r * 0.54 - folga, -r * 0.30 - folga),
 		Vector2(r * 1.12 + folga * 2.0, r * 0.56 + folga * 2.0)
@@ -94,7 +94,7 @@ static func _caixa_redonda(ci: CanvasItem, rect: Rect2, raio: float, cor: Color)
 		for i in range(7):
 			var a := a0 + float(i) / 6.0 * PI * 0.5
 			pontos.append(meio + Vector2(cos(a), sin(a)) * r)
-	ci.draw_colored_polygon(pontos, cor)
+	Traco.poligono(ci, pontos, cor)
 
 ## Ficha — os créditos.
 ##
@@ -103,7 +103,7 @@ static func _caixa_redonda(ci: CanvasItem, rect: Rect2, raio: float, cor: Color)
 ## acaba com dois ícones idênticos dizendo coisas diferentes.
 static func ficha(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
 	var r := raio
-	ci.draw_circle(centro, r * 0.88, cor)
+	ci.draw_circle(centro, r * 0.88, cor, true, -1.0, true)
 	for i in range(8):
 		var a := float(i) / 8.0 * TAU + PI / 8.0
 		ci.draw_line(
@@ -117,7 +117,8 @@ static func ficha(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> v
 ## Raio — potência e o passo do soco.
 static func raio_eletrico(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
 	var r := raio
-	ci.draw_colored_polygon(
+	Traco.poligono(
+		ci,
 		PackedVector2Array([
 			centro + Vector2(r * 0.20, -r * 0.90),
 			centro + Vector2(-r * 0.55, r * 0.14),
@@ -136,13 +137,13 @@ static func estrela(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) ->
 		var a := -PI * 0.5 + float(i) * PI / 5.0
 		var r := raio if i % 2 == 0 else raio * 0.45
 		pontos.append(centro + Vector2(cos(a), sin(a)) * r)
-	ci.draw_colored_polygon(pontos, cor)
+	Traco.poligono(ci, pontos, cor)
 
 ## Boneco — o lugar da foto de quem ainda não foi fotografado. Sem ele o
 ## quadro sem foto vira um buraco, e buraco parece defeito, não "vaga".
 static func avatar(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
 	var r := raio
-	ci.draw_circle(centro + Vector2(0.0, -r * 0.40), r * 0.40, cor)
+	ci.draw_circle(centro + Vector2(0.0, -r * 0.40), r * 0.40, cor, true, -1.0, true)
 	# Ombros: meia elipse cortada na altura do queixo.
 	var ombros := PackedVector2Array()
 	for i in range(21):
@@ -150,13 +151,13 @@ static func avatar(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> 
 		ombros.append(centro + Vector2(cos(a) * r * 0.80, r * 0.66 + sin(a) * r * 0.56))
 	ombros.append(centro + Vector2(r * 0.80, r * 0.80))
 	ombros.append(centro + Vector2(-r * 0.80, r * 0.80))
-	ci.draw_colored_polygon(ombros, cor)
+	Traco.poligono(ci, ombros, cor)
 
 ## Alvo — onde o soco tem de chegar.
 static func alvo(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
 	ci.draw_arc(centro, raio * 0.82, 0.0, TAU, 44, cor, raio * 0.18, true)
 	ci.draw_arc(centro, raio * 0.44, 0.0, TAU, 32, cor, raio * 0.16, true)
-	ci.draw_circle(centro, raio * 0.14, cor)
+	ci.draw_circle(centro, raio * 0.14, cor, true, -1.0, true)
 
 ## Botão de arcade visto de cima — o passo do START.
 ##
@@ -165,9 +166,9 @@ static func alvo(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> vo
 ## degrau de tom que faz o olho enxergar um botão de apertar.
 static func botao(ci: CanvasItem, centro: Vector2, raio: float, cor: Color) -> void:
 	var r := raio
-	ci.draw_circle(centro, r * 0.95, cor.darkened(0.45))
+	ci.draw_circle(centro, r * 0.95, cor.darkened(0.45), true, -1.0, true)
 	ci.draw_arc(centro, r * 0.95, 0.0, TAU, 44, cor.darkened(0.65), r * 0.10, true)
-	ci.draw_circle(centro - Vector2(0.0, r * 0.05), r * 0.64, cor)
+	ci.draw_circle(centro - Vector2(0.0, r * 0.05), r * 0.64, cor, true, -1.0, true)
 	ci.draw_arc(
 		centro - Vector2(0.0, r * 0.05), r * 0.40,
 		PI * 1.08, PI * 1.78, 20, Color(1, 1, 1, 0.75), r * 0.16, true

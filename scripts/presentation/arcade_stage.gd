@@ -23,7 +23,7 @@ const PANEL := Color("330c16")
 ## espalhados pelo código, acertar isso vira tentativa e erro.
 const T_SELO := 0.00     ## o selo da casa, quadrado, apresenta a máquina
 const T_VARRER := 0.95   ## dois facões de luz cruzam o escuro
-const T_VOO := 1.25      ## a luva entra voando, deixando rastro
+const T_VOO := 1.10      ## a luva entra voando, deixando rastro
 const T_SOCO := 1.90     ## o impacto: clarão, ondas e tremor
 const T_EMBLEMA := 1.95  ## o emblema nasce do ponto do soco
 const T_TITULO := 2.60   ## PUNCH desce batendo
@@ -94,10 +94,10 @@ static func _janela(tempo: float, inicio: float, duracao: float) -> float:
 static func background(canvas: CanvasItem, time: float) -> void:
 	canvas.draw_rect(Rect2(0, 0, 1080, 1920), FLOOR)
 	# Grandes planos vermelhos, centro livre para a leitura a distância.
-	canvas.draw_colored_polygon(PackedVector2Array([Vector2(0, 0), Vector2(1080, 0), Vector2(1080, 290), Vector2(0, 550)]), Color("9f0a20"))
-	canvas.draw_colored_polygon(PackedVector2Array([Vector2(0, 0), Vector2(780, 0), Vector2(0, 430)]), Color("d00c29"))
-	canvas.draw_colored_polygon(PackedVector2Array([Vector2(0, 1650), Vector2(1080, 1400), Vector2(1080, 1920), Vector2(0, 1920)]), Color("85091d"))
-	canvas.draw_colored_polygon(PackedVector2Array([Vector2(230, 1920), Vector2(1080, 1630), Vector2(1080, 1920)]), Color("cc102a"))
+	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 0), Vector2(1080, 0), Vector2(1080, 290), Vector2(0, 550)]), Color("9f0a20"))
+	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 0), Vector2(780, 0), Vector2(0, 430)]), Color("d00c29"))
+	Traco.poligono(canvas, PackedVector2Array([Vector2(0, 1650), Vector2(1080, 1400), Vector2(1080, 1920), Vector2(0, 1920)]), Color("85091d"))
+	Traco.poligono(canvas, PackedVector2Array([Vector2(230, 1920), Vector2(1080, 1630), Vector2(1080, 1920)]), Color("cc102a"))
 	for side in [0.0, 1.0]:
 		var x := lerpf(28.0, 1052.0, side)
 		for layer in range(9):
@@ -160,7 +160,7 @@ static func _intro_varredura(canvas: Control, time: float) -> void:
 			Vector2(x - 190.0, 0.0), Vector2(x + 190.0, 0.0),
 			Vector2(x + 420.0, 1920.0), Vector2(x + 40.0, 1920.0),
 		])
-		canvas.draw_colored_polygon(faixa, Color(GOLD, 0.34 * forca))
+		Traco.poligono(canvas, faixa, Color(GOLD, 0.34 * forca))
 		canvas.draw_line(Vector2(x, 0.0), Vector2(x + 230.0, 1920.0), Color(WHITE, 0.95 * forca), 7.0, true)
 	# A linha do horizonte que abre junto: sem ela os dois facões passam
 	# por um retângulo preto e a máquina parece que ainda não ligou.
@@ -171,41 +171,192 @@ static func _intro_varredura(canvas: Control, time: float) -> void:
 		Color(WHITE, forca * 0.8), lerpf(2.0, 26.0, 1.0 - t), true
 	)
 
-## A LUVA ENTRA VOANDO, e o rastro é o que vende a velocidade: uma luva
-## só, por mais rápida que se mova, é uma luva parada em cada quadro.
+## O SOCO VEM DE LADO, E VEM PARA CIMA DE QUEM OLHA.
+##
+## A primeira versão fazia a luva subir da diagonal de baixo, chapada,
+## do mesmo tamanho o caminho inteiro e DESACELERANDO no fim. Isso é o
+## movimento de quem estende o braço para pegar alguma coisa, não o de
+## quem bate: soco nenhum freia antes de acertar.
+##
+## Três coisas mudam aqui, e são elas que fazem o golpe parecer golpe:
+##
+##   LADO.        Entra pela direita, na altura do olhar, e não do chão.
+##                É de onde um soco chega quando quem bate está de pé na
+##                frente da máquina — o mesmo eixo do soco de verdade.
+##   PERSPECTIVA. Longe é pequeno; perto é enorme. O raio quase não muda
+##                na primeira metade do caminho e multiplica por nove na
+##                última — é assim que uma coisa vindo NA DIREÇÃO da
+##                câmera cresce, e é o que vende a profundidade numa tela
+##                que não tem profundidade nenhuma.
+##   ACELERAÇÃO.  `pow(t, 2.4)`: sai devagar e chega estourando. A curva
+##                antiga (`ease(t, 0.32)`) fazia o contrário.
+##
+## E o antebraço. Uma luva sozinha voando é um objeto flutuando; o braço
+## atrás dela, saindo da borda da tela, é o que diz que tem alguém ali.
+const VOO_PARTIDA := Vector2(1180.0, 500.0)
+const VOO_DURACAO := T_SOCO - T_VOO
+
+## Onde a luva está, e de que tamanho, numa fração do voo.
+static func _voo_em(avanco: float) -> Dictionary:
+	var reta := VOO_PARTIDA.lerp(SOCO, avanco)
+	# Uma barriga na trajetória: o punho descreve um arco, como o braço
+	# que gira no ombro. Em linha reta o voo lê como um slide de
+	# apresentação atravessando a tela.
+	var desvio := Vector2(0.0, -1.0) * sin(avanco * PI) * 120.0
+	return {
+		"centro": reta + desvio,
+		"raio": lerpf(64.0, 440.0, pow(avanco, 1.45)),
+	}
+
 static func _intro_voo(canvas: Control, time: float) -> void:
 	if time < T_VOO or time >= T_SOCO + 0.10:
 		return
-	var t := _janela(time, T_VOO, T_SOCO - T_VOO)
-	var avanco := ease(t, 0.32)
-	var partida := Vector2(-360.0, 1500.0)
-	for i in range(7):
-		var atras := clampf(avanco - float(i) * 0.055, 0.0, 1.0)
-		var centro := partida.lerp(SOCO, atras)
-		var raio := lerpf(150.0, 250.0, atras)
-		var forca := (1.0 - float(i) / 7.0) * (1.0 - t * 0.35)
-		if i > 0:
-			Icones.luva_vulto(canvas, centro, raio, Color(RED, forca * 0.26))
+	var t := _janela(time, T_VOO, VOO_DURACAO)
+	var avanco := pow(t, 1.9)
+	var agora: Dictionary = _voo_em(avanco)
+	var centro: Vector2 = agora["centro"]
+	var raio: float = agora["raio"]
+	# A direção do golpe sai da própria trajetória, e não de uma constante:
+	# com a barriga do arco, a direção no começo e no fim não são a mesma.
+	var antes: Dictionary = _voo_em(maxf(avanco - 0.02, 0.0))
+	var direcao: Vector2 = (centro - antes["centro"]).normalized()
+	if direcao.length_squared() < 0.5:
+		direcao = (SOCO - VOO_PARTIDA).normalized()
+
+	_voo_vento(canvas, centro, raio, direcao, t)
+	# O RASTRO, do mais antigo para o mais novo: cada fantasma é a luva
+	# como ela era alguns centésimos atrás, com o tamanho daquele momento.
+	# Fantasmas do mesmo tamanho do punho atual pareciam uma fileira de
+	# bolas, e não uma coisa só que passou.
+	for i in range(6, 0, -1):
+		var atras := maxf(avanco - float(i) * 0.048, 0.0)
+		if atras <= 0.0:
 			continue
-		# A LUVA DA FRENTE, montada aqui e não pelo ícone: os brilhos do
-		# ícone são duas barras brancas grossas, pensadas para um botão de
-		# 40 px. A 250 px de raio elas cobrem a luva inteira e o que voa
-		# pela tela deixa de parecer uma luva.
-		Icones.luva_vulto(canvas, centro + Vector2(0.0, raio * 0.09), raio, Color("6d0a18"))
-		Icones.luva_vulto(canvas, centro, raio, Color("ef1f38"))
-		Icones.luva_vulto(canvas, centro - Vector2(raio * 0.05, raio * 0.09), raio * 0.86, Color("ff5f6f"))
+		var passado: Dictionary = _voo_em(atras)
+		var forca := (1.0 - float(i) / 7.0) * 0.42
+		_punho(canvas, passado["centro"], passado["raio"], direcao, Color(RED, forca), true)
+	_punho(canvas, centro, raio, direcao, Color(1, 1, 1, 1), false)
+	_voo_riscos(canvas, centro, raio, direcao, t)
+
+## O CONE DE VENTO: o ar empurrado à frente do golpe, aberto para trás.
+## É o que preenche o vazio entre a borda da tela e o punho enquanto ele
+## ainda está pequeno e longe.
+static func _voo_vento(canvas: Control, centro: Vector2, raio: float, direcao: Vector2, t: float) -> void:
+	var perp := Vector2(-direcao.y, direcao.x)
+	var fundo := centro - direcao * (raio * 2.0 + 1500.0)
+	var forca := 0.10 + 0.16 * t
+	Traco.poligono(canvas, PackedVector2Array([
+		centro + perp * raio * 0.95,
+		centro - perp * raio * 0.95,
+		fundo - perp * raio * 2.4,
+		fundo + perp * raio * 2.4,
+	]), Color(RED, forca * 0.35))
+	Traco.poligono(canvas, PackedVector2Array([
+		centro + perp * raio * 0.45,
+		centro - perp * raio * 0.45,
+		fundo - perp * raio * 1.1,
+		fundo + perp * raio * 1.1,
+	]), Color(GOLD, forca * 0.30))
+
+## Riscas de velocidade CONVERGINDO no punho. Elas nascem longe, atrás
+## dele, e apontam para onde ele está: é o olho do público sendo puxado
+## para o ponto do impacto antes do impacto acontecer.
+static func _voo_riscos(canvas: Control, centro: Vector2, raio: float, direcao: Vector2, t: float) -> void:
+	var perp := Vector2(-direcao.y, direcao.x)
+	for i in range(18):
+		var lado := perp * randf_range(-1.0, 1.0) * (raio * 1.9 + 260.0)
+		var origem := centro - direcao * randf_range(raio * 1.2, raio * 3.4 + 900.0) + lado
+		var comprimento := randf_range(120.0, 320.0) * (0.5 + t)
+		var cor := GOLD if i % 3 else WHITE
 		canvas.draw_line(
-			centro + Vector2(-raio * 0.06, -raio * 0.62),
-			centro + Vector2(raio * 0.42, -raio * 0.50),
-			Color(WHITE, 0.85), raio * 0.07, true
+			origem, origem + direcao * comprimento,
+			Color(cor, 0.16 + 0.22 * t), lerpf(2.0, 6.0, t), true
 		)
-	# Riscas de velocidade atrás da luva, na direção do voo.
-	var direcao := (SOCO - partida).normalized()
-	var atual := partida.lerp(SOCO, avanco)
-	for i in range(14):
-		var desvio := Vector2(-direcao.y, direcao.x) * randf_range(-230.0, 230.0)
-		var origem := atual - direcao * randf_range(280.0, 900.0) + desvio
-		canvas.draw_line(origem, origem - direcao * randf_range(90.0, 220.0), Color(GOLD, 0.30), 3.0, true)
+
+## O PUNHO, montado na direção do voo.
+##
+## Não é a luva do ícone: aquela é um PERFIL, desenhada para caber num
+## botão e ser reconhecida de lado. Aqui a luva vem DE FRENTE, na cara de
+## quem olha, e o que se vê de um soco assim é a fileira dos nós dos
+## dedos ocupando a borda de ataque, o polegar dobrado de um lado e o
+## cano do punho sumindo para trás. É outra figura, e por isso mora aqui
+## e não em `Icones`.
+##
+## A ORDEM DO DESENHO É O DESENHO. Três passadas:
+##
+##   1. a silhueta inteira em tinta escura — mão, quatro nós, polegar e
+##      cano, todos um pouco maiores do que serão;
+##   2. as mesmas formas em couro, encolhidas o bastante para a passada
+##      escura sobrar como contorno em volta de tudo;
+##   3. os brilhos, só onde a luz bateria.
+##
+## Foi isso que salvou a figura: com os nós desenhados por cima de um
+## disco liso, eles viravam uma lagarta atravessando uma bola. Fazendo os
+## nós participarem da SILHUETA, a borda de ataque fica recortada — e é
+## essa borda recortada que o olho lê como punho fechado.
+const NOS := 4
+
+## Onde fica cada nó do dedo, e o polegar, em relação ao centro.
+static func _nos_do_punho(centro: Vector2, r: float, direcao: Vector2, perp: Vector2) -> Array:
+	var lugares := []
+	for i in range(NOS):
+		var passo := (-0.54 + float(i) * 0.36) * r
+		# Os nós das pontas ficam um pouco atrás: a mão é redonda, não
+		# uma régua, e alinhá-los todos achatava a frente do punho.
+		var recuo := 0.62 - pow(absf(passo / r) * 1.5, 2.0) * 0.30
+		lugares.append(centro + direcao * r * recuo + perp * passo)
+	return lugares
+
+static func _punho(canvas: Control, centro: Vector2, raio: float, direcao: Vector2, tinta: Color, vulto: bool) -> void:
+	var r := raio
+	var perp := Vector2(-direcao.y, direcao.x)
+	var a := tinta.a
+	if a <= 0.01:
+		return
+	var couro := Color("e01430", a)
+	var sombra := Color("5c0714", a)
+	var luz := Color("ff7183", a)
+	var polegar := centro - perp * r * 0.74 + direcao * r * 0.06
+	var cano := centro - direcao * r * 0.66
+	var lugares := _nos_do_punho(centro, r, direcao, perp)
+
+	# ANTEBRAÇO. Afina para trás porque em perspectiva ele está mais longe
+	# da câmera que a mão. Sem ele a luva é um objeto flutuando.
+	var fundo := centro - direcao * (r * 4.2)
+	Traco.poligono(canvas, PackedVector2Array([
+		centro + perp * r * 0.62,
+		centro - perp * r * 0.62,
+		fundo - perp * r * 0.26,
+		fundo + perp * r * 0.26,
+	]), sombra if not vulto else Color(RED, a))
+
+	if vulto:
+		# Fantasma do rastro: uma mancha só, do tamanho daquele instante.
+		# Um fantasma com nó de dedo e brilho vira sujeira, não rastro.
+		canvas.draw_circle(centro, r * 0.96, Color(RED, a), true, -1.0, true)
+		return
+
+	# 1) A SILHUETA, em tinta escura e um degrau maior que a figura.
+	canvas.draw_circle(cano, r * 0.80, sombra, true, -1.0, true)
+	canvas.draw_circle(centro, r * 1.00, sombra, true, -1.0, true)
+	canvas.draw_circle(polegar, r * 0.38, sombra, true, -1.0, true)
+	for lugar in lugares:
+		canvas.draw_circle(lugar, r * 0.36, sombra, true, -1.0, true)
+
+	# 2) O COURO, encolhido — o que sobra da passada escura é o contorno.
+	canvas.draw_circle(cano, r * 0.72, Color("a80f24", a), true, -1.0, true)
+	canvas.draw_circle(centro, r * 0.92, couro, true, -1.0, true)
+	canvas.draw_circle(polegar, r * 0.30, Color("c8122b", a), true, -1.0, true)
+	for lugar in lugares:
+		canvas.draw_circle(lugar, r * 0.28, Color("f0243e", a), true, -1.0, true)
+
+	# 3) A LUZ. Um clarão no alto da mão — a lâmpada do galpão está em
+	# cima — e um fio de luz na quina que chega primeiro.
+	canvas.draw_circle(centro + perp * r * 0.30 - direcao * r * 0.22, r * 0.30, Color(luz, a * 0.55), true, -1.0, true)
+	for lugar in lugares:
+		canvas.draw_circle(lugar + perp * r * 0.06 - direcao * r * 0.02, r * 0.15, Color(luz, a * 0.9), true, -1.0, true)
+	var ang := direcao.angle()
+	canvas.draw_arc(centro, r * 0.99, ang - 0.55, ang + 0.55, 22, Color(WHITE, a * 0.45), r * 0.05, true)
 
 ## O SOCO. Clarão, três ondas e um leque de riscas saindo do ponto.
 static func _intro_impacto(canvas: Control, time: float) -> void:
@@ -334,7 +485,7 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 				Vector2(x - meia + 150.0, alto), Vector2(x + meia + 150.0, alto),
 				Vector2(x + meia - 150.0, baixo), Vector2(x - meia - 150.0, baixo),
 			])
-			canvas.draw_colored_polygon(faixa, Color(WHITE, 0.16 - float(camada) * 0.045))
+			Traco.poligono(canvas, faixa, Color(WHITE, 0.16 - float(camada) * 0.045))
 	# A batida do emblema: um anel que sai dele e se apaga.
 	var batida := _janela(time, T_BRILHO + 0.15, 0.75)
 	if batida > 0.0 and batida < 1.0:
@@ -372,7 +523,7 @@ static func _intro_selo(canvas: Control, time: float) -> void:
 
 	# Halo por trás: separa a placa do preto sem precisar de sombra.
 	for i in range(5):
-		canvas.draw_circle(SELO_CENTRO, lado * (0.62 + float(i) * 0.10), Color(GOLD, 0.030 * alpha))
+		canvas.draw_circle(SELO_CENTRO, lado * (0.62 + float(i) * 0.10), Color(GOLD, 0.030 * alpha), true, -1.0, true)
 
 	_placa_redonda(canvas, placa, raio, Color(Color("2a0a12"), alpha))
 	_contorno_redondo(canvas, placa, raio, Color(GOLD, alpha), 4.0)
@@ -405,7 +556,7 @@ static func _intro_selo(canvas: Control, time: float) -> void:
 			])
 			var recortada := _recortar_no_retangulo(faixa, placa.grow(-4.0))
 			if recortada.size() >= 3:
-				canvas.draw_colored_polygon(recortada, Color(WHITE, (0.30 - float(camada) * 0.16) * alpha))
+				Traco.poligono(canvas, recortada, Color(WHITE, (0.30 - float(camada) * 0.16) * alpha))
 
 	# O SÍMBOLO EM CIMA, O NOME EMBAIXO. É a ordem da marca: quem vê de
 	# longe reconhece o alvo antes de conseguir ler qualquer coisa, e o
@@ -418,7 +569,7 @@ static func _placa_redonda(canvas: CanvasItem, rect: Rect2, raio: float, cor: Co
 	canvas.draw_rect(Rect2(rect.position + Vector2(raio, 0.0), rect.size - Vector2(raio * 2.0, 0.0)), cor)
 	canvas.draw_rect(Rect2(rect.position + Vector2(0.0, raio), Vector2(rect.size.x, rect.size.y - raio * 2.0)), cor)
 	for canto in _cantos(rect, raio):
-		canvas.draw_circle(canto, raio, cor)
+		canvas.draw_circle(canto, raio, cor, true, -1.0, true)
 
 static func _contorno_redondo(canvas: CanvasItem, rect: Rect2, raio: float, cor: Color, largura: float) -> void:
 	canvas.draw_line(rect.position + Vector2(raio, 0.0), Vector2(rect.end.x - raio, rect.position.y), cor, largura, true)

@@ -79,7 +79,7 @@ func desenhar(tela: CanvasItem) -> void:
 					p.posicao + Vector2(largura, p.tamanho * 1.6).rotated(p.giro * 0.35),
 					p.posicao + Vector2(-largura, p.tamanho * 1.6).rotated(p.giro * 0.35),
 				])
-				tela.draw_colored_polygon(pontos, cor)
+				Traco.poligono(tela, pontos, cor)
 			"brasa":
 				# BRASA: um risco na direção do voo, com a cabeça mais
 				# quente. É o que substituiu o confete — um retângulo
@@ -92,11 +92,11 @@ func desenhar(tela: CanvasItem) -> void:
 				frio.a *= 0.25
 				tela.draw_line(atras, p.posicao, frio, p.tamanho * 0.7, true)
 				tela.draw_line(p.posicao - vel.normalized() * comprimento * 0.35, p.posicao, cor, p.tamanho, true)
-				tela.draw_circle(p.posicao, p.tamanho * 0.7, Color(1, 1, 1, cor.a * 0.85))
+				tela.draw_circle(p.posicao, p.tamanho * 0.7, Color(1, 1, 1, cor.a * 0.85), true, -1.0, true)
 			"raio":
 				# RAIO: o mesmo símbolo que está no emblema, girando. Dá
 				# à festa a linguagem da máquina em vez da de carnaval.
-				tela.draw_colored_polygon(_forma_de_raio(p.posicao, p.tamanho, p.giro), cor)
+				Traco.poligono(tela, _forma_de_raio(p.posicao, p.tamanho, p.giro), cor)
 			"faisca":
 				var rastro: Vector2 = p.velocidade.normalized() * p.tamanho * 3.5
 				tela.draw_line(p.posicao - rastro, p.posicao, cor, maxf(1.5, p.tamanho * 0.6), true)
@@ -106,9 +106,9 @@ func desenhar(tela: CanvasItem) -> void:
 					p.posicao + Vector2(p.tamanho, p.tamanho * 0.6).rotated(p.giro),
 					p.posicao + Vector2(-p.tamanho * 0.8, p.tamanho).rotated(p.giro),
 				])
-				tela.draw_colored_polygon(pontos_e, cor)
+				Traco.poligono(tela, pontos_e, cor)
 			_:
-				tela.draw_circle(p.posicao, p.tamanho, cor)
+				tela.draw_circle(p.posicao, p.tamanho, cor, true, -1.0, true)
 
 
 ## O contorno de um raio de seis pontas, na escala e no giro pedidos.

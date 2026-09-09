@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://be68fwpd56052"
-path="res://.godot/imported/Bungee-Regular.ttf-58cdcdfae0aef1a05fd8c473aa98fdbe.fontdata"
+uid="uid://de5jafmmon035"
+path="res://.godot/imported/SairaCondensed-ExtraBold.ttf-052069c3365f1bd532cfe4156fd9774e.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/Bungee-Regular.ttf"
-dest_files=["res://.godot/imported/Bungee-Regular.ttf-58cdcdfae0aef1a05fd8c473aa98fdbe.fontdata"]
+source_file="res://assets/fonts/SairaCondensed-ExtraBold.ttf"
+dest_files=["res://.godot/imported/SairaCondensed-ExtraBold.ttf-052069c3365f1bd532cfe4156fd9774e.fontdata"]
 
 [params]
 

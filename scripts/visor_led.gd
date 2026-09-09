@@ -70,13 +70,13 @@ static func _digito(
 		var forma := _forma(seg, canto, w, h, t, folga, meio)
 		if aceso and brilho:
 			# Halo do LED aceso: o vidro espalha um pouco a luz em volta.
-			ci.draw_colored_polygon(_inflar(forma, t * 0.70), Color(cor, 0.30))
-		ci.draw_colored_polygon(forma, tom)
+			Traco.poligono(ci, _inflar(forma, t * 0.70), Color(cor, 0.30))
+		Traco.poligono(ci, forma, tom)
 		if aceso:
 			# MIOLO CLARO. Um LED aceso não é um traço de cor chapada: o
 			# centro estoura quase branco e a cor fica só na borda. Sem
 			# isso o algarismo lê como adesivo, e some contra o vidro.
-			ci.draw_colored_polygon(_inflar(forma, -t * 0.30), cor.lightened(0.55))
+			Traco.poligono(ci, _inflar(forma, -t * 0.30), cor.lightened(0.55))
 
 ## Os pontos de um segmento. Horizontais e verticais são o mesmo hexágono
 ## girado, então a conta mora num lugar só.

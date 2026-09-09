@@ -86,11 +86,20 @@ def backends() -> list[tuple[str, int]]:
     return [("V4L2", cv2.CAP_V4L2), ("ANY", cv2.CAP_ANY)]
 
 
-def abrir(indice: int, largura: int, silencioso: bool = False):
+def abrir(indice: int, largura: int, silencioso: bool = False, preferido: str = ""):
     """Abre a câmera testando cada back-end. Devolve (captura, nome) ou
     (None, "") — abrir sem conseguir LER um quadro não conta como aberta:
-    várias webcams respondem `isOpened()` e só então falham."""
-    for nome, backend in backends():
+    várias webcams respondem `isOpened()` e só então falham.
+
+    `preferido` põe na frente da fila o back-end que a sondagem já provou
+    que funciona nesta máquina. Sem isso, toda religada da ponte repete a
+    fila inteira, e cada tentativa frustrada de um back-end custa entre
+    um e três segundos no Windows — tempo em que o gabinete fica sem
+    prévia bem na hora da foto."""
+    ordem = backends()
+    if preferido:
+        ordem = [b for b in ordem if b[0] == preferido] + [b for b in ordem if b[0] != preferido]
+    for nome, backend in ordem:
         captura = cv2.VideoCapture(indice, backend)
         if captura.isOpened():
             captura.set(cv2.CAP_PROP_FRAME_WIDTH, largura)
@@ -105,30 +114,98 @@ def abrir(indice: int, largura: int, silencioso: bool = False):
     return None, ""
 
 
+## ATÉ ONDE A VARREDURA VAI.
+##
+## Seis era pouco. No Windows a numeração da câmera anda quando se
+## instala um driver de câmera virtual (OBS, Teams, DroidCam), quando a
+## webcam do notebook está presente, e quando a webcam USB é ligada numa
+## porta diferente. Uma máquina com OBS instalado pode pôr a SIGMA-W420
+## no índice 7 sem nenhum aviso.
+INDICE_MAXIMO = 10
+
+
+def _resultado_do_indice(indice: int, largura: int) -> dict:
+    """Tenta UM índice em TODOS os back-ends e conta o que aconteceu.
+
+    A distinção que interessa não é "abriu ou não abriu": é
+
+      * nem abriu           -> não existe câmera nesse número;
+      * abriu e não leu     -> existe, mas alguém está com ela, ou o
+                               driver aceita a conexão e não entrega
+                               quadro (o caso clássico de privacidade
+                               bloqueada no Windows);
+      * abriu e leu         -> funciona.
+
+    O segundo caso é o que fazia o diagnóstico antigo mentir: ele dizia
+    "nenhuma câmera respondeu", que manda o operador conferir cabo e
+    driver, quando o cabo e o driver estão certos e o problema é outro
+    programa segurando a webcam.
+    """
+    tentativas = []
+    for nome, backend in backends():
+        try:
+            captura = cv2.VideoCapture(indice, backend)
+        except cv2.error:
+            tentativas.append((nome, "erro", 0, 0))
+            continue
+        if not captura.isOpened():
+            captura.release()
+            tentativas.append((nome, "fechada", 0, 0))
+            continue
+        captura.set(cv2.CAP_PROP_FRAME_WIDTH, largura)
+        captura.set(cv2.CAP_PROP_FRAME_HEIGHT, int(largura * 3 / 4))
+        ok, quadro = captura.read()
+        w = int(captura.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(captura.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        captura.release()
+        if ok and quadro is not None:
+            tentativas.append((nome, "ok", w, h))
+        else:
+            tentativas.append((nome, "sem quadro", w, h))
+    return {"indice": indice, "tentativas": tentativas}
+
+
 def sondar(largura: int) -> int:
-    """Varre os primeiros índices e diz quais funcionam."""
+    """Varre os índices e diz, back-end por back-end, o que respondeu."""
+    print(f"python: {sys.executable}")
+    print(f"opencv: {cv2.__version__}")
     achou = []
-    for indice in range(6):
-        captura, nome = abrir(indice, largura, silencioso=True)
-        if captura is not None:
-            w = int(captura.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(captura.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    ocupadas = []
+    for indice in range(INDICE_MAXIMO):
+        resultado = _resultado_do_indice(indice, largura)
+        bons = [t for t in resultado["tentativas"] if t[1] == "ok"]
+        mudos = [t for t in resultado["tentativas"] if t[1] == "sem quadro"]
+        if bons:
+            nome, _, w, h = bons[0]
             # DUAS LINHAS: uma para gente, outra para o jogo.
             #
             # A da gente tem acento e travessão e muda quando alguém
             # melhora o texto; a do jogo é `INDICE=n` e não muda nunca.
             # Fazer o jogo ler a linha bonita é como uma correção de
             # português quebra a leitura da câmera.
-            print(f"câmera {indice}: OK via {nome} — {w}x{h}")
+            print(f"camera {indice}: OK via {nome} - {w}x{h}")
             print(f"INDICE={indice}")
+            print(f"BACKEND={nome}")
             achou.append(indice)
-            captura.release()
-    if not achou:
-        print("nenhuma câmera respondeu (índices 0 a 5)")
-        print("verifique cabo USB, driver, e se outro programa está usando a webcam")
-        return 1
-    print(f"\nuse --camera {achou[0]} (ou ajuste na Central Técnica do jogo)")
-    return 0
+        elif mudos:
+            nomes = ", ".join(t[0] for t in mudos)
+            print(f"camera {indice}: ABRE mas nao entrega quadro ({nomes})")
+            ocupadas.append(indice)
+    if achou:
+        print(f"use --camera {achou[0]} (ou ajuste na Central Tecnica do jogo)")
+        return 0
+    if ocupadas:
+        # ESTE É O DIAGNÓSTICO QUE FALTAVA. A câmera existe e o Windows a
+        # entrega; o que não vem é o quadro. São só duas causas, e as
+        # duas se resolvem sem mexer em cabo nenhum.
+        print(f"CAMERA PRESENTE MAS MUDA nos indices {ocupadas}")
+        print("1) feche Camera do Windows, Teams, Meet, OBS e o navegador")
+        print("2) Windows: Privacidade > Camera > permitir que APLICATIVOS DE")
+        print("   AREA DE TRABALHO acessem a camera")
+        return 2
+    print(f"nenhuma camera respondeu (indices 0 a {INDICE_MAXIMO - 1})")
+    print("verifique cabo USB, driver, e se outro programa esta usando a webcam")
+    return 1
 
 
 def imagem_de_teste(largura: int, quadro_n: int):
@@ -168,6 +245,7 @@ def main() -> int:
     parser.add_argument("--fps", type=float, default=15.0)
     parser.add_argument("--quality", type=int, default=80)
     parser.add_argument("--probe", action="store_true", help="lista as câmeras e sai")
+    parser.add_argument("--backend", default="", help="back-end preferido (DSHOW, MSMF, ANY, V4L2)")
     parser.add_argument("--pattern", action="store_true", help="imagem sintética")
     args = parser.parse_args()
 
@@ -237,7 +315,7 @@ def main() -> int:
                 # RECONECTA SOZINHA. Uma webcam USB que dá tranco no cabo
                 # some por um segundo; se a ponte morresse nisso, o
                 # gabinete ficaria sem câmera até alguém reiniciar o jogo.
-                captura, nome_backend = abrir(indice, args.width, silencioso=True)
+                captura, nome_backend = abrir(indice, args.width, silencioso=True, preferido=args.backend)
                 if captura is None:
                     tentativas_no_indice += 1
                     # O ÍNDICE CONFIGURADO NÃO É SAGRADO.
@@ -249,10 +327,10 @@ def main() -> int:
                     # ligada e o jogo nao ve": ela esta ali, no indice 1.
                     #
                     # Duas tentativas por indice e passa para o proximo,
-                    # dando a volta em 0..5.
+                    # dando a volta em 0..INDICE_MAXIMO-1.
                     if tentativas_no_indice >= 2:
                         tentativas_no_indice = 0
-                        indice = (indice + 1) % 6
+                        indice = (indice + 1) % INDICE_MAXIMO
                         anotar(f"PROCURANDO CAMERA - TESTANDO INDICE {indice}")
                     else:
                         anotar(f"PROCURANDO CAMERA {indice}")

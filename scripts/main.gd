@@ -328,6 +328,15 @@ var portas_visiveis: PackedStringArray = []
 ## Câmera e dados locais do proprietário. Nenhum deles depende da rede.
 var camera_service: CameraService
 var camera_enabled := true
+## O ÍNDICE E O BACK-END QUE JÁ FUNCIONARAM NESTA MÁQUINA.
+##
+## Descobrir a câmera é a parte cara: no Windows, varrer dez índices em
+## três back-ends leva a melhor parte de um minuto, e é isso que a
+## máquina fazia toda vez que ligava. Guardado, o gabinete abre a webcam
+## na primeira tentativa — e a foto da primeira partida da noite sai
+## igual à da centésima.
+var camera_index := 0
+var camera_backend := ""
 var camera_mirrored := true
 ## Pula o CameraServer e vai direto à ponte Python. Guardado em disco:
 ## numa máquina em que o caminho nativo nunca funciona, ligar isso uma
@@ -357,7 +366,26 @@ var fx := PunchFX.new()
 ## curvo troca a transformação do canvas e precisa devolvê-la exatamente
 ## como estava — senão o tremor some do resto da tela a partir dali.
 var _deslocamento := Vector2.ZERO
-var fonte: Font
+## AS DUAS LETRAS DA MÁQUINA — e o motivo de serem duas.
+##
+## A Bungee é uma fonte de CARTAZ: letra larga, caixa alta, feita para
+## ser lida atravessando a rua. É a letra certa para PUNCH CHALLENGE, para
+## a pontuação e para o nome da faixa do golpe, e é ela que combina com o
+## logotipo da casa.
+##
+## O erro era usar a mesma Bungee nos rótulos de 22 px. Nesse corpo ela
+## fecha os contra-formas — o buraco do "a", do "e", do "o" —, os acentos
+## grudam na letra e a linha vira uma barra cinza: exatamente o "feio e
+## embaçado" que se vê na tela. Nenhum ajuste de renderização conserta
+## isso, porque não é falta de nitidez, é a fonte errada para o tamanho.
+##
+## A Saira Condensed entra só onde se LÊ: rótulos, instruções, Central
+## Técnica, rodapés. É estreita (cabe "PRESSIONE START" sem encolher),
+## tem acentuação completa do português e mantém o buraco da letra aberto
+## a 20 px. O cartaz continua Bungee, então a identidade não muda — muda
+## só o lugar em que a letra tinha de trabalhar e não conseguia.
+var fonte: Font        ## Bungee: o cartaz.
+var fonte_texto: Font  ## Saira Condensed: a leitura.
 var logo: Texture2D = null
 
 @onready var fundo: PunchBackground = $Fundo
@@ -368,11 +396,18 @@ func _ready() -> void:
 	fonte = ThemeDB.fallback_font
 	if ResourceLoader.exists("res://assets/fonts/Bungee-Regular.ttf"):
 		fonte = load("res://assets/fonts/Bungee-Regular.ttf")
+	# A letra de leitura cai para a de cartaz se o arquivo faltar: uma
+	# tela com a fonte errada ainda é uma tela; uma tela sem fonte não é.
+	fonte_texto = fonte
+	if ResourceLoader.exists("res://assets/fonts/SairaCondensed-ExtraBold.ttf"):
+		fonte_texto = load("res://assets/fonts/SairaCondensed-ExtraBold.ttf")
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
 	camera_service = CameraService.new()
 	camera_service.enabled = camera_enabled
+	camera_service.selected_index = camera_index
+	camera_service.backend_preferido = camera_backend
 	camera_service.mirrored = camera_mirrored
 	camera_service.forcar_ponte = camera_forcar_ponte
 	add_child(camera_service)
@@ -1519,6 +1554,10 @@ func _click_central(p: Vector2) -> void:
 		_show_notice(camera_service.status)
 	elif _visivel_na_pagina("trocar_camera") and BOTOES_SIMPLES["trocar_camera"].has_point(p):
 		camera_service.cycle_camera()
+		# A escolha do técnico também é descoberta e também fica guardada:
+		# senão o próximo boot volta ao índice antigo e ele troca de novo.
+		camera_index = camera_service.selected_index
+		_salvar()
 		_show_notice(camera_service.status)
 	elif _visivel_na_pagina("testar_som") and BOTOES_SIMPLES["testar_som"].has_point(p):
 		# O SOCO DE TESTE DA MESA toca o impacto e o nível mais alto por
@@ -1680,6 +1719,8 @@ func _carregar() -> void:
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
 	botao_credito = _mapa_de_botao(data.get("botao_credito", {}), 4)
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
+	camera_index = int(data.get("camera_index", camera_index))
+	camera_backend = str(data.get("camera_backend", camera_backend))
 	camera_forcar_ponte = bool(data.get("camera_forcar_ponte", camera_forcar_ponte))
 	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
 	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
@@ -1709,6 +1750,8 @@ func _salvar() -> void:
 		"botao_start": botao_start,
 		"botao_credito": botao_credito,
 		"camera_enabled": camera_enabled,
+		"camera_index": camera_index,
+		"camera_backend": camera_backend,
 		"camera_forcar_ponte": camera_forcar_ponte,
 		"camera_mirrored": camera_mirrored,
 		"statistics": statistics,
@@ -1805,7 +1848,7 @@ func _draw_transicao() -> void:
 		Vector2(x + largura * 0.5 - inclinacao, TELA.y + 20.0),
 		Vector2(x - largura * 0.5 - inclinacao, TELA.y + 20.0),
 	])
-	draw_colored_polygon(faixa, Color("b21029"))
+	Traco.poligono(self, faixa, Color("b21029"))
 	# Um fio de ouro na borda de ataque: é ele que dá velocidade ao gesto.
 	draw_line(
 		Vector2(x + largura * 0.5 + inclinacao, -20.0),
@@ -1898,7 +1941,7 @@ func _pagina_como_jogar(alpha: float) -> void:
 		var y := 428.0 + i * 236.0
 		var cor: Color = passos[i][2]
 		var centro := Vector2(MARGEM + 110.0, y + 60.0)
-		draw_circle(centro, 62.0, Paleta.tinta_clara(cor, 0.20))
+		draw_circle(centro, 62.0, Paleta.tinta_clara(cor, 0.20), true, -1.0, true)
 		draw_arc(centro, 62.0, 0.0, TAU, 60, Color(cor, 0.55 * alpha), 4.0)
 		_icone(str(passos[i][0]), centro, 38.0, Color(Paleta.para_texto(cor), alpha))
 		_texto(
@@ -2071,7 +2114,7 @@ func _pontos_do_capitulo(capitulo: int, alpha := 1.0) -> void:
 		var atual := i == capitulo
 		var centro := Vector2(540.0 - largura * 0.5 + 15.0 + i * 30.0, 1500.0)
 		var cor: Color = Paleta.AMBAR if atual else Color("6d2835")
-		draw_circle(centro, 8.0 if atual else 5.0, Color(cor, alpha))
+		draw_circle(centro, 8.0 if atual else 5.0, Color(cor, alpha), true, -1.0, true)
 
 func _draw_score_hero() -> void:
 	var center := Vector2(540, 930)
@@ -2096,7 +2139,7 @@ func _draw_score_hero() -> void:
 	_draw_colunas_de_forca(color, progress)
 	for i in range(12):
 		draw_arc(center, 335.0 + float(i) * 3.0, 0, TAU, 192, Color(color, 0.02), 9.0, true)
-	draw_circle(center, 326.0, Color("250911"))
+	draw_circle(center, 326.0, Color("250911"), true, -1.0, true)
 	draw_arc(center, 327, 0, TAU, 192, Color("6d2835"), 4.0, true)
 	for i in range(60):
 		var angle := float(i) / 60.0 * TAU - PI * 0.5
@@ -2141,7 +2184,7 @@ func _draw_campo_de_forca(centro: Vector2, cor: Color, progresso: float, no_impa
 	if no_impacto:
 		forca = 1.0 - clampf(state_time / GameDef.IMPACTO_DURACAO, 0.0, 1.0)
 	for i in range(7):
-		draw_circle(centro, 380.0 + float(i) * 64.0, Color(cor, 0.013 * forca))
+		draw_circle(centro, 380.0 + float(i) * 64.0, Color(cor, 0.013 * forca), true, -1.0, true)
 	for i in range(36):
 		var ang := float(i) * TAU / 36.0 + animation_time * 0.22
 		var onda := 0.5 + 0.5 * sin(float(i) * 1.7 - animation_time * 4.0)
@@ -2320,7 +2363,9 @@ func _central_operacao() -> void:
 		1056.0, 15, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
 	)
 	if simulacao_bancada:
-		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1090.0, 18, Paleta.VERMELHO)
+		# Abaixo do botão, não em cima dele: a linha de base 1090 encostava
+		# na borda de baixo da chave (que acaba em 1078).
+		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1104.0, 16, Paleta.VERMELHO)
 
 	_secao(Rect2(80, 1136, 920, 130), "SALDO", Paleta.AMBAR)
 	_texto(
@@ -2377,7 +2422,7 @@ func _central_golpe() -> void:
 
 	_secao(Rect2(80, 926, 920, 300), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 972.0), 7.0, dot)
+	draw_circle(Vector2(560, 972.0), 7.0, dot, true, -1.0, true)
 	_texto(serial_status, 978.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
 	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
 	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
@@ -2452,15 +2497,19 @@ func _central_camera() -> void:
 	_secao(Rect2(80, 866, 920, 420), "DIAGNÓSTICO DA CÂMERA", Paleta.AMBAR)
 	var ocupado := medico != null and medico.rodando
 	_botao(BOTOES_SIMPLES["diagnosticar"], "AGUARDE…" if ocupado else "DIAGNOSTICAR", ocupado, Paleta.CIANO, 18)
-	_botao(BOTOES_SIMPLES["instalar_camera"], "INSTALAR OPENCV", false, Paleta.AMBAR, 18)
+	_botao(BOTOES_SIMPLES["instalar_camera"], "RESOLVER TUDO", false, Paleta.VERDE, 18)
 	if medico == null or medico.linhas.is_empty():
 		_texto(
-			"DIAGNOSTICAR confere o Python, o OpenCV e procura a câmera. A resposta aparece aqui.",
-			1010.0, 15, Paleta.TINTA_FRACA
+			"DIAGNOSTICAR só olha: Python, OpenCV, o que o Windows vê e quais índices respondem.",
+			1006.0, 15, Paleta.TINTA_FRACA
 		)
 		_texto(
-			"INSTALAR OPENCV faz o mesmo e instala o que faltar. Leva 1 a 2 minutos.",
-			1036.0, 15, Paleta.TINTA_FRACA
+			"RESOLVER TUDO faz o mesmo e ainda conserta: instala o OpenCV e libera a câmera na",
+			1030.0, 15, Paleta.TINTA_FRACA
+		)
+		_texto(
+			"privacidade do Windows. Leva 1 a 2 minutos. A resposta aparece aqui embaixo.",
+			1054.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
 		for i in range(medico.linhas.size()):
@@ -2523,10 +2572,12 @@ func _lista_de_indices(valores: Array) -> String:
 
 ## Manda examinar a instalação da câmera. `instalar` autoriza mexer no
 ## sistema; sem ele o exame só olha e conta.
-func _examinar_camera(instalar: bool) -> void:
+func _examinar_camera(resolver: bool) -> void:
 	if medico == null or medico.rodando:
 		return
-	medico.diagnosticar(instalar, camera_service.caminho_da_ponte())
+	medico.diagnosticar(
+		resolver, camera_service.caminho_da_ponte(), camera_service.caminho_do_inspetor()
+	)
 	_show_notice("EXAMINANDO — A RESPOSTA APARECE NA TELA")
 
 ## Terminado o exame, a máquina AGE com o que descobriu: se achou câmera
@@ -2536,9 +2587,22 @@ func _examinar_camera(instalar: bool) -> void:
 func _fim_do_exame() -> void:
 	if medico.indices.is_empty():
 		return
-	camera_service.selected_index = int(medico.indices[0])
+	camera_index = int(medico.indices[0])
+	camera_service.selected_index = camera_index
+	# O BACK-END TAMBÉM É DESCOBERTA, e também vale guardar. Sem ele a
+	# ponte refaz a fila DirectShow → Media Foundation → qualquer um a
+	# cada religada, e cada tentativa frustrada custa segundos no Windows
+	# — segundos que caem justamente na hora de tirar a foto.
+	camera_backend = medico.backend
+	camera_service.backend_preferido = camera_backend
+	camera_enabled = true
+	camera_service.enabled = true
 	camera_service.refresh()
-	_show_notice("CÂMERA ENCONTRADA NO ÍNDICE %d — RELIGANDO" % camera_service.selected_index)
+	_salvar()
+	_show_notice("CÂMERA NO ÍNDICE %d%s — RELIGANDO" % [
+		camera_service.selected_index,
+		"" if medico.backend.is_empty() else " VIA " + medico.backend,
+	])
 
 ## Quantas fotos existem na pasta do ranking. Serve para o técnico
 ## perceber sobra de arquivo — foto sem dono é disco enchendo à toa.
@@ -2617,7 +2681,7 @@ func _regua_dos_niveis(rect: Rect2) -> void:
 ## vivo, e canto vivo em peça grande destoa do resto da tela — a placa,
 ## os cartões e os botões todos precisam da mesma família de formas.
 func _placa(rect: Rect2, raio: float, cor: Color) -> void:
-	draw_colored_polygon(_contorno_arredondado(rect, raio), cor)
+	Traco.poligono(self, _contorno_arredondado(rect, raio), cor)
 
 func _contorno_arredondado(rect: Rect2, raio: float) -> PackedVector2Array:
 	var r := minf(raio, minf(rect.size.x, rect.size.y) * 0.5)
@@ -2763,15 +2827,33 @@ func _texto(
 	texto: String, y: float, tamanho: int, cor: Color,
 	alinhamento := HORIZONTAL_ALIGNMENT_CENTER, x := MARGEM, largura := LARGURA_UTIL
 ) -> void:
-	draw_string(fonte, Vector2(x, y), texto, alinhamento, largura, tamanho, cor)
+	draw_string(fonte_texto, Vector2(x, y), texto, alinhamento, largura, _corpo(tamanho), cor)
+
+## COMPENSAÇÃO DE ALTURA ENTRE AS DUAS LETRAS.
+##
+## "Tamanho 26" no Godot é a altura da CAIXA da fonte, não a altura da
+## letra. A maiúscula da Bungee ocupa 0,720 dessa caixa; a da Saira
+## Condensed, 0,688 (medido nas próprias tabelas dos arquivos). Pedir 26
+## nas duas desenharia letras de alturas diferentes, e todas as posições
+## desta tela foram acertadas com a altura da Bungee.
+##
+## Este fator devolve a altura: 0,720 / 0,688. Ele NÃO é um "deixa maior
+## porque ficou pequeno" — é a conta que faz 26 continuar valendo 26.
+const CAIXA_LEITURA := 1.047
+
+func _corpo(tamanho: int) -> int:
+	if fonte_texto == fonte:
+		return tamanho
+	return int(round(float(tamanho) * CAIXA_LEITURA))
 
 ## O maior corpo, até `tamanho_max`, em que o texto ainda cabe na
 ## largura. Sem isso, "PESO-PESADO" a 96 px sai pelos dois lados da tela
 ## e "FRACO!" fica pequeno demais no mesmo lugar.
-func _tamanho_que_cabe(texto: String, tamanho_max: int, largura: float) -> int:
+func _tamanho_que_cabe(texto: String, tamanho_max: int, largura: float, letra: Font = null) -> int:
+	var usada: Font = letra if letra != null else fonte
 	var tamanho := tamanho_max
 	while tamanho > 10:
-		if fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho).x <= largura:
+		if usada.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho).x <= largura:
 			break
 		tamanho -= 2
 	return tamanho
@@ -2789,16 +2871,31 @@ func _tamanho_que_cabe(texto: String, tamanho_max: int, largura: float) -> int:
 ##
 ## Com `halo`, entra antes de tudo um contorno largo e transparente na
 ## cor de destaque — a luz que a letra joga no que está atrás dela.
-func _letreiro(texto: String, pos: Vector2, tamanho: int, cor: Color, halo := Color(0, 0, 0, 0)) -> void:
+func _letreiro(
+	texto: String, pos: Vector2, tamanho: int, cor: Color,
+	halo := Color(0, 0, 0, 0), letra: Font = null
+) -> void:
+	var usada: Font = letra if letra != null else fonte
 	if halo.a > 0.001:
-		draw_string_outline(fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, int(tamanho * 0.34), halo)
+		draw_string_outline(usada, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, int(tamanho * 0.34), halo)
+	# O CONTORNO ACOMPANHA O CORPO DA LETRA, e não o tamanho pedido.
+	#
+	# Um contorno de 17% do corpo é o que dá presença a PUNCH a 144 px.
+	# Nos 22 px de um rótulo esse mesmo 17% engorda quatro pixels em cada
+	# lado de um traço que tem três de largura: o contorno come a letra e
+	# sobra a mancha. Abaixo de 34 px o contorno passa a ser fino e fixo,
+	# apenas o bastante para descolar a letra do fundo.
+	var grossura := maxi(6, int(tamanho * 0.17)) if tamanho >= 34 else maxi(3, int(tamanho * 0.11))
 	draw_string_outline(
-		fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho,
-		maxi(6, int(tamanho * 0.17)), Color(Paleta.CONTORNO, cor.a)
+		usada, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho,
+		grossura, Color(Paleta.CONTORNO, cor.a)
 	)
-	var realce := Color(cor.lightened(0.42), cor.a)
-	draw_string(fonte, pos - Vector2(0.0, tamanho * 0.055), texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, realce)
-	draw_string(fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, cor)
+	# O realce de topo também é coisa de letra grande: a 22 px ele vira
+	# uma segunda cópia deslocada meio pixel, que é a definição de borrão.
+	if tamanho >= 34:
+		var realce := Color(cor.lightened(0.42), cor.a)
+		draw_string(usada, pos - Vector2(0.0, tamanho * 0.055), texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, realce)
+	draw_string(usada, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho, cor)
 
 ## OS TRÊS PAPÉIS DE TEXTO DA TELA DE JOGO.
 ##
@@ -2819,14 +2916,19 @@ func _letreiro(texto: String, pos: Vector2, tamanho: int, cor: Color, halo := Co
 ##
 ## Todos com o mesmo contorno da abertura: é isso que "uniformiza com as
 ## iniciais" de verdade, e não só igualar o corpo da letra.
-const CORPO_ROTULO := 26
-const CORPO_APOIO := 22
+## A Saira Condensed é um terço mais estreita que a Bungee (0,474 contra
+## 0,712 de largura média na maiúscula). Essa largura devolvida é o que
+## permite subir o corpo dos dois papéis sem que nada estoure a linha: a
+## tela ganha letra maior E linha mais curta ao mesmo tempo, que é o que
+## faltava para ler de longe.
+const CORPO_ROTULO := 30
+const CORPO_APOIO := 25
 
 func _rotulo(texto: String, y: float, cor: Color) -> void:
-	_letreiro_centrado(texto, y, CORPO_ROTULO, cor)
+	_letreiro_centrado(texto, y, _corpo(CORPO_ROTULO), cor, fonte_texto)
 
 func _apoio(texto: String, y: float, cor: Color) -> void:
-	_letreiro_centrado(texto, y, CORPO_APOIO, cor)
+	_letreiro_centrado(texto, y, _corpo(CORPO_APOIO), cor, fonte_texto)
 
 ## A MARCA DA CASA, DESENHADA E NÃO ESCRITA.
 ##
@@ -2853,9 +2955,10 @@ func _marca_da_casa(y: float, altura: float, alpha := 1.0) -> void:
 ## Letreiro centrado na largura útil, sem encolher: o corpo dos rótulos é
 ## fixo de propósito, e um rótulo que não cabe é um rótulo comprido
 ## demais, não um rótulo que precisa diminuir.
-func _letreiro_centrado(texto: String, y: float, tamanho: int, cor: Color) -> void:
-	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
-	_letreiro(texto, Vector2(540.0 - medida.x * 0.5, y), tamanho, cor)
+func _letreiro_centrado(texto: String, y: float, tamanho: int, cor: Color, letra: Font = null) -> void:
+	var usada: Font = letra if letra != null else fonte
+	var medida := usada.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
+	_letreiro(texto, Vector2(540.0 - medida.x * 0.5, y), tamanho, cor, Color(0, 0, 0, 0), usada)
 
 ## Letreiro centrado numa largura, encolhendo até caber.
 func _texto_arcade(texto: String, y: float, tamanho_max: int, cor: Color, largura: float, x := MARGEM) -> void:
@@ -2865,6 +2968,6 @@ func _texto_arcade(texto: String, y: float, tamanho_max: int, cor: Color, largur
 
 func _texto_cabendo(texto: String, y: float, tamanho_max: int, cor: Color, largura: float, x := MARGEM) -> void:
 	draw_string(
-		fonte, Vector2(x, y), texto, HORIZONTAL_ALIGNMENT_CENTER, largura,
-		_tamanho_que_cabe(texto, tamanho_max, largura), cor
+		fonte_texto, Vector2(x, y), texto, HORIZONTAL_ALIGNMENT_CENTER, largura,
+		_tamanho_que_cabe(texto, _corpo(tamanho_max), largura, fonte_texto), cor
 	)

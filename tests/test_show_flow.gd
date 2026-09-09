@@ -249,6 +249,37 @@ func _test_medico_da_camera() -> void:
 	# `assign`, e não `=`: `indices` é Array[int] tipado, e atribuir um
 	# literal solto de fora deixa a lista vazia em silêncio.
 	jogo.medico.indices.assign([2])
+	jogo.medico.backend = "DSHOW"
 	jogo._fim_do_exame()
 	assert(jogo.camera_service.selected_index == 2)
+	# O back-end descoberto também é adotado: sem isso a ponte refaz a
+	# fila inteira a cada religada, e cada tentativa frustrada custa
+	# segundos justamente na hora da foto.
+	assert(jogo.camera_service.backend_preferido == "DSHOW")
 	jogo.medico.indices.clear()
+	jogo.medico.backend = ""
+
+	# O VEREDITO MUDA COM O QUE SE DESCOBRIU. Uma frase única para todos
+	# os casos ("feche o Teams") é o que fazia o operador tentar sempre a
+	# mesma coisa e concluir que o botão não funciona.
+	jogo.medico.cameras_do_windows = 0
+	assert("cabo" in jogo.medico._veredito())
+
+	jogo.medico.cameras_do_windows = 1
+	jogo.medico.privacidade = "Deny"
+	assert("PRIVACIDADE" in jogo.medico._veredito())
+
+	jogo.medico.privacidade = "Allow"
+	jogo.medico.ocupantes = "WindowsCamera, Teams"
+	assert("WindowsCamera" in jogo.medico._veredito())
+
+	jogo.medico.ocupantes = "nenhum"
+	assert("OPENCV" in jogo.medico._veredito().to_upper())
+
+	jogo.medico.cameras_do_windows = -1
+	jogo.medico.privacidade = ""
+	jogo.medico.ocupantes = ""
+
+	# Sem quadro nenhum, a idade é grande — e é ela que impede a máquina
+	# de anunciar "FOTO OK" para uma imagem congelada.
+	assert(jogo.camera_service.idade_do_quadro() > 2000)
