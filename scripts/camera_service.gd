@@ -361,6 +361,47 @@ func _bridge_frame_counter() -> int:
 func reinicios_da_ponte() -> int:
 	return _bridge_reinicios
 
+## RODA O INSTALADOR DA CÂMERA, do próprio jogo.
+##
+## Existe porque o operador do salão não é quem abre PowerShell. A
+## mensagem "instale o OpenCV" é correta e inútil para quem está na
+## frente do gabinete às onze da noite: o botão faz o que a mensagem
+## pede.
+##
+## Só no Windows — no Linux e no macOS o OpenCV entra pelo gerenciador de
+## pacotes do sistema, e um script de PowerShell ali não teria sentido.
+func instalar_dependencias() -> String:
+	if OS.get_name() != "Windows":
+		return "INSTALAÇÃO AUTOMÁTICA SÓ NO WINDOWS — VEJA docs/CAMERA.md"
+	var data_dir := "user://camera_bridge"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
+	# O .py precisa estar ao lado do .ps1: o instalador procura a ponte na
+	# própria pasta para poder sondar as câmeras no fim.
+	_materialize_bridge_script(data_dir)
+	var script := _copiar_para_disco("res://tools/instalar_camera_windows.ps1", data_dir + "/instalar_camera_windows.ps1")
+	if script.is_empty():
+		return "INSTALADOR NÃO ENCONTRADO NO PACOTE"
+	var pid := OS.create_process("powershell", PackedStringArray([
+		"-NoExit", "-ExecutionPolicy", "Bypass", "-File", script,
+	]), false)
+	if pid <= 0:
+		return "NÃO FOI POSSÍVEL ABRIR O POWERSHELL"
+	# `-NoExit` de propósito: a janela FICA ABERTA no fim. Fechando
+	# sozinha, o resultado da sondagem de câmeras — que é a informação
+	# mais útil da tela toda — passaria voando.
+	return "INSTALADOR ABERTO NUMA JANELA À PARTE — ACOMPANHE POR LÁ"
+
+func _copiar_para_disco(origem: String, destino: String) -> String:
+	var fonte := FileAccess.open(origem, FileAccess.READ)
+	if fonte == null:
+		return ""
+	var alvo := FileAccess.open(destino, FileAccess.WRITE)
+	if alvo == null:
+		return ""
+	alvo.store_string(fonte.get_as_text())
+	alvo.close()
+	return ProjectSettings.globalize_path(destino)
+
 func _materialize_bridge_script(data_dir: String) -> String:
 	# Em exportação com PCK embutido o .py não é um arquivo físico. Copiá-lo
 	# para user:// dá ao processo Python um caminho real e gravável.

@@ -95,8 +95,8 @@ const PASSOS := {
 	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
 	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
 	"amin": Rect2(570, 1124, 400, LADO_BOTAO),
-	"vol_musica": Rect2(110, 934, 400, LADO_BOTAO),
-	"vol_efeitos": Rect2(570, 934, 400, LADO_BOTAO),
+	"vol_musica": Rect2(110, 1020, 400, LADO_BOTAO),
+	"vol_efeitos": Rect2(570, 1020, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 const BOTOES_SIMPLES := {
@@ -118,7 +118,8 @@ const BOTOES_SIMPLES := {
 	"foto_teste": Rect2(670, 410, 300, 60),
 	"forcar_ponte": Rect2(110, 484, 400, 56),
 	"sondar_camera": Rect2(570, 484, 400, 56),
-	"testar_som": Rect2(300, 1046, 480, 60),
+	"instalar_camera": Rect2(110, 850, 860, 60),
+	"testar_som": Rect2(300, 1132, 480, 60),
 	# --- página DADOS
 	"zerar": Rect2(110, 850, 207, 60),
 	"zerar_stats": Rect2(327, 850, 207, 60),
@@ -140,7 +141,7 @@ const PAGINA_DO_CONTROLE := {
 	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
 	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
-	"forcar_ponte": 2, "sondar_camera": 2,
+	"forcar_ponte": 2, "sondar_camera": 2, "instalar_camera": 2,
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 }
@@ -1500,6 +1501,8 @@ func _click_central(p: Vector2) -> void:
 			"INDO DIRETO PELA PONTE PYTHON" if camera_forcar_ponte
 			else "TENTANDO O CAMINHO NATIVO PRIMEIRO"
 		)
+	elif _visivel_na_pagina("instalar_camera") and BOTOES_SIMPLES["instalar_camera"].has_point(p):
+		_show_notice(camera_service.instalar_dependencias())
 	elif _visivel_na_pagina("sondar_camera") and BOTOES_SIMPLES["sondar_camera"].has_point(p):
 		# PROCURAR DE NOVO, e não só religar: `refresh` zera a desistência
 		# e refaz a enumeração inteira. É o botão de quem acabou de
@@ -1656,6 +1659,14 @@ func _carregar() -> void:
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
 	simulacao_bancada = bool(data.get("simulacao_bancada", true))
 	simulacao_escolhida = bool(data.get("simulacao_escolhida", false))
+	# ENQUANTO O OPERADOR NÃO ESCOLHER, QUEM DECIDE É O SENSOR — e sem
+	# sensor a máquina é bancada. Ler o valor gravado e parar por aí não
+	# bastava: uma instalação que rodou uma versão anterior tem
+	# `simulacao_bancada: false` no disco, e ficava com a barra morta
+	# para sempre, esperando um MPU-6050 que ainda não existe. O `READY`
+	# do firmware desliga isto no segundo em que a placa se apresentar.
+	if not simulacao_escolhida:
+		simulacao_bancada = true
 	volume_musica = float(data.get("volume_musica", volume_musica))
 	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
@@ -2432,15 +2443,20 @@ func _central_camera() -> void:
 			836.0, 14, Paleta.AMBAR
 		)
 
-	_secao(Rect2(80, 850, 920, 290), "MESA DE SOM", Paleta.VERDE)
+	# O BOTÃO QUE FAZ O QUE A MENSAGEM PEDE. "Instale o OpenCV" é correto
+	# e inútil para quem está na frente do gabinete às onze da noite: o
+	# operador do salão não é quem abre PowerShell.
+	_botao(BOTOES_SIMPLES["instalar_camera"], "INSTALAR / CONSERTAR A CÂMERA (WINDOWS)", false, Paleta.AMBAR, 19)
+
+	_secao(Rect2(80, 936, 920, 290), "MESA DE SOM", Paleta.VERDE)
 	_stepper("vol_musica", "%+.0f dB" % volume_musica, "TRILHA", Paleta.CIANO)
 	_stepper("vol_efeitos", "%+.0f dB" % volume_efeitos, "EFEITOS E VOZ", Paleta.AMBAR)
 	_botao(BOTOES_SIMPLES["testar_som"], "TOCAR SOCO DE TESTE", false, Paleta.VERDE, 19)
 
-	_secao(Rect2(80, 1170, 920, 170), "COMO A FOTO É USADA", Paleta.AMBAR)
-	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 1236.0, 15, Paleta.TINTA_FRACA)
-	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 1262.0, 15, Paleta.TINTA_FRACA)
-	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 1306.0, 18, Paleta.CREME)
+	_secao(Rect2(80, 1256, 920, 170), "COMO A FOTO É USADA", Paleta.AMBAR)
+	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 1322.0, 15, Paleta.TINTA_FRACA)
+	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 1348.0, 15, Paleta.TINTA_FRACA)
+	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 1392.0, 18, Paleta.CREME)
 
 # ------------------------------------------------------------- DADOS
 func _central_dados() -> void:

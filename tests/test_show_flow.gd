@@ -41,6 +41,7 @@ func run() -> void:
 	_test_start_e_credito_independentes()
 	_test_timeout_devolve_credito()
 	_test_quatro_digitos()
+	_test_bancada_sem_sensor()
 
 	jogo.queue_free()
 	await process_frame
@@ -192,3 +193,32 @@ func _test_quatro_digitos() -> void:
 	jogo.displayed_score = 9999.0
 	jogo.central_aberta = false
 	jogo.queue_redraw()
+
+# ------------------------------------------- bancada sem sensor
+## A BARRA TEM DE VOLTAR SOZINHA NUMA MÁQUINA SEM SENSOR.
+##
+## Uma instalação que rodou uma versão anterior tem `simulacao_bancada:
+## false` gravado no disco. Lendo só o arquivo, ela ficava com a barra
+## morta para sempre, esperando um MPU-6050 que ainda não existe — e o
+## sintoma era "o espaço parou de funcionar", sem nada na tela explicando.
+func _test_bancada_sem_sensor() -> void:
+	# Arquivo de uma versão anterior: desligada, e sem escolha do operador.
+	jogo.simulacao_bancada = false
+	jogo.simulacao_escolhida = false
+	var disco := FileAccess.open(SettingsStore.PATH, FileAccess.WRITE)
+	disco.store_string(JSON.stringify({"simulacao_bancada": false, "mode": "credit"}))
+	disco.close()
+	jogo._carregar()
+	assert(jogo.simulacao_bancada)
+	assert(jogo._simulador_liberado())
+
+	# O sensor se apresentando desliga a chave sem ninguém pedir.
+	jogo._on_serial_line("READY,PUNCH_MPU6050,V2")
+	assert(not jogo.simulacao_bancada)
+	assert(not jogo._simulador_liberado())
+
+	# Mas a escolha do operador manda mais que o sensor.
+	jogo.simulacao_bancada = true
+	jogo.simulacao_escolhida = true
+	jogo._on_serial_line("READY,PUNCH_MPU6050,V2")
+	assert(jogo.simulacao_bancada)
