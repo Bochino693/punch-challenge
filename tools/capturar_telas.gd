@@ -35,7 +35,10 @@ func _initialize() -> void:
 		{"nome": "07_lendario", "fn": _lendario},
 		{"nome": "08_forte", "fn": _forte},
 		{"nome": "09_leve", "fn": _leve},
-		{"nome": "10_central", "fn": _central},
+		{"nome": "10_central_operacao", "fn": _central.bind(0)},
+		{"nome": "11_central_golpe", "fn": _central.bind(1)},
+		{"nome": "12_central_camera", "fn": _central.bind(2)},
+		{"nome": "13_central_dados", "fn": _central.bind(3)},
 	]
 
 func _process(_delta: float) -> bool:
@@ -129,6 +132,7 @@ func _forte() -> void:
 func _leve() -> void:
 	_resultado(1480, 1.6)
 
-func _central() -> void:
+func _central(pagina: int) -> void:
 	_preparar(GameDef.State.IDLE)
 	jogo.central_aberta = true
+	jogo.central_pagina = pagina

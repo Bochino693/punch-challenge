@@ -67,6 +67,18 @@ const RANKING_TAMANHO := 20
 # ======================================================================
 # A CENTRAL TÉCNICA, DESCRITA UMA VEZ SÓ
 # ======================================================================
+## A CENTRAL TEM PÁGINAS.
+##
+## Ela cabia numa tela só enquanto tinha modo, faixas e sensor. Com o
+## mapeamento dos botões do gabinete, a calibração, a câmera e a mesa de
+## som, passou a caber empilhando coisa por cima de coisa — e uma tela de
+## configuração com controle escondido atrás de outro é onde o técnico
+## clica errado e some com a regulagem da casa.
+##
+## Quatro páginas, cada uma com um assunto: como a máquina opera, como
+## ela mede o golpe, o que ela vê e ouve, e o que ela guardou.
+const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA", "DADOS"]
+
 ## Os retângulos dos botões NÃO são escritos à mão. Um par de − / + com o
 ## valor no meio é um "passo" (`_passo`), e é ele que decide onde ficam
 ## os dois botões e onde sobra espaço para o número. Foi um número
@@ -74,42 +86,58 @@ const RANKING_TAMANHO := 20
 ## só, o texto não tem como invadir a área de clique.
 const LADO_BOTAO := 64.0
 ## Passos: chave -> retângulo total (botões nas pontas, valor no meio).
-## NENHUM RETÂNGULO PODE ENCOSTAR NO OUTRO.
-##
-## `curva` foi acrescentada em cima de `vmin` e `vmax` (x 340–740 contra
-## 110–510 e 570–970, todos na mesma altura). Como `_click_central`
-## percorre esta tabela em ordem, o clique no γ caía primeiro em `vmin`
-## ou `vmax`: mexer na dificuldade mudava a velocidade, e a tela inteira
-## parecia não responder. Cada passo tem agora a sua própria linha.
+## NENHUM RETÂNGULO PODE ENCOSTAR NO OUTRO **DENTRO DA MESMA PÁGINA**.
 const PASSOS := {
-	"vmin": Rect2(110, 470, 400, LADO_BOTAO),
-	"vmax": Rect2(570, 470, 400, LADO_BOTAO),
-	"curva": Rect2(110, 592, 400, 58),
-	"zona": Rect2(570, 592, 400, 58),
-	"porta": Rect2(110, 1036, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1150, 400, LADO_BOTAO),
-	"amin": Rect2(570, 1150, 400, LADO_BOTAO),
+	"vmin": Rect2(110, 404, 400, LADO_BOTAO),
+	"vmax": Rect2(570, 404, 400, LADO_BOTAO),
+	"curva": Rect2(110, 526, 400, 58),
+	"zona": Rect2(570, 526, 400, 58),
+	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
+	"amin": Rect2(570, 1124, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 const BOTOES_SIMPLES := {
 	"fechar": Rect2(920, 140, 68, 64),
-	"modo_livre": Rect2(110, 318, 400, 68),
-	"modo_ficha": Rect2(570, 318, 400, 68),
-	"eixo": Rect2(620, 1036, 280, LADO_BOTAO),
-	# A câmera ganhou seção própria: estava dentro de "AÇÕES NO
-	# FIRMWARE", que é do sensor de soco e não tem nada com webcam.
-	"camera": Rect2(110, 1322, 260, 60),
-	"trocar_camera": Rect2(390, 1322, 260, 60),
-	"foto_teste": Rect2(670, 1322, 300, 60),
-	"enviar_config": Rect2(110, 1484, 400, 60),
-	"testar": Rect2(570, 1484, 400, 60),
-	"zerar": Rect2(110, 1716, 207, 60),
-	"zerar_stats": Rect2(327, 1716, 207, 60),
-	"zerar_ranking": Rect2(544, 1716, 207, 60),
-	"reconectar": Rect2(761, 1716, 209, 60),
+	# --- página OPERAÇÃO
+	"modo_livre": Rect2(110, 406, 400, 68),
+	"modo_ficha": Rect2(570, 406, 400, 68),
+	"mapear_start": Rect2(110, 620, 400, 68),
+	"mapear_credito": Rect2(570, 620, 400, 68),
+	"simulacao": Rect2(110, 1010, 400, 68),
+	# --- página GOLPE
+	"eixo": Rect2(620, 1010, 280, LADO_BOTAO),
+	"enviar_config": Rect2(110, 1300, 400, 60),
+	"testar": Rect2(570, 1300, 400, 60),
+	# --- página CÂMERA
+	"camera": Rect2(110, 410, 260, 60),
+	"trocar_camera": Rect2(390, 410, 260, 60),
+	"foto_teste": Rect2(670, 410, 300, 60),
+	# --- página DADOS
+	"zerar": Rect2(110, 850, 207, 60),
+	"zerar_stats": Rect2(327, 850, 207, 60),
+	"zerar_ranking": Rect2(544, 850, 207, 60),
+	"reconectar": Rect2(761, 850, 209, 60),
+	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
 }
+## Em que página cada controle vive. `-1` quer dizer "em todas".
+##
+## Sem esta tabela, um clique numa página acertaria o botão de outra —
+## os retângulos continuam existindo mesmo quando não estão desenhados, e
+## um botão invisível que responde é a pior espécie de defeito.
+const PAGINA_DO_CONTROLE := {
+	"fechar": -1, "padroes": -1, "salvar": -1,
+	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0, "simulacao": 0,
+	"vmin": 1, "vmax": 1, "curva": 1, "zona": 1,
+	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
+	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
+	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
+}
+## As abas, no topo da caixa.
+const ABA_LARGURA := 230.0
+const ABA_RECT := Rect2(80, 250, 920, 62)
 
 var state: GameDef.State = GameDef.State.IDLE
 var central_aberta := false
@@ -163,11 +191,45 @@ var simulacao_por_ambiente := false
 ## impacto e o MPU-6050 vê esse balanço como um segundo evento.
 var golpe_registrado := false
 ## Instante do último golpe ACEITO, para o tempo morto entre eventos.
-var ultimo_golpe_ms := 0
+##
+## Começa em NUNCA, e não em zero. `Time.get_ticks_msec()` conta desde o
+## start do processo: com zero, "faz quanto tempo desde o último golpe"
+## dava menos que o tempo morto durante o primeiro segundo de máquina
+## ligada, e o primeiro soco da manhã era recusado em silêncio.
+const NUNCA_MS := -1000000
+var ultimo_golpe_ms := NUNCA_MS
 ## O firmware avisou que o acelerômetro saturou. Fica registrado para a
 ## Central; um golpe saturado NÃO vira 9999 artificial, porque a máquina
 ## não sabe quanto ele valeu de verdade.
 var saturacao_recente := ""
+
+## OS DOIS BOTÕES DO GABINETE, mapeados e guardados.
+##
+## A placa Zero Delay se apresenta ao sistema como um controle USB
+## genérico, e o índice de cada botão muda conforme a porta, o cabo e o
+## modelo da placa. Um índice fixo no código funciona numa máquina e erra
+## na seguinte — por isso o mapeamento é feito na Central, apertando o
+## botão de verdade, e o que fica gravado é o que aquela máquina viu.
+##
+## `guid` identifica o controle; `index` é o botão; `nome` é o que o
+## sistema chama aquele controle, para o técnico reconhecer a placa.
+var botao_start := {"guid": "", "index": 6, "nome": ""}
+var botao_credito := {"guid": "", "index": 4, "nome": ""}
+## "" | "start" | "credito" — o que a Central está esperando capturar.
+var mapeando := ""
+## Contadores de teste: sobem a cada aperto reconhecido. São a prova de
+## que o mapeamento pegou; sem eles o técnico aperta o botão e não sabe
+## se o problema é a placa, o índice ou o jogo.
+var contador_start := 0
+var contador_credito := 0
+## ANTIRREPIQUE. Botão de arcade é chave mecânica e treme ao fechar: um
+## aperto vira dois ou três eventos em poucos milissegundos, e o segundo
+## viraria um crédito a mais ou um START engolindo a rodada recém-criada.
+const REPIQUE_MS := 250
+var ultimo_start_ms := NUNCA_MS
+var ultimo_credito_ms := NUNCA_MS
+## Qual página da Central está aberta.
+var central_pagina := 0
 ## Marcado quando `_carregar` converteu marcas da escala antiga. `_ready`
 ## grava logo em seguida, e é isso que torna a conversão de uma vez só.
 var _converteu_esquema := false
@@ -527,12 +589,17 @@ func _input(event: InputEvent) -> void:
 			if event.keycode == KEY_T:
 				_teste_de_golpe()
 			return
+		# TECLADO É BANCADA. Num salão os comandos entram pelos botões do
+		# gabinete ou pela serial; deixar 5/C e 1/Enter valendo sempre é
+		# deixar um teclado esquecido no armário virar crédito de graça.
 		if event.keycode in [KEY_5, KEY_C]:
-			_add_credit()
+			if _simulador_liberado():
+				_add_credit()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode in [KEY_1, KEY_ENTER, KEY_KP_ENTER]:
-			_pressionou_start()
+			if _simulador_liberado():
+				_pressionou_start()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_SPACE:
@@ -547,11 +614,8 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 
-	if event is InputEventJoypadButton and event.pressed and not central_aberta:
-		if event.is_action_pressed("input_credito"):
-			_add_credit()
-		elif event.is_action_pressed("input_start"):
-			_pressionou_start()
+	if event is InputEventJoypadButton:
+		_botao_do_gabinete(event as InputEventJoypadButton)
 		return
 
 	if central_aberta and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -566,6 +630,81 @@ func _input(event: InputEvent) -> void:
 ## do técnico, ou com `PUNCH_SIMULACAO=1` na bancada de quem desenvolve.
 func _simulador_liberado() -> bool:
 	return simulacao_bancada or central_aberta or simulacao_por_ambiente
+
+## UM APERTO NA PLACA ZERO DELAY.
+##
+## Três coisas acontecem aqui, nesta ordem: capturar um mapeamento em
+## curso, recusar repique, e só então agir. Soltar o botão nunca faz
+## nada — processar solta e aperta dobraria todo comando.
+func _botao_do_gabinete(evento: InputEventJoypadButton) -> void:
+	if not evento.pressed:
+		return
+	var nome := Input.get_joy_name(evento.device)
+	var guid := Input.get_joy_guid(evento.device)
+
+	# 1) A CENTRAL ESTÁ ESPERANDO ESTE APERTO?
+	if central_aberta and not mapeando.is_empty():
+		_gravar_botao(evento.button_index, guid, nome)
+		return
+	if central_aberta:
+		return
+
+	var agora := Time.get_ticks_msec()
+	if _combina(botao_start, evento.button_index, guid):
+		if agora - ultimo_start_ms < REPIQUE_MS:
+			return
+		ultimo_start_ms = agora
+		contador_start += 1
+		_pressionou_start()
+	elif _combina(botao_credito, evento.button_index, guid):
+		if agora - ultimo_credito_ms < REPIQUE_MS:
+			return
+		ultimo_credito_ms = agora
+		contador_credito += 1
+		_add_credit()
+
+## Grava o botão capturado no papel que a Central pediu.
+##
+## O MESMO BOTÃO NÃO PODE ASSUMIR OS DOIS PAPÉIS. Numa máquina em que
+## START e CRÉDITO fossem o mesmo aperto, cada partida consumiria uma
+## ficha e começaria junto — ou nenhuma das duas coisas aconteceria na
+## hora certa. Recusar é melhor do que aceitar e deixar a máquina
+## indefinida.
+func _gravar_botao(indice: int, guid: String, nome: String) -> void:
+	var outro := botao_credito if mapeando == "start" else botao_start
+	if _combina(outro, indice, guid):
+		_show_notice("ESSE BOTÃO JÁ É O OUTRO COMANDO — ESCOLHA OUTRO")
+		sons.play("error", -6.0)
+		return
+	var mapa := {"guid": guid, "index": indice, "nome": nome}
+	if mapeando == "start":
+		botao_start = mapa
+		contador_start = 0
+	else:
+		botao_credito = mapa
+		contador_credito = 0
+	mapeando = ""
+	sons.play("menu", -8.0)
+	_show_notice("BOTÃO %d GRAVADO EM %s" % [indice, "START" if mapa == botao_start else "CRÉDITO"])
+	_salvar()
+
+## Um aperto combina com um mapeamento quando o índice bate e o controle
+## também — ou quando ainda não há controle gravado, caso em que o índice
+## sozinho decide. É esse "ou" que faz os padrões de fábrica servirem de
+## rede antes de alguém mapear qualquer coisa.
+func _combina(mapa: Dictionary, indice: int, guid: String) -> bool:
+	if int(mapa.get("index", -1)) != indice:
+		return false
+	var esperado := str(mapa.get("guid", ""))
+	return esperado.is_empty() or esperado == guid
+
+func _mapa_de_botao(bruto: Variant, indice_padrao: int) -> Dictionary:
+	var d: Dictionary = bruto if bruto is Dictionary else {}
+	return {
+		"guid": str(d.get("guid", "")),
+		"index": int(d.get("index", indice_padrao)),
+		"nome": str(d.get("nome", "")),
+	}
 
 func _apertou_espaco() -> void:
 	## Na janela do soco, a barra de espaço CARREGA; fora dela, é START.
@@ -982,9 +1121,24 @@ func _passo_visor(chave: String) -> Rect2:
 		Vector2(r.size.x - LADO_BOTAO * 2.0 - 16.0, r.size.y)
 	)
 
+## Um controle só responde se estiver NA PÁGINA ABERTA. Os retângulos
+## continuam existindo mesmo quando não estão desenhados, e um botão
+## invisível que responde é a pior espécie de defeito: o técnico clica
+## num lugar vazio e a máquina muda de comportamento.
+func _visivel_na_pagina(chave: String) -> bool:
+	var pagina := int(PAGINA_DO_CONTROLE.get(chave, -1))
+	return pagina < 0 or pagina == central_pagina
+
 func _click_central(p: Vector2) -> void:
-	# Passos primeiro: são a maioria dos cliques.
+	# As abas primeiro: elas ficam por cima de tudo.
+	if ABA_RECT.has_point(p):
+		central_pagina = clampi(int((p.x - ABA_RECT.position.x) / ABA_LARGURA), 0, PAGINAS.size() - 1)
+		mapeando = ""
+		return
+	# Passos depois: são a maioria dos cliques.
 	for chave in PASSOS:
+		if not _visivel_na_pagina(chave):
+			continue
 		if _passo_menos(chave).has_point(p):
 			_ajustar(chave, -1)
 			_salvar()
@@ -994,54 +1148,77 @@ func _click_central(p: Vector2) -> void:
 			_salvar()
 			return
 
+	# Um clique fora de qualquer botão cancela um mapeamento em curso:
+	# quem desistiu não fica com a máquina esperando um aperto para sempre.
+	var acertou := false
+	for chave in BOTOES_SIMPLES:
+		if _visivel_na_pagina(chave) and (BOTOES_SIMPLES[chave] as Rect2).has_point(p):
+			acertou = true
+			break
+	if not acertou:
+		mapeando = ""
+		return
+
 	if BOTOES_SIMPLES["fechar"].has_point(p) or BOTOES_SIMPLES["salvar"].has_point(p):
 		_fechar_central()
 		return
+	elif _visivel_na_pagina("mapear_start") and BOTOES_SIMPLES["mapear_start"].has_point(p):
+		mapeando = "" if mapeando == "start" else "start"
+		return
+	elif _visivel_na_pagina("mapear_credito") and BOTOES_SIMPLES["mapear_credito"].has_point(p):
+		mapeando = "" if mapeando == "credito" else "credito"
+		return
+	elif _visivel_na_pagina("simulacao") and BOTOES_SIMPLES["simulacao"].has_point(p):
+		simulacao_bancada = not simulacao_bancada
+		_show_notice(
+			"SIMULAÇÃO DE BANCADA LIGADA — DESLIGUE ANTES DE ABRIR"
+			if simulacao_bancada else "SIMULAÇÃO DE BANCADA DESLIGADA"
+		)
 	elif BOTOES_SIMPLES["modo_livre"].has_point(p):
 		game_mode = "free"
 	elif BOTOES_SIMPLES["modo_ficha"].has_point(p):
 		game_mode = "credit"
-	elif BOTOES_SIMPLES["eixo"].has_point(p):
+	elif _visivel_na_pagina("eixo") and BOTOES_SIMPLES["eixo"].has_point(p):
 		var eixos := ["X", "Y", "Z"]
 		sensor_eixo = eixos[(eixos.find(sensor_eixo) + 1) % 3]
-	elif BOTOES_SIMPLES["enviar_config"].has_point(p):
+	elif _visivel_na_pagina("enviar_config") and BOTOES_SIMPLES["enviar_config"].has_point(p):
 		_enviar_config()
 		_show_notice("CONFIG ENVIADA AO ARDUINO")
-	elif BOTOES_SIMPLES["testar"].has_point(p):
+	elif _visivel_na_pagina("testar") and BOTOES_SIMPLES["testar"].has_point(p):
 		_teste_de_golpe()
-	elif BOTOES_SIMPLES["camera"].has_point(p):
+	elif _visivel_na_pagina("camera") and BOTOES_SIMPLES["camera"].has_point(p):
 		camera_enabled = not camera_enabled
 		camera_service.set_enabled(camera_enabled)
 		_show_notice(camera_service.status)
-	elif BOTOES_SIMPLES["trocar_camera"].has_point(p):
+	elif _visivel_na_pagina("trocar_camera") and BOTOES_SIMPLES["trocar_camera"].has_point(p):
 		camera_service.cycle_camera()
 		_show_notice(camera_service.status)
-	elif BOTOES_SIMPLES["foto_teste"].has_point(p):
+	elif _visivel_na_pagina("foto_teste") and BOTOES_SIMPLES["foto_teste"].has_point(p):
 		var test_path := camera_service.capture_photo()
 		if test_path.is_empty():
 			_show_notice(camera_service.status)
 		else:
 			RankingStore.delete_photo(test_path)
 			_show_notice("CAPTURA DA CÂMERA APROVADA")
-	elif BOTOES_SIMPLES["zerar"].has_point(p):
+	elif _visivel_na_pagina("zerar") and BOTOES_SIMPLES["zerar"].has_point(p):
 		if not _confirmar("contadores"):
 			return
 		credits = 0
 		plays = 0
 		_show_notice("CONTADORES ZERADOS")
-	elif BOTOES_SIMPLES["zerar_stats"].has_point(p):
+	elif _visivel_na_pagina("zerar_stats") and BOTOES_SIMPLES["zerar_stats"].has_point(p):
 		if not _confirmar("estatisticas"):
 			return
 		statistics = {}
 		_show_notice("ESTATÍSTICAS ZERADAS")
-	elif BOTOES_SIMPLES["zerar_ranking"].has_point(p):
+	elif _visivel_na_pagina("zerar_ranking") and BOTOES_SIMPLES["zerar_ranking"].has_point(p):
 		if not _confirmar("ranking"):
 			return
 		RankingStore.clear_photos(ranking)
 		ranking.clear()
 		_photo_cache.clear()
 		_show_notice("RANKING E FOTOS ZERADOS")
-	elif BOTOES_SIMPLES["reconectar"].has_point(p):
+	elif _visivel_na_pagina("reconectar") and BOTOES_SIMPLES["reconectar"].has_point(p):
 		if link != null:
 			link.close_port()
 		_tentar_conectar()
@@ -1147,6 +1324,9 @@ func _carregar() -> void:
 	sensor_raio = float(data.get("sensor_raio", sensor_raio))
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
+	simulacao_bancada = bool(data.get("simulacao_bancada", false))
+	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
+	botao_credito = _mapa_de_botao(data.get("botao_credito", {}), 4)
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
 	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
 	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
@@ -1169,6 +1349,9 @@ func _salvar() -> void:
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
 		"sensor_amin": sensor_amin,
+		"simulacao_bancada": simulacao_bancada,
+		"botao_start": botao_start,
+		"botao_credito": botao_credito,
 		"camera_enabled": camera_enabled,
 		"camera_mirrored": camera_mirrored,
 		"statistics": statistics,
@@ -1626,85 +1809,23 @@ func _draw_ranking_reveal() -> void:
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
-	# Véu sobre o jogo: a Central cobre a tela, mas o técnico continua
-	# vendo que a máquina está ligada por trás.
-	draw_rect(Rect2(Vector2.ZERO, TELA), Color("120409", 0.94))
 	var caixa := Rect2(40, 96, 1000, 1790)
-	_placa(Rect2(caixa.position + Vector2(0.0, 8.0), caixa.size), 22.0, Paleta.SOMBRA)
-	# Borda DOURADA e miolo mais claro que o fundo. Com a moldura em
-	# marinho, que neste tema é quase o preto da tela, o painel não se
-	# separava do jogo atrás e a Central parecia colada por cima.
-	_placa(caixa, 22.0, Paleta.AMBAR)
+	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
 	_placa(caixa.grow(-5.0), 19.0, Color("2b0a13"))
 	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
 	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
 	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
+	_abas_da_central()
 
-	# ---- modo de operação
-	_secao(Rect2(80, 262, 920, 138), "MODO DE OPERAÇÃO", Paleta.ROSA)
-	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
-	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
-
-	# ---- velocidade e dificuldade: é aqui que se regula a máquina
-	_secao(Rect2(80, 416, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
-	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
-	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
-	_stepper(
-		"curva", "γ %.2f" % score_exponent,
-		"CURVA  %s" % ScoreCurve.difficulty_name(score_exponent), Paleta.ROXO
-	)
-	_stepper("zona", "%.0f%%" % (score_dead_zone * 100.0), "ZONA MORTA", Paleta.ROXO)
-
-	# ---- os oito níveis: régua de leitura, não de regulagem
-	_secao(Rect2(80, 716, 920, 244), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
-	_regua_dos_niveis(Rect2(110, 776, 860, 40))
-	_texto(
-		"As faixas dos níveis são fixas. Quem decide quanta gente chega a cada uma é a curva acima.",
-		880.0, 15, Paleta.TINTA_FRACA
-	)
-
-	# ---- sensor e firmware
-	_secao(Rect2(80, 976, 920, 274), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
-	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 1010.0), 7.0, dot)
-	_texto(serial_status, 1016.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
-	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
-	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
-	_texto("EIXO DO GOLPE", 1128.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
-	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
-	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
-
-	# ---- câmera, em seção própria
-	_secao(Rect2(80, 1266, 920, 154), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
-	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
-	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
-	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
-	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
-	_texto(cam_status, 1404.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
-
-	# ---- ações no firmware
-	_secao(Rect2(80, 1436, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
-	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
-	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
-
-	# ---- ranking e diagnóstico
-	_secao(Rect2(80, 1572, 920, 214), "MELHORES DA CASA E DIAGNÓSTICO", Paleta.VERMELHO)
-	# A faixa começa ABAIXO da linha de base do título. Antes ela subia
-	# até 1508 com o título em 1512, e as células cobriam o nome da seção.
-	_lista_do_ranking(Rect2(110, 1618, 860, 42))
-	_texto(
-		telemetria if telemetria != "" else "sem telemetria ainda",
-		1684.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-	)
-	var resumo := StatisticsStore.summary(statistics)
-	_texto(
-		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
-		1706.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-	)
-	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
-	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
-	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
-	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+	match central_pagina:
+		1:
+			_central_golpe()
+		2:
+			_central_camera()
+		3:
+			_central_dados()
+		_:
+			_central_operacao()
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
@@ -1716,6 +1837,217 @@ func _draw_central() -> void:
 		"%s     Tecla T: golpe de teste  •  ESC: fecha sem sair da rodada" % Versao.curta(),
 		1872.0, 14, Paleta.TINTA_LEVE
 	)
+
+func _abas_da_central() -> void:
+	for i in range(PAGINAS.size()):
+		var r := Rect2(
+			ABA_RECT.position + Vector2(float(i) * ABA_LARGURA, 0.0),
+			Vector2(ABA_LARGURA - 6.0, ABA_RECT.size.y)
+		)
+		var atual := i == central_pagina
+		_cartao(r, Paleta.AMBAR if atual else Color("330c16"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+		_texto(
+			str(PAGINAS[i]), r.position.y + 40.0, 20,
+			Color("2b0a13") if atual else Paleta.TINTA_FRACA,
+			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+		)
+
+# ---------------------------------------------------------- OPERAÇÃO
+func _central_operacao() -> void:
+	_secao(Rect2(80, 350, 920, 138), "MODO DE OPERAÇÃO", Paleta.ROSA)
+	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
+	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
+
+	# ---- os dois botões físicos do gabinete
+	_secao(Rect2(80, 504, 920, 400), "BOTÕES DO GABINETE (ZERO DELAY)", Paleta.CIANO)
+	_texto(
+		"A placa aparece como controle USB e o índice muda de porta para porta. Mapeie aqui.",
+		578.0, 15, Paleta.TINTA_FRACA
+	)
+	_botao(
+		BOTOES_SIMPLES["mapear_start"],
+		"AGUARDANDO START" if mapeando == "start" else "MAPEAR START",
+		mapeando == "start", Paleta.VERDE, 19
+	)
+	_botao(
+		BOTOES_SIMPLES["mapear_credito"],
+		"AGUARDANDO CRÉDITO" if mapeando == "credito" else "MAPEAR CRÉDITO",
+		mapeando == "credito", Paleta.AMBAR, 19
+	)
+	_ficha_do_botao(botao_start, "START", Rect2(110, 706, 400, 150), contador_start)
+	_ficha_do_botao(botao_credito, "CRÉDITO", Rect2(570, 706, 400, 150), contador_credito)
+
+	# ---- a chave que libera a barra de espaço
+	_secao(Rect2(80, 920, 920, 200), "SIMULAÇÃO DE BANCADA", Paleta.ROXO)
+	_botao(
+		BOTOES_SIMPLES["simulacao"],
+		"LIGADA" if simulacao_bancada else "DESLIGADA",
+		simulacao_bancada, Paleta.VERMELHO if simulacao_bancada else Paleta.ROXO, 20
+	)
+	_texto(
+		"Ligada, a barra de espaço vale como soco. Serve para montar e regular a máquina —",
+		1000.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
+	)
+	_texto(
+		"num salão, é qualquer pessoa tirando 9999 sem encostar no equipamento.",
+		1024.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
+	)
+	if simulacao_bancada:
+		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1076.0, 18, Paleta.VERMELHO)
+
+	_secao(Rect2(80, 1136, 920, 130), "SALDO", Paleta.AMBAR)
+	_texto(
+		"Créditos %02d  •  partidas contadas %d  •  modo %s" % [
+			credits, plays, "livre" if game_mode == "free" else "1 ficha"
+		],
+		1210.0, 20, Paleta.CREME
+	)
+
+## A ficha de um botão mapeado: qual controle, qual índice, e um contador
+## que sobe a cada aperto. O contador é o que prova que o mapeamento
+## pegou — sem ele, o técnico aperta o botão e não sabe se o problema é a
+## placa, o índice ou o jogo.
+func _ficha_do_botao(mapa: Dictionary, titulo: String, rect: Rect2, contador: int) -> void:
+	_cartao(rect, Color("240810"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+	_texto(titulo, rect.position.y + 34.0, 20, Paleta.CREME, HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x)
+	var indice := int(mapa.get("index", -1))
+	_texto(
+		"BOTÃO %d" % indice if indice >= 0 else "NÃO MAPEADO",
+		rect.position.y + 68.0, 18,
+		Paleta.AMBAR if indice >= 0 else Paleta.VERMELHO,
+		HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x
+	)
+	var nome := str(mapa.get("nome", ""))
+	_texto(
+		nome if not nome.is_empty() else "controle não identificado",
+		rect.position.y + 98.0, 14, Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_CENTER, rect.position.x + 8.0, rect.size.x - 16.0
+	)
+	_texto(
+		"apertado %d ×" % contador, rect.position.y + 128.0, 16, Paleta.VERDE,
+		HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x
+	)
+
+# ------------------------------------------------------------- GOLPE
+func _central_golpe() -> void:
+	_secao(Rect2(80, 350, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
+	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
+	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
+	_stepper(
+		"curva", "γ %.2f" % score_exponent,
+		"CURVA  %s" % ScoreCurve.difficulty_name(score_exponent), Paleta.ROXO
+	)
+	_stepper("zona", "%.0f%%" % (score_dead_zone * 100.0), "ZONA MORTA", Paleta.ROXO)
+
+	_secao(Rect2(80, 650, 920, 260), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
+	_regua_dos_niveis(Rect2(110, 710, 860, 40))
+	_texto(
+		"As faixas dos níveis são fixas. Quem decide quanta gente chega a cada uma é a curva acima.",
+		814.0, 15, Paleta.TINTA_FRACA
+	)
+	_curva_desenhada(Rect2(110, 830, 860, 60))
+
+	_secao(Rect2(80, 926, 920, 300), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
+	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
+	draw_circle(Vector2(560, 972.0), 7.0, dot)
+	_texto(serial_status, 978.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
+	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
+	_texto("EIXO DO GOLPE", 1102.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
+	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
+
+	_secao(Rect2(80, 1252, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
+	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
+	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
+
+	_texto(
+		telemetria if telemetria != "" else "sem telemetria ainda",
+		1420.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	if not saturacao_recente.is_empty():
+		_texto(
+			"SATURAÇÃO DO SENSOR: %s — aumente a faixa do MPU-6050" % saturacao_recente,
+			1452.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		)
+
+## A CURVA DESENHADA, do jeito que ela vai pagar.
+##
+## Um expoente é um número abstrato: a diferença entre 2,80 e 3,20 só
+## existe no traço. Quem regula precisa VER o que a mudança faz antes de
+## salvar, senão regula por tentativa e erro em cima da fila do salão.
+func _curva_desenhada(rect: Rect2) -> void:
+	_cartao(rect, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+	var amostras := ScoreCurve.amostrar(hit_min_speed, hit_max_speed, score_exponent, score_dead_zone, 64)
+	if amostras.is_empty():
+		return
+	var v_max: float = (amostras[amostras.size() - 1] as Vector2).x
+	var pontos := PackedVector2Array()
+	for a in amostras:
+		var p: Vector2 = a
+		pontos.append(Vector2(
+			rect.position.x + rect.size.x * clampf(p.x / maxf(v_max, 0.01), 0.0, 1.0),
+			rect.end.y - rect.size.y * clampf(p.y / float(GameDef.SCORE_MAX), 0.0, 1.0)
+		))
+	draw_polyline(pontos, Paleta.AMBAR, 3.0, true)
+	_texto("0 m/s", rect.end.y + 20.0, 13, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, rect.position.x, rect.size.x)
+	_texto("%.0f m/s" % v_max, rect.end.y + 20.0, 13, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_RIGHT, rect.position.x, rect.size.x)
+
+# ------------------------------------------------------------ CÂMERA
+func _central_camera() -> void:
+	_secao(Rect2(80, 350, 920, 470), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
+	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
+	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
+	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
+	var previa := Rect2(340, 500, 400, 260)
+	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+	if camera_service != null and camera_service.available():
+		_draw_texture_cover(camera_service.preview_texture(), previa, 1.0, camera_mirrored)
+	else:
+		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
+	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
+	_texto(cam_status, 792.0, 16, Paleta.TINTA_FRACA)
+
+	_secao(Rect2(80, 850, 920, 200), "COMO A FOTO É USADA", Paleta.AMBAR)
+	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 916.0, 15, Paleta.TINTA_FRACA)
+	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 942.0, 15, Paleta.TINTA_FRACA)
+	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 986.0, 18, Paleta.CREME)
+
+# ------------------------------------------------------------- DADOS
+func _central_dados() -> void:
+	_secao(Rect2(80, 350, 920, 220), "MELHORES DA CASA", Paleta.VERMELHO)
+	_lista_do_ranking(Rect2(110, 410, 860, 42))
+	var resumo := StatisticsStore.summary(statistics)
+	_texto(
+		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
+		502.0, 16, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto("Recorde da casa: %04d" % _melhor(), 532.0, 18, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+
+	_secao(Rect2(80, 600, 920, 180), "DIAGNÓSTICO", Paleta.CIANO)
+	_texto(serial_status, 664.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+	_texto(
+		telemetria if telemetria != "" else "sem telemetria ainda",
+		692.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto(
+		"START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
+		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	_secao(Rect2(80, 796, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
+	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
+	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
+	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+
+## Quantas fotos existem na pasta do ranking. Serve para o técnico
+## perceber sobra de arquivo — foto sem dono é disco enchendo à toa.
+func _fotos_guardadas() -> int:
+	var dir := DirAccess.open(RankingStore.PHOTO_DIR)
+	if dir == null:
+		return 0
+	return dir.get_files().size()
 
 ## As cinco marcas em uma linha só: o técnico precisa VER o que vai
 ## apagar antes de apertar ZERAR RANKING.

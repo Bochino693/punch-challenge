@@ -12,9 +12,9 @@ extends RefCounted
 ## NUMERO em um e escreva em NOTA o que mudou. Um carimbo que não sobe
 ## mente, e um carimbo que mente é pior do que carimbo nenhum.
 
-const NUMERO := 18
+const NUMERO := 19
 const DATA := "08/09/2026"
-const NOTA := "efeitos de pancada, fontes e selo da casa"
+const NOTA := "escala 9999, oito niveis e botoes do gabinete"
 
 ## Rodapé da abertura: cabe em uma linha discreta.
 static func curta() -> String:
