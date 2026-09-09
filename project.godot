@@ -16,17 +16,11 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="Punch Challenge"
 run/main_scene="res://scenes/main.tscn"
-<<<<<<< Updated upstream
 config/features=PackedStringArray("4.4", "GL Compatibility")
 boot_splash/bg_color=Color(0.098, 0.0235, 0.051, 1)
 boot_splash/image="res://assets/branding/selo_lazer.png"
-=======
-config/features=PackedStringArray("4.6", "GL Compatibility")
-boot_splash/bg_color=Color(0.0196, 0.0314, 0.0863, 1)
-boot_splash/stretch_mode=0
-boot_splash/image="res://assets/logo_lazersport.png"
->>>>>>> Stashed changes
 config/icon="res://assets/icon.png"
+boot_splash/stretch_mode=0
 
 [display]
 
