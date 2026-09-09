@@ -754,10 +754,19 @@ func _manter_festa(_delta: float) -> void:
 	## de a máquina perder a credibilidade.
 	var nivel := ScoreTier.de(result_score)
 	var intervalo := float(nivel["festa_intervalo"])
-	if intervalo <= 0.0 or verdict_time >= 5.0 or verdict_time < proximo_fogo:
+	# A FESTA DURA O VEREDITO INTEIRO, e não cinco segundos.
+	#
+	# Ela parava em 5 s, bem no meio da revelação do ranking — e a tela
+	# mais importante da partida acontecia no silêncio visual que sobrava.
+	# Agora acompanha o veredito até o fim, e os fogos entram no intervalo
+	# do nível, que é mais espaçado do que era.
+	if intervalo <= 0.0 or verdict_time >= 9.0 or verdict_time < proximo_fogo:
 		return
 	proximo_fogo = verdict_time + intervalo
 	ImpactDirector.festa(fx, _alvo(), nivel, CORES_FESTA)
+	# CADA FOGO TEM O SEU ESTOURO. Festa muda no som antes de mudar na
+	# imagem: fogo mudo lê como enfeite de tela, não como comemoração.
+	sons.play("subgrave", -14.0)
 
 # ======================================================================
 # ENTRADA DE COMANDOS
@@ -2157,7 +2166,11 @@ func _draw_partida() -> void:
 			_cartao(Rect2(170, 460, 740, 740), Color("330c16"), Paleta.CIANO, 1.0, 4.0)
 			if pose_finished:
 				_draw_player_photo(rect, result_photo_path, 1.0)
-			elif camera_service != null and camera_service.available():
+			elif camera_service != null and camera_service.tem_imagem():
+				# `tem_imagem`, e não `available`: a segunda pergunta se a
+				# imagem é DESTE instante, e um atraso de meio segundo na
+				# ponte fazia a prévia voltar a ser o boneco com a webcam
+				# acesa na frente da pessoa.
 				_draw_texture_cover(camera_service.preview_texture(), rect, 1.0, camera_mirrored)
 			else:
 				_draw_avatar(rect, 1.0)
@@ -2563,9 +2576,14 @@ func _cor_da_posicao(posicao: int) -> Color:
 ## Quem NÃO entrou no Top 20 pula os atos 1, 3 e 4 e vai direto à tabela.
 ## Comemorar o que não aconteceu é o jeito mais rápido de a máquina
 ## perder a credibilidade.
-const ATO_ANUNCIO := 0.90
-const ATO_TABELA := 0.85
-const ATO_ASSENTA := 0.55
+## SEM PRESSA. Os tempos eram 0,90 / 0,85 / 0,55 — dois segundos e pouco
+## para anunciar, montar a tabela e assentar a linha. Cabia, mas passava
+## rápido demais para ser vivido: quem entrou no Top 20 mal via acontecer.
+## Um segundo a mais em cada ato não atrasa a fila (o veredito fica doze
+## segundos na tela de qualquer jeito) e é a diferença entre ver e ler.
+const ATO_ANUNCIO := 1.45
+const ATO_TABELA := 1.20
+const ATO_ASSENTA := 0.80
 
 func _tempo_do_ranking() -> float:
 	return maxf(0.0, verdict_time - 2.5)
@@ -2945,7 +2963,7 @@ func _central_camera() -> void:
 	_botao(BOTOES_SIMPLES["sondar_camera"], "PROCURAR CÂMERA DE NOVO", false, Paleta.CIANO, 16)
 	var previa := Rect2(340, 556, 400, 220)
 	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
-	if camera_service != null and camera_service.available():
+	if camera_service != null and camera_service.tem_imagem():
 		_draw_texture_cover(camera_service.preview_texture(), previa, 1.0, camera_mirrored)
 	else:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)

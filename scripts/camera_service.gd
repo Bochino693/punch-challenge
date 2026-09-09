@@ -182,7 +182,15 @@ func _supervisionar(_delta: float) -> void:
 	_vigiar_ponte()
 	if _bridge_desistiu:
 		estado = Estado.PARADA
-	elif _bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500:
+	# QUATRO SEGUNDOS PARA CONTINUAR ACESA, dois e meio para a foto.
+	#
+	# São duas perguntas diferentes e elas tinham o mesmo prazo. A foto
+	# exige um quadro de agora, e dois segundos e meio é generoso para
+	# isso. Mas o ESTADO com o mesmo prazo fazia a câmera "desligar" a
+	# cada engasgo da webcam — e desligar o estado trava a contagem
+	# regressiva, que é como o atraso de meio segundo virava uma rodada
+	# inteira esperando.
+	elif _bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 4000:
 		estado = Estado.ACESA
 	else:
 		estado = Estado.SUBINDO
@@ -572,6 +580,26 @@ func available() -> bool:
 	if _feed != null:
 		return _native_ok
 	return _bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500
+
+## HÁ IMAGEM PARA MOSTRAR? — pergunta diferente de `available()`.
+##
+## `available()` responde "a imagem é de agora?", e serve para decidir se
+## vale tirar foto. Para decidir o que DESENHAR ela é a pergunta errada,
+## e era por isso que a prévia voltava a ser o boneco marrom no começo de
+## cada rodada: bastava a ponte atrasar meio segundo além dos dois e meio
+## — trocando de exposição, ou logo depois de a foto anterior ter sido
+## salva — para a tela concluir que não havia câmera e devolver o
+## desenho, com a webcam acesa na frente da pessoa.
+##
+## Enquanto o processo da ponte está de pé e já houve um quadro, há
+## imagem para mostrar. Um quadro parado por um instante é infinitamente
+## melhor do que um boneco: ele é a cara de quem está ali.
+func tem_imagem() -> bool:
+	if not enabled:
+		return false
+	if _feed != null:
+		return _native_ok
+	return _bridge_texture != null and _bridge_pid > 0
 
 func camera_count() -> int:
 	return CameraServer.get_feed_count()

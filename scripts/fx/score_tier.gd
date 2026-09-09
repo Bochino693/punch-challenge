@@ -76,7 +76,7 @@ const NIVEIS := [
 		"ondas": 3, "onda_raio": 980.0,
 		"faiscas": 54, "brasas": 110, "raios": 12, "estilhacos": 0, "chuva": 30,
 		"poeira": 0, "rachaduras": true, "tunel": false, "palco": false,
-		"festa_intervalo": 0.90,
+		"festa_intervalo": 1.15,
 	},
 	{
 		"id": "PESO", "min": 9000, "max": 9699,
@@ -87,7 +87,7 @@ const NIVEIS := [
 		"ondas": 3, "onda_raio": 1100.0,
 		"faiscas": 64, "brasas": 150, "raios": 18, "estilhacos": 0, "chuva": 55,
 		"poeira": 0, "rachaduras": true, "tunel": true, "palco": false,
-		"festa_intervalo": 0.65,
+		"festa_intervalo": 0.90,
 	},
 	{
 		"id": "LENDARIO", "min": 9700, "max": 9998,
@@ -98,7 +98,7 @@ const NIVEIS := [
 		"ondas": 4, "onda_raio": 1240.0,
 		"faiscas": 80, "brasas": 190, "raios": 26, "estilhacos": 0, "chuva": 80,
 		"poeira": 0, "rachaduras": true, "tunel": true, "palco": true,
-		"festa_intervalo": 0.50,
+		"festa_intervalo": 0.70,
 	},
 	{
 		"id": "PERFEITO", "min": 9999, "max": 9999,
@@ -109,7 +109,7 @@ const NIVEIS := [
 		"ondas": 5, "onda_raio": 1400.0,
 		"faiscas": 110, "brasas": 260, "raios": 40, "estilhacos": 0, "chuva": 120,
 		"poeira": 0, "rachaduras": true, "tunel": true, "palco": true,
-		"festa_intervalo": 0.38,
+		"festa_intervalo": 0.55,
 	},
 ]
 

@@ -447,6 +447,17 @@ func _test_camera_acesa_nao_apaga() -> void:
 	)
 	camera._last_frame_ms = Time.get_ticks_msec()
 	assert(camera.pronta())
+	assert(camera.tem_imagem())
+
+	# QUADRO ATRASADO AINDA É IMAGEM. `available()` fica falso -- e deve
+	# ficar, porque a foto quer um quadro de agora --, mas a PRÉVIA
+	# continua mostrando a cara de quem está ali. Era por confundir as
+	# duas perguntas que a tela voltava ao boneco marrom no começo de
+	# cada rodada.
+	camera._last_frame_ms = Time.get_ticks_msec() - 4000
+	assert(not camera.available())
+	assert(camera.tem_imagem())
+	camera._last_frame_ms = Time.get_ticks_msec()
 
 	# UM PEDIDO DE ABERTURA NÃO DERRUBA O QUE JÁ ESTÁ ACESO. Era daqui
 	# que vinha o acende-e-apaga: várias origens pediam "atualize" o

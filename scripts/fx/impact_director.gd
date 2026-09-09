@@ -60,13 +60,50 @@ static func golpe(fx: PunchFX, alvo: Vector2, nivel: Dictionary, cores: Array) -
 ## Só os níveis com `festa_intervalo` acima de zero comemoram: um impacto
 ## leve que ficasse soltando brasa por cinco segundos diria à pessoa que
 ## ela mandou bem, e ela não mandou.
+## OS LUGARES DE ONDE UM FOGO DE ARTIFÍCIO ESTOURA.
+##
+## Eram sorteados: `randf_range(180, 900) x randf_range(300, 1100)`, um
+## ponto qualquer da tela a cada estouro. Sorteio é o contrário de
+## composição — um deles caía em cima do placar, o seguinte na borda, o
+## terceiro no meio do nome do nível, e o conjunto lia como defeito e não
+## como festa. Um show de fogos tem RITMO E LUGAR: os tiros se alternam,
+## sobem, e explodem numa faixa de céu, sempre acima do que se está
+## lendo.
+##
+## Sete pontos fixos, percorridos em ordem trocada de propósito — nunca
+## dois seguidos do mesmo lado, e nenhum deles em cima do placar, que
+## fica no meio da tela.
+const CEU := [
+	Vector2(210.0, 430.0),
+	Vector2(870.0, 330.0),
+	Vector2(410.0, 250.0),
+	Vector2(930.0, 560.0),
+	Vector2(150.0, 300.0),
+	Vector2(680.0, 400.0),
+	Vector2(540.0, 210.0),
+]
+static var _proximo_ponto := 0
+
 static func festa(fx: PunchFX, alvo: Vector2, nivel: Dictionary, cores: Array) -> void:
 	var cor: Color = nivel["cor"]
-	var ponto := Vector2(randf_range(180.0, 900.0), randf_range(300.0, 1100.0))
-	fx.onda(ponto, 6.0, randf_range(150.0, 280.0), Color(cor, 0.5), 6.0, 0.5)
-	fx.explosao(ponto, 18 + int(nivel["raios"]), cores, 780.0)
+	var ponto: Vector2 = CEU[_proximo_ponto % CEU.size()]
+	_proximo_ponto += 1
+	# Um empurrãozinho aleatório em volta do ponto fixo: composto não é
+	# mecânico, e dois estouros exatamente no mesmo pixel denunciam a
+	# tabela.
+	ponto += Vector2(randf_range(-40.0, 40.0), randf_range(-30.0, 30.0))
+
+	# O ESTOURO, EM TRÊS CAMADAS E MAIS DEVAGAR.
+	#
+	# A onda antiga vivia meio segundo e as fagulhas saíam a 780 px/s:
+	# nesse ritmo o fogo nasce e morre antes de o olho chegar nele, e o
+	# que se vê é um piscar. Um fogo de artifício ABRE, fica um instante
+	# no ar e cai — quase dois segundos, do estouro à última fagulha.
+	fx.onda(ponto, 6.0, randf_range(200.0, 330.0), Color(Paleta.CREME, 0.55), 7.0, 0.85)
+	fx.onda(ponto, 4.0, randf_range(150.0, 260.0), Color(cor, 0.45), 5.0, 1.05)
+	fx.explosao(ponto, 14 + int(nivel["raios"]), cores, 430.0)
+	fx.faiscas(ponto, 10, Paleta.AMBAR, 300.0)
 	if bool(nivel["palco"]):
-		fx.raios(alvo, 4, Paleta.AMBAR, 620.0)
 		fx.chuva_de_brasas(1080.0, 3, cores)
 
 # ======================================================================
