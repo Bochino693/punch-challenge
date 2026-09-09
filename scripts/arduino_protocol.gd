@@ -34,6 +34,17 @@ static func parse(line: String) -> Dictionary:
 			return {"type": "CALIBRATED", "offsets": offs}
 		"PONG":
 			return {"type": "PONG"}
+		"PINS":
+			# PINS,<start>,<credito> — 1 é APERTADO. O estado cru dos dois
+			# pinos, para a Central mostrar ao vivo: se o número não muda
+			# quando o botão é apertado, o problema é antes do firmware.
+			if parts.size() != 3:
+				return {"type": ""}
+			return {
+				"type": "PINS",
+				"start": parts[1].strip_edges() == "1",
+				"credit": parts[2].strip_edges() == "1",
+			}
 		"BUTTON":
 			if parts.size() != 2:
 				return {"type": ""}

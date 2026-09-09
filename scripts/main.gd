@@ -332,6 +332,10 @@ var portas_visiveis: PackedStringArray = []
 ## O MPU-6050 se apresentou nesta sessão? Separado de "a placa
 ## respondeu": desde que o firmware deixou de travar sem sensor, as duas
 ## coisas passaram a ser independentes.
+## O estado CRU dos dois pinos, como a placa os lê agora. Não é "o jogo
+## aceitou o aperto": é o fio.
+var pino_start := false
+var pino_credito := false
 var sensor_presente := false
 var serial_start := 0
 var serial_credito := 0
@@ -1501,6 +1505,9 @@ func _on_serial_line(line: String) -> void:
 			# existe: o `OK,MPU` do firmware, ou o primeiro golpe medido.
 			sensor_presente = false
 			_enviar_config()
+		"PINS":
+			pino_start = bool(msg["start"])
+			pino_credito = bool(msg["credit"])
 		"PONG":
 			if not porta_atual.is_empty() and "CONECTADO" not in serial_status:
 				serial_status = "CONECTADO %s" % porta_atual
@@ -1965,13 +1972,44 @@ func _ajustar(chave: String, direcao: int) -> void:
 			sensor_amin = clampf(sensor_amin + direcao * 0.5, 0.5, 15.0)
 	_aplicar_faixas()
 
-func _girar_porta(direcao: int) -> void:
+## AS PORTAS QUE SE PODE FIXAR — e não só as que estão à vista.
+##
+## A lista era só `portas_visiveis`, e isso tornava a opção inútil
+## justamente quando ela é mais necessária: com a placa desligada ou o
+## driver ainda sem carregar, a COM do Nano não aparece, e não havia como
+## deixá-la escolhida ESPERANDO a placa chegar. Fixar uma porta é dizer
+## "é aqui que ela vai estar" — uma decisão sobre o futuro, não sobre o
+## presente.
+##
+## No Windows entram COM1 a COM12 sempre; no Linux e no macOS a
+## enumeração é confiável e a lista real basta.
+func _opcoes_de_porta() -> PackedStringArray:
 	var opcoes := PackedStringArray(["AUTO"])
-	opcoes.append_array(portas_visiveis)
+	if OS.get_name() == "Windows":
+		for i in range(1, 13):
+			opcoes.append("COM%d" % i)
+	for porta in portas_visiveis:
+		if not opcoes.has(porta):
+			opcoes.append(porta)
+	# A porta guardada entra na lista mesmo que hoje ninguém a veja: sem
+	# isso, abrir a Central com a placa fora do ar apagaria a escolha.
+	if not porta_configurada.is_empty() and not opcoes.has(porta_configurada):
+		opcoes.append(porta_configurada)
+	return opcoes
+
+func _girar_porta(direcao: int) -> void:
+	var opcoes := _opcoes_de_porta()
 	var atual := opcoes.find(porta_configurada if not porta_configurada.is_empty() else "AUTO")
+	if atual < 0:
+		atual = 0
 	atual = (atual + direcao + opcoes.size()) % opcoes.size()
 	var escolha := opcoes[atual]
 	porta_configurada = "" if escolha == "AUTO" else escolha
+	# Trocar a porta à mão vale agora, não na próxima varredura.
+	if link != null and link.is_open():
+		link.close_port()
+	proxima_tentativa = animation_time
+	_porta_da_vez = 0
 
 func _show_notice(message: String) -> void:
 	notice = message
@@ -3101,7 +3139,12 @@ func _central_golpe() -> void:
 	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
 	draw_circle(Vector2(560, 972.0), 7.0, dot, true, -1.0, true)
 	_texto(serial_status, 978.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
-	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
+	_stepper(
+		"porta",
+		porta_configurada if not porta_configurada.is_empty() else "AUTO",
+		"PORTA SERIAL — FIXA" if not porta_configurada.is_empty() else "PORTA SERIAL — AUTOMÁTICA",
+		Paleta.CIANO
+	)
 	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
 	_texto("EIXO DO GOLPE", 1102.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
 	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
@@ -3251,17 +3294,32 @@ func _central_dados() -> void:
 		"Zero Delay:  START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
 		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	# APERTE O BOTÃO E OLHE ESTE NÚMERO. Se ele sobe, o fio, o pino e a
-	# placa estão certos e o problema é adiante; se não sobe, é antes.
+	# APERTE O BOTÃO E OLHE ESTES DOIS NÚMEROS.
+	#
+	# O primeiro é o pino CRU, como a placa o lê agora — o fio. O segundo
+	# é quantos apertos o jogo aceitou. "O botão não funciona" tem quatro
+	# causas com o mesmo sintoma: fio solto, pino errado, placa muda, ou o
+	# jogo ignorando. Estas duas linhas separam as quatro em dez segundos:
+	# pino que não muda é problema ANTES do firmware, e aí não adianta
+	# mexer em código.
+	_texto(
+		"pinos agora:  D2 START %s  •  D3 CRÉDITO %s" % [
+			"APERTADO" if pino_start else "solto",
+			"APERTADO" if pino_credito else "solto",
+		],
+		748.0, 17,
+		Paleta.VERDE if (pino_start or pino_credito) else Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
 	_texto(
 		"Arduino (D2/D3):  START %d apertos  •  CRÉDITO %d apertos" % [serial_start, serial_credito],
-		748.0, 17,
+		776.0, 17,
 		Paleta.VERDE if (serial_start + serial_credito) > 0 else Paleta.TINTA_LEVE,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
 		"portas vistas: %s" % (", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "nenhuma"),
-		776.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		832.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	# AS DUAS PERGUNTAS, SEPARADAS. "A placa respondeu" e "o sensor
 	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
@@ -3269,7 +3327,7 @@ func _central_dados() -> void:
 	# se ele deve olhar o cabo USB ou os fios do I2C.
 	_texto(
 		"sensor MPU-6050: %s" % ("presente" if sensor_presente else "NÃO ENCONTRADO — confira SDA=A4, SCL=A5, VCC e GND"),
-		804.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,
+		860.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 

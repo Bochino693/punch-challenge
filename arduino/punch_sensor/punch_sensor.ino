@@ -5,7 +5,7 @@
   Botoes: D2 = START, D3 = CREDIT (liga no GND; INPUT_PULLUP interno).
 
   PROTOCOLO SERIAL (115200 bps, uma linha por mensagem, campos com virgula):
-    Enviados:  READY / CALIBRATING / CALIBRATED / PONG / BUTTON /
+    Enviados:  READY / CALIBRATING / CALIBRATED / PONG / BUTTON / PINS /
                TELEMETRY / HIT / SATURATION / ERROR / OK
     Recebidos: PING / RESET / TEST / CALIBRATE / LEDS,permil /
                CONFIG,eixo,raio,vmin,amin[,vmax]
@@ -129,6 +129,7 @@ bool mpuVivo();
 bool mpuResponde(uint8_t endereco);
 bool ligarMpu();
 void insistirNoMpu();
+void enviarPinos();
 void escreverReg(uint8_t reg, uint8_t valor);
 
 /*  A PLACA FUNCIONA COM OU SEM O SENSOR.
@@ -412,6 +413,28 @@ void processarAmostra() {
   Serial.print(duracao);
   Serial.print(',');
   Serial.println(eixoMedicao);
+}
+
+/*  O ESTADO CRU DOS DOIS PINOS, QUATRO VEZES POR SEGUNDO.
+
+    "O botao nao funciona" tem quatro causas possiveis e o mesmo sintoma:
+    fio solto, pino errado, placa muda, ou o jogo ignorando o aperto.
+    Discutir isso por telefone e impossivel; ver o pino na tela resolve em
+    dez segundos.
+
+    `PINS,1,0` quer dizer START apertado, CREDITO solto. Com INPUT_PULLUP
+    o pino em repouso le ALTO e o aperto o leva ao terra, entao o valor
+    aqui ja vai invertido: 1 e APERTADO, que e o que a pessoa espera ler.
+
+    Isto e independente da deteccao de aperto e do tempo morto: e o pino,
+    cru. Se este numero nao muda quando o botao e apertado, o problema e
+    ANTES do firmware -- e ai nao adianta mexer em codigo.
+*/
+void enviarPinos() {
+  Serial.print(F("PINS,"));
+  Serial.print(digitalRead(PINO_BOTAO_START) == LOW ? 1 : 0);
+  Serial.print(',');
+  Serial.println(digitalRead(PINO_BOTAO_CREDIT) == LOW ? 1 : 0);
 }
 
 // ---------------------------------------------------------------- botoes
@@ -747,6 +770,7 @@ void loop() {
   if (millis() - ultimaTelemetriaMs >= TELEMETRIA_MS) {
     ultimaTelemetriaMs = millis();
     enviarTelemetria();
+    enviarPinos();
   }
   atualizarFitas();
 }

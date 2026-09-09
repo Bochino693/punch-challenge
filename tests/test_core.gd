@@ -32,6 +32,16 @@ func _initialize() -> void:
 	assert(ArduinoProtocol.build_leds(-3.0) == "LEDS,0")
 	assert(ArduinoProtocol.build_leds(9.0) == "LEDS,1000")
 
+	# ------------------------------------------ o estado cru dos pinos
+	# 1 e APERTADO: com INPUT_PULLUP o pino em repouso le ALTO, e o
+	# firmware ja manda invertido para o numero significar o que a pessoa
+	# espera ler.
+	var pinos := ArduinoProtocol.parse("PINS,1,0")
+	assert(str(pinos["type"]) == "PINS")
+	assert(bool(pinos["start"]))
+	assert(not bool(pinos["credit"]))
+	assert(str(ArduinoProtocol.parse("PINS,1")["type"]) == "")
+
 	print("CORE_TESTS_OK")
 	quit(0)
 

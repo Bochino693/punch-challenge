@@ -217,8 +217,16 @@ func _perguntar_ao_windows() -> void:
 	_dizer("Perguntando ao Windows...")
 	var acao := "liberar" if _instalar else "listar"
 	var saida: Array = []
+	# O POWERSHELL É MANDADO A FALAR UTF-8 ANTES DE QUALQUER COISA.
+	#
+	# Por padrão ele escreve na página de código do console — CP-850 num
+	# Windows em português —, e cada acento chega aqui como byte solto.
+	# `OutputEncoding = UTF8` na frente do comando resolve na origem, que
+	# é sempre melhor do que limpar o estrago depois.
 	var codigo := OS.execute("powershell", PackedStringArray([
-		"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", _caminho_inspetor, "-Acao", acao,
+		"-NoProfile", "-ExecutionPolicy", "Bypass",
+		"-Command",
+		"[Console]::OutputEncoding=[Text.Encoding]::UTF8; & '%s' -Acao %s" % [_caminho_inspetor, acao],
 	]), saida, true)
 	if codigo != 0:
 		_dizer("O PowerShell não respondeu (código %d)." % codigo)
@@ -296,11 +304,42 @@ func _rodar(exe: String, args: PackedStringArray) -> int:
 ## para fora justamente o que interessa.
 const RUIDO := ["[ WARN", "[ERROR", "[INFO", "global cap", "VIDEOIO", "WARNING:"]
 
+## O TEXTO QUE VEM DE FORA NÃO É UTF-8 — e é por isso que ele saía torto.
+##
+## O console do Windows em português não fala UTF-8: ele fala CP-850 ou
+## CP-1252. Quando o `pip`, o PowerShell ou o próprio Python escrevem uma
+## mensagem com acento, os bytes que chegam aqui não formam UTF-8 válido,
+## e o Godot os transforma em caractere de substituição — aquele losango
+## com uma interrogação, ou um símbolo qualquer no lugar do acento. O
+## relatório da Central, que existe justamente para ser lido, vira sopa
+## de letra.
+##
+## Não dá para "consertar" o acento depois de perdido: os bytes já vieram
+## errados. O que dá, e é o que importa numa tela de diagnóstico, é não
+## deixar lixo aparecer. Caractere que não seja legível é trocado por um
+## espaço, e a frase continua legível mesmo sem o acento — "instalacao"
+## em vez de "instala??o" é infinitamente melhor do que qualquer um dos
+## dois pareceres.
+const SUBSTITUICAO := 0xFFFD
+
+static func _legivel(bruta: String) -> String:
+	var saida := ""
+	for i in range(bruta.length()):
+		var c := bruta.unicode_at(i)
+		if c == SUBSTITUICAO or c < 32:
+			# Caractere perdido na tradução, ou controle: vira espaço.
+			saida += " " if c != 9 else "  "
+		elif c < 127 or c > 160:
+			saida += String.chr(c)
+		else:
+			saida += " "
+	return saida
+
 func _linhas_de(saida: Array) -> Array:
 	var fora: Array = []
 	for bloco in saida:
 		for linha in str(bloco).split("\n"):
-			var limpa := str(linha).strip_edges()
+			var limpa := _legivel(str(linha)).strip_edges()
 			if limpa.is_empty():
 				continue
 			var ruidosa := false

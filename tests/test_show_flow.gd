@@ -49,6 +49,7 @@ func run() -> void:
 	_test_contagem_espera_a_camera()
 	_test_laco_de_atracao()
 	_test_teto_de_efeitos()
+	_test_porta_fixa()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -268,6 +269,16 @@ func _test_medico_da_camera() -> void:
 	])
 	assert(limpas.size() == 1)
 	assert(str(limpas[0]) == "Python 3.12.3")
+
+	# TEXTO DE FORA NÃO É UTF-8. O console do Windows em português fala
+	# CP-850, e o acento chega aqui como caractere perdido. O relatório é
+	# para ser LIDO: lixo vira espaço, e a frase sobrevive sem o acento.
+	var torta: Array = jogo.medico._linhas_de([
+		"instala%s%so concluida" % [String.chr(0xFFFD), String.chr(0xFFFD)],
+	])
+	assert(torta.size() == 1)
+	assert(String.chr(0xFFFD) not in str(torta[0]))
+	assert("concluida" in str(torta[0]))
 
 	# Achou câmera: a máquina adota o índice e reabre.
 	jogo.camera_service.selected_index = 0
@@ -627,3 +638,32 @@ func _test_teto_de_efeitos() -> void:
 	d.teto = antes
 	d.qualidade = 1.0
 	d.aplicar_teto()
+
+# ------------------------------------------- fixar a porta serial
+func _test_porta_fixa() -> void:
+	var antes: String = jogo.porta_configurada
+	jogo.porta_configurada = ""
+	jogo.portas_visiveis = PackedStringArray()
+
+	# DA PARA FIXAR UMA PORTA QUE NAO ESTA A VISTA. Era o contrario, e
+	# isso tornava a opcao inutil justamente quando ela e necessaria: com
+	# a placa desligada, a COM do Nano nao aparece na lista.
+	var opcoes: PackedStringArray = jogo._opcoes_de_porta()
+	assert(str(opcoes[0]) == "AUTO")
+	if OS.get_name() == "Windows":
+		assert(opcoes.has("COM5"))
+
+	# A escolha guardada sobrevive mesmo sem ninguem ver a porta hoje.
+	jogo.porta_configurada = "COM9"
+	jogo.portas_visiveis = PackedStringArray(["COM3"])
+	assert(jogo._opcoes_de_porta().has("COM9"))
+	assert(jogo._opcoes_de_porta().has("COM3"))
+
+	# E ela vai e volta na roda sem sair da lista.
+	jogo.porta_configurada = ""
+	jogo._girar_porta(1)
+	assert(not jogo.porta_configurada.is_empty())
+	jogo._girar_porta(-1)
+	assert(jogo.porta_configurada.is_empty())
+
+	jogo.porta_configurada = antes
