@@ -21,6 +21,14 @@ var _bridge_digest := 0
 var _last_frame_ms := 0
 var _bridge_started_ms := 0
 var _next_bridge_poll_ms := 0
+## O CONTADOR DE QUADROS QUE A PONTE PUBLICA. Parado quer dizer imagem
+## velha; a data de modificação do arquivo não serve para isso, porque
+## tem resolução de um segundo em vários sistemas de arquivos.
+var _bridge_contador := -1
+var _bridge_contador_ms := 0
+## Quantas vezes a ponte precisou ser ressuscitada. Aparece na Central:
+## uma ponte que reinicia sozinha o tempo todo é cabo ruim, não software.
+var _bridge_reinicios := 0
 ## Vigia do caminho nativo: quando o feed foi ativado e se ele já provou
 ## que entrega quadro.
 var _native_started_ms := 0
@@ -52,12 +60,41 @@ func _process(_delta: float) -> void:
 	var now := Time.get_ticks_msec()
 	if now < _next_bridge_poll_ms:
 		return
-	_next_bridge_poll_ms = now + 100
+	# QUINZE VEZES POR SEGUNDO, que é a taxa em que a ponte publica.
+	# Cem milissegundos deixavam a prévia em dez quadros e a pose parecia
+	# travada justamente quando a pessoa está se ajeitando na frente da
+	# câmera.
+	_next_bridge_poll_ms = now + 66
 	if not OS.is_process_running(_bridge_pid):
+		# O PROCESSO MORREU: ressuscita. Antes a máquina só anunciava
+		# "desconectada" e ficava assim até alguém reiniciar o jogo — num
+		# salão, isso é a noite inteira sem foto no ranking.
 		_bridge_texture = null
 		_last_image = null
-		status = "CÂMERA DESCONECTADA"
+		_bridge_pid = -1
+		_bridge_reinicios += 1
+		status = "PONTE CAIU — RELIGANDO (%d)" % _bridge_reinicios
+		_start_bridge()
 		return
+
+	# O CONTADOR VEM PRIMEIRO. Ler o estado é ler dezenas de bytes; ler o
+	# JPEG e calcular o resumo dele é ler dezenas de milhares. Sem
+	# quadro novo, não há por que tocar na imagem.
+	var contador := _bridge_frame_counter()
+	if contador >= 0 and contador == _bridge_contador:
+		if now - _bridge_contador_ms > 3000 and _bridge_texture != null:
+			# IMAGEM CONGELADA COM O PROCESSO VIVO. Acontece quando a
+			# webcam trava sem devolver erro ao OpenCV: a ponte fica
+			# publicando o mesmo quadro para sempre, e a prévia mostra
+			# uma foto antiga como se fosse ao vivo.
+			status = "IMAGEM CONGELADA — RELIGANDO A PONTE"
+			_bridge_reinicios += 1
+			_matar_ponte()
+			_start_bridge()
+		return
+	if contador >= 0:
+		_bridge_contador = contador
+		_bridge_contador_ms = now
 	var bytes := FileAccess.get_file_as_bytes(_bridge_path) if FileAccess.file_exists(_bridge_path) else PackedByteArray()
 	var digest := hash(bytes)
 	if not bytes.is_empty() and digest != _bridge_digest:
@@ -99,12 +136,27 @@ func _vigiar_nativa() -> void:
 		status = "CÂMERA NATIVA MUDA — TENTANDO A PONTE"
 		_start_bridge()
 
+## Acorda o servidor de câmeras do Godot. Existe como função própria
+## porque a 4.6 exige isso e as versões anteriores não têm o método:
+## chamar direto quebraria o jogo em qualquer instalação mais antiga.
+func _acordar_servidor() -> void:
+	if CameraServer.has_method("set_monitoring_feeds"):
+		CameraServer.call("set_monitoring_feeds", true)
+
 func refresh() -> void:
 	_stop_feed()
 	_native_ok = false
 	if not enabled:
 		status = "CÂMERA DESATIVADA"
 		return
+	# O GODOT 4.6 SÓ ENUMERA CÂMERAS SOB PEDIDO.
+	#
+	# Até a 4.5 `CameraServer.feeds()` já vinha preenchido; na 4.6 o
+	# servidor começa dormindo e responde
+	# "CameraServer is not actively monitoring feeds" — a lista volta
+	# vazia e a máquina conclui, errado, que não há câmera nenhuma.
+	# Ligar o monitoramento é barato e idempotente.
+	_acordar_servidor()
 	var feeds := CameraServer.feeds()
 	if feeds.is_empty():
 		# A PONTE NÃO É MAIS SÓ DO WINDOWS. Ela é a reserva para QUALQUER
@@ -140,6 +192,14 @@ func set_enabled(value: bool) -> void:
 	refresh()
 
 func cycle_camera() -> void:
+	# O GODOT 4.6 SÓ ENUMERA CÂMERAS SOB PEDIDO.
+	#
+	# Até a 4.5 `CameraServer.feeds()` já vinha preenchido; na 4.6 o
+	# servidor começa dormindo e responde
+	# "CameraServer is not actively monitoring feeds" — a lista volta
+	# vazia e a máquina conclui, errado, que não há câmera nenhuma.
+	# Ligar o monitoramento é barato e idempotente.
+	_acordar_servidor()
 	var feeds := CameraServer.feeds()
 	if feeds.is_empty():
 		# Sem feed nativo, quem troca de câmera é a ponte: os índices
@@ -196,14 +256,25 @@ func _stop_feed() -> void:
 		_feed.set_active(false)
 	_feed = null
 	_texture = null
+	_matar_ponte()
+	_native_ok = false
+
+## Derruba o processo da ponte e esquece tudo o que veio dele.
+##
+## SEMPRE por aqui, e nunca com um `OS.kill` solto: um Python órfão
+## segurando a webcam faz a próxima ponte não conseguir abrir a câmera, e
+## o sintoma aparece como "câmera não funciona" numa máquina em que a
+## câmera está perfeita.
+func _matar_ponte() -> void:
 	if _bridge_pid > 0:
 		OS.kill(_bridge_pid)
 	_bridge_pid = -1
 	_bridge_texture = null
 	_last_image = null
 	_bridge_digest = 0
+	_bridge_contador = -1
+	_bridge_contador_ms = 0
 	_last_frame_ms = 0
-	_native_ok = false
 
 func _start_bridge() -> void:
 	if _bridge_pid > 0:
@@ -233,13 +304,32 @@ func _start_bridge() -> void:
 	_bridge_started_ms = Time.get_ticks_msec()
 	status = "INICIANDO PONTE DE CÂMERA…"
 
-## Lê a linha de estado que a ponte grava ao lado do JPEG.
-func _bridge_status_file() -> String:
+## A linha de estado que a ponte grava ao lado do JPEG, no formato
+## `TEXTO|contador|epoch_ms`.
+func _bridge_status_line() -> String:
 	var caminho := _bridge_path.get_base_dir() + "/estado.txt"
 	if not FileAccess.file_exists(caminho):
+		return ""
+	return FileAccess.get_file_as_string(caminho).strip_edges()
+
+func _bridge_status_file() -> String:
+	var linha := _bridge_status_line()
+	if linha.is_empty():
 		return "PONTE SEM RESPOSTA — INSTALE OPENCV"
-	var texto := FileAccess.get_file_as_string(caminho).strip_edges()
-	return texto if not texto.is_empty() else "PONTE SEM RESPOSTA"
+	return linha.split("|")[0]
+
+## O contador de quadros publicado pela ponte, ou -1 se ainda não há.
+func _bridge_frame_counter() -> int:
+	var partes := _bridge_status_line().split("|")
+	if partes.size() < 2 or not partes[1].is_valid_int():
+		return -1
+	return partes[1].to_int()
+
+## Quantas vezes a ponte precisou ser religada nesta sessão. A Central
+## mostra: uma ponte que reinicia sozinha o tempo todo é cabo ou porta
+## USB com defeito, e não software.
+func reinicios_da_ponte() -> int:
+	return _bridge_reinicios
 
 func _materialize_bridge_script(data_dir: String) -> String:
 	# Em exportação com PCK embutido o .py não é um arquivo físico. Copiá-lo

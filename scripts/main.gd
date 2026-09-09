@@ -67,6 +67,18 @@ const RANKING_TAMANHO := 20
 # ======================================================================
 # A CENTRAL TÉCNICA, DESCRITA UMA VEZ SÓ
 # ======================================================================
+## A CENTRAL TEM PÁGINAS.
+##
+## Ela cabia numa tela só enquanto tinha modo, faixas e sensor. Com o
+## mapeamento dos botões do gabinete, a calibração, a câmera e a mesa de
+## som, passou a caber empilhando coisa por cima de coisa — e uma tela de
+## configuração com controle escondido atrás de outro é onde o técnico
+## clica errado e some com a regulagem da casa.
+##
+## Quatro páginas, cada uma com um assunto: como a máquina opera, como
+## ela mede o golpe, o que ela vê e ouve, e o que ela guardou.
+const PAGINAS := ["OPERAÇÃO", "GOLPE", "CÂMERA E SOM", "DADOS"]
+
 ## Os retângulos dos botões NÃO são escritos à mão. Um par de − / + com o
 ## valor no meio é um "passo" (`_passo`), e é ele que decide onde ficam
 ## os dois botões e onde sobra espaço para o número. Foi um número
@@ -74,43 +86,64 @@ const RANKING_TAMANHO := 20
 ## só, o texto não tem como invadir a área de clique.
 const LADO_BOTAO := 64.0
 ## Passos: chave -> retângulo total (botões nas pontas, valor no meio).
-## NENHUM RETÂNGULO PODE ENCOSTAR NO OUTRO.
-##
-## `curva` foi acrescentada em cima de `vmin` e `vmax` (x 340–740 contra
-## 110–510 e 570–970, todos na mesma altura). Como `_click_central`
-## percorre esta tabela em ordem, o clique no γ caía primeiro em `vmin`
-## ou `vmax`: mexer na dificuldade mudava a velocidade, e a tela inteira
-## parecia não responder. Cada passo tem agora a sua própria linha.
+## NENHUM RETÂNGULO PODE ENCOSTAR NO OUTRO **DENTRO DA MESMA PÁGINA**.
 const PASSOS := {
-	"limiar_fraco": Rect2(110, 522, 400, LADO_BOTAO),
-	"limiar_forte": Rect2(570, 522, 400, LADO_BOTAO),
-	"vmin": Rect2(110, 740, 400, LADO_BOTAO),
-	"vmax": Rect2(570, 740, 400, LADO_BOTAO),
-	"curva": Rect2(340, 856, 400, 58),
-	"porta": Rect2(110, 1036, 400, LADO_BOTAO),
-	"raio": Rect2(110, 1150, 400, LADO_BOTAO),
-	"amin": Rect2(570, 1150, 400, LADO_BOTAO),
+	"vmin": Rect2(110, 404, 400, LADO_BOTAO),
+	"vmax": Rect2(570, 404, 400, LADO_BOTAO),
+	"curva": Rect2(110, 526, 400, 58),
+	"zona": Rect2(570, 526, 400, 58),
+	"porta": Rect2(110, 1010, 400, LADO_BOTAO),
+	"raio": Rect2(110, 1124, 400, LADO_BOTAO),
+	"amin": Rect2(570, 1124, 400, LADO_BOTAO),
+	"vol_musica": Rect2(110, 934, 400, LADO_BOTAO),
+	"vol_efeitos": Rect2(570, 934, 400, LADO_BOTAO),
 }
 ## Botões simples: chave -> retângulo.
 const BOTOES_SIMPLES := {
 	"fechar": Rect2(920, 140, 68, 64),
-	"modo_livre": Rect2(110, 318, 400, 68),
-	"modo_ficha": Rect2(570, 318, 400, 68),
-	"eixo": Rect2(620, 1036, 280, LADO_BOTAO),
-	# A câmera ganhou seção própria: estava dentro de "AÇÕES NO
-	# FIRMWARE", que é do sensor de soco e não tem nada com webcam.
-	"camera": Rect2(110, 1322, 260, 60),
-	"trocar_camera": Rect2(390, 1322, 260, 60),
-	"foto_teste": Rect2(670, 1322, 300, 60),
-	"enviar_config": Rect2(110, 1484, 400, 60),
-	"testar": Rect2(570, 1484, 400, 60),
-	"zerar": Rect2(110, 1716, 207, 60),
-	"zerar_stats": Rect2(327, 1716, 207, 60),
-	"zerar_ranking": Rect2(544, 1716, 207, 60),
-	"reconectar": Rect2(761, 1716, 209, 60),
+	# --- página OPERAÇÃO
+	"modo_livre": Rect2(110, 406, 400, 68),
+	"modo_ficha": Rect2(570, 406, 400, 68),
+	"mapear_start": Rect2(110, 620, 400, 68),
+	"mapear_credito": Rect2(570, 620, 400, 68),
+	"simulacao": Rect2(110, 1010, 400, 68),
+	# --- página GOLPE
+	"eixo": Rect2(620, 1010, 280, LADO_BOTAO),
+	"enviar_config": Rect2(110, 1300, 400, 60),
+	"testar": Rect2(570, 1300, 400, 60),
+	"calibrar": Rect2(300, 846, 480, 56),
+	# --- página CÂMERA
+	"camera": Rect2(110, 410, 260, 60),
+	"trocar_camera": Rect2(390, 410, 260, 60),
+	"foto_teste": Rect2(670, 410, 300, 60),
+	"testar_som": Rect2(300, 1046, 480, 60),
+	# --- página DADOS
+	"zerar": Rect2(110, 850, 207, 60),
+	"zerar_stats": Rect2(327, 850, 207, 60),
+	"zerar_ranking": Rect2(544, 850, 207, 60),
+	"reconectar": Rect2(761, 850, 209, 60),
+	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
 }
+## Em que página cada controle vive. `-1` quer dizer "em todas".
+##
+## Sem esta tabela, um clique numa página acertaria o botão de outra —
+## os retângulos continuam existindo mesmo quando não estão desenhados, e
+## um botão invisível que responde é a pior espécie de defeito.
+const PAGINA_DO_CONTROLE := {
+	"fechar": -1, "padroes": -1, "salvar": -1,
+	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0, "simulacao": 0,
+	"vmin": 1, "vmax": 1, "curva": 1, "zona": 1,
+	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
+	"calibrar": 1,
+	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
+	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
+	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
+}
+## As abas, no topo da caixa.
+const ABA_LARGURA := 230.0
+const ABA_RECT := Rect2(80, 250, 920, 62)
 
 var state: GameDef.State = GameDef.State.IDLE
 var central_aberta := false
@@ -126,15 +159,14 @@ var plays := 0
 ## pagar a segunda ficha.
 var ranking: Array[Dictionary] = []
 ## Faixa de velocidade (m/s) que vira pontos no placar.
-var hit_min_speed := 0.8
-var hit_max_speed := 12.0
-## Expoente 2 torna os pontos altos raros; o valor anterior (0.8)
-## inflava os golpes médios e fazia a máquina parecer fácil demais.
+var hit_min_speed := ScoreCurve.DEFAULT_MIN_SPEED
+var hit_max_speed := ScoreCurve.DEFAULT_MAX_SPEED
+## O expoente é o botão de dificuldade da casa: quanto maior, mais tarde
+## a nota sobe e mais raro fica o topo da escala. Os oito níveis têm
+## faixas FIXAS, então é aqui — e só aqui — que se decide quanta gente
+## chega a cada um deles.
 var score_exponent := ScoreCurve.DEFAULT_EXPONENT
 var score_dead_zone := ScoreCurve.DEFAULT_DEAD_ZONE
-## Os dois limites que separam fraco, médio e forte no placar.
-var limiar_fraco := GameDef.LIMIAR_FRACO_PADRAO
-var limiar_forte := GameDef.LIMIAR_FORTE_PADRAO
 ## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,amin).
 var sensor_eixo := "X"
 var sensor_raio := 0.45
@@ -150,10 +182,86 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
-## A ESTRELA DE PANCADA: quanto tempo desde o golpe, e com que força.
-## Negativo quer dizer que não há pancada no ar.
+## SIMULAÇÃO DE BANCADA. Desligada de fábrica.
+##
+## Ligada, a barra de espaço vira um soco falso. É indispensável para
+## montar e regular a máquina sem bater no saco cem vezes, e é fraude num
+## salão: com ela ligada, qualquer pessoa tira 9999 sem encostar no
+## equipamento. Por isso ela não é um atalho escondido, é uma chave — e
+## uma chave que a Central mostra ligada, em vermelho, quando está.
+var simulacao_bancada := false
+## Uma segunda porta, para a bancada de quem desenvolve: `PUNCH_SIMULACAO=1`
+## no ambiente libera a barra sem mexer na configuração da máquina.
+var simulacao_por_ambiente := false
+## O GOLPE DA RODADA JÁ FOI. Um soco por rodada: o saco balança depois do
+## impacto e o MPU-6050 vê esse balanço como um segundo evento.
+var golpe_registrado := false
+## Instante do último golpe ACEITO, para o tempo morto entre eventos.
+##
+## Começa em NUNCA, e não em zero. `Time.get_ticks_msec()` conta desde o
+## start do processo: com zero, "faz quanto tempo desde o último golpe"
+## dava menos que o tempo morto durante o primeiro segundo de máquina
+## ligada, e o primeiro soco da manhã era recusado em silêncio.
+const NUNCA_MS := -1000000
+var ultimo_golpe_ms := NUNCA_MS
+## O firmware avisou que o acelerômetro saturou. Fica registrado para a
+## Central; um golpe saturado NÃO vira 9999 artificial, porque a máquina
+## não sabe quanto ele valeu de verdade.
+var saturacao_recente := ""
+
+## OS DOIS BOTÕES DO GABINETE, mapeados e guardados.
+##
+## A placa Zero Delay se apresenta ao sistema como um controle USB
+## genérico, e o índice de cada botão muda conforme a porta, o cabo e o
+## modelo da placa. Um índice fixo no código funciona numa máquina e erra
+## na seguinte — por isso o mapeamento é feito na Central, apertando o
+## botão de verdade, e o que fica gravado é o que aquela máquina viu.
+##
+## `guid` identifica o controle; `index` é o botão; `nome` é o que o
+## sistema chama aquele controle, para o técnico reconhecer a placa.
+var botao_start := {"guid": "", "index": 6, "nome": ""}
+var botao_credito := {"guid": "", "index": 4, "nome": ""}
+## "" | "start" | "credito" — o que a Central está esperando capturar.
+var mapeando := ""
+## Contadores de teste: sobem a cada aperto reconhecido. São a prova de
+## que o mapeamento pegou; sem eles o técnico aperta o botão e não sabe
+## se o problema é a placa, o índice ou o jogo.
+var contador_start := 0
+var contador_credito := 0
+## ANTIRREPIQUE. Botão de arcade é chave mecânica e treme ao fechar: um
+## aperto vira dois ou três eventos em poucos milissegundos, e o segundo
+## viraria um crédito a mais ou um START engolindo a rodada recém-criada.
+const REPIQUE_MS := 250
+var ultimo_start_ms := NUNCA_MS
+var ultimo_credito_ms := NUNCA_MS
+## Qual página da Central está aberta.
+var central_pagina := 0
+## Volume das duas mesas que o operador regula, em dB. Vão do silêncio
+## prático (-40) a um pouco acima do nominal (+6): um salão barulhento
+## precisa de mais, e uma loja de shopping precisa de bem menos.
+var volume_musica := 0.0
+var volume_efeitos := 0.0
+## Quanto tempo faz que alguém apertou START sem saldo. Enquanto é curto,
+## o lugar do crédito pisca na abertura: apontar para onde a ficha entra
+## resolve mais do que qualquer frase.
+var aviso_de_credito := -1.0
+## Marcado quando `_carregar` converteu marcas da escala antiga. `_ready`
+## grava logo em seguida, e é isso que torna a conversão de uma vez só.
+var _converteu_esquema := false
+## A ESTRELA DE PANCADA: quanto tempo desde o golpe, com que força e de
+## qual nível. Negativo quer dizer que não há pancada no ar.
 var pancada_tempo := -1.0
 var pancada_forca := 0.0
+var pancada_nivel: Dictionary = {}
+## HIT-STOP: o congelamento curto que dá peso ao golpe. Enquanto ele
+## corre, o relógio do jogo PARA — animação, contagem e máquina de
+## estados — e só a tela continua sendo desenhada. É o que faz um
+## nocaute parecer que acertou alguma coisa sólida.
+var hitstop_left := 0.0
+## ZOOM DE IMPACTO: a tela inteira cresce um pouco e volta. Fica no
+## desenho, não na câmera, porque não há câmera — o jogo é um `_draw`.
+var zoom_impacto := 1.0
+var zoom_alvo := 1.0
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -236,7 +344,21 @@ func _ready() -> void:
 	camera_service.enabled = camera_enabled
 	camera_service.mirrored = camera_mirrored
 	add_child(camera_service)
+	# TRÊS PORTAS PARA A MESMA CHAVE, e de propósito: a da Central serve
+	# ao técnico no salão, a variável de ambiente serve à bancada de quem
+	# desenvolve, e o ajuste de projeto serve a uma build feita só para
+	# feira ou demonstração — em que a máquina precisa nascer com a barra
+	# de espaço valendo, sem ninguém lembrar de ligar nada.
+	simulacao_por_ambiente = (
+		OS.get_environment("PUNCH_SIMULACAO") == "1"
+		or bool(ProjectSettings.get_setting("punch/debug_simulation", false))
+	)
+	sons.set_volumes(volume_musica, volume_efeitos)
 	_aplicar_faixas()
+	if _converteu_esquema:
+		_converteu_esquema = false
+		_salvar()
+		_show_notice("MARCAS CONVERTIDAS PARA A ESCALA 0000 – 9999")
 	_iniciar_serial()
 	_entrar_em_abertura()
 	# A música entra baixa por baixo da entrada e sobe na virada para a
@@ -250,12 +372,18 @@ func _exit_tree() -> void:
 		link.close_port()
 	_photo_cache.clear()
 
-## Um lugar só onde as faixas chegam a quem as desenha. Régua da Central,
-## cor da moldura e veredito passam a concordar por construção.
+## Um lugar só onde os parâmetros da curva são saneados.
+##
+## Os oito níveis têm faixas fixas, então não há mais limite ajustável
+## para arrumar: o que precisa de saneamento é a curva, e ela é a mesma
+## que a Central desenha, que o placar usa e que o firmware recebe. Uma
+## passagem só por `ScoreCurve.sanitize` mantém as três concordando.
 func _aplicar_faixas() -> void:
-	var lim := GameDef.limiares(limiar_fraco, limiar_forte)
-	limiar_fraco = lim.x
-	limiar_forte = lim.y
+	var cfg := ScoreCurve.sanitize(hit_min_speed, hit_max_speed, score_exponent, score_dead_zone)
+	hit_min_speed = cfg["min_speed"]
+	hit_max_speed = cfg["max_speed"]
+	score_exponent = cfg["exponent"]
+	score_dead_zone = cfg["dead_zone"]
 
 ## A melhor marca da casa. Sai do topo do ranking, e não de uma variável
 ## paralela — duas fontes para o mesmo número é como elas divergem.
@@ -284,6 +412,17 @@ func _alvo() -> Vector2:
 # CICLO
 # ======================================================================
 func _process(delta: float) -> void:
+	# O HIT-STOP CONGELA O JOGO, E SÓ ELE ANDA. Nem `animation_time` nem
+	# a máquina de estados avançam: se avançassem, o congelamento seria
+	# só um quadro repetido enquanto o resto seguia, e a pessoa sentiria
+	# um engasgo em vez de um golpe pesado.
+	if hitstop_left > 0.0:
+		hitstop_left = maxf(0.0, hitstop_left - delta)
+		queue_redraw()
+		return
+	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
+	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
+		zoom_impacto = 1.0
 	animation_time += delta
 	state_time += delta
 	_poll_serial(delta)
@@ -292,7 +431,10 @@ func _process(delta: float) -> void:
 	clarao = maxf(0.0, clarao - delta * 2.6)
 	if pancada_tempo >= 0.0:
 		pancada_tempo += delta
-		if pancada_tempo > PANCADA_DURACAO:
+		# O zoom volta ao normal assim que o estrelão passa da metade.
+		if pancada_tempo > ImpactDirector.PANCADA_DURACAO * 0.5:
+			zoom_alvo = 1.0
+		if pancada_tempo > ImpactDirector.PANCADA_DURACAO:
 			pancada_tempo = -1.0
 
 	if notice_left > 0.0:
@@ -302,6 +444,8 @@ func _process(delta: float) -> void:
 	if not confirm_action.is_empty() and animation_time > confirm_until:
 		confirm_action = ""
 
+	if central_aberta:
+		_processar_calibracao(delta)
 	if not central_aberta:
 		match state:
 			GameDef.State.IDLE:
@@ -348,6 +492,10 @@ func _processar_abertura(delta: float) -> void:
 			abertura_chegada = 0.0
 		return
 	abertura_chegada = minf(1.0, abertura_chegada + delta * 2.2)
+	if aviso_de_credito >= 0.0:
+		aviso_de_credito += delta
+		if aviso_de_credito > 2.6:
+			aviso_de_credito = -1.0
 	if randf() < delta * 4.0:
 		fx.poeira(
 			Vector2(randf_range(120.0, 960.0), TELA.y + 40.0),
@@ -368,11 +516,16 @@ func _processar_contagem(delta: float) -> void:
 	if atual > 0 and atual < last_count:
 		last_count = atual
 		sons.play("count")
+		sons.duck(8.0, 0.5)
 	if countdown_left <= -1.2:
 		state = GameDef.State.ARMED
 		state_time = 0.0
 		espera_left = GameDef.ESPERA_DO_SOCO
 		carga_tempo = -1.0
+		# A rodada nova começa sem golpe e sem saturação pendente.
+		golpe_registrado = false
+		saturacao_recente = ""
+		sons.play("armado", -6.0)
 		sons.play("go")
 		sons.music(-19.0)
 		moldura.set_estado(LedFrame.ARMADA)
@@ -433,28 +586,17 @@ func _processar_resultado(delta: float) -> void:
 	if result_time > GameDef.RESULTADO_TIMEOUT:
 		_entrar_em_abertura()
 
-func _manter_festa(delta: float) -> void:
-	## A festa continua enquanto o veredito está na tela, e o tamanho
-	## dela é o da faixa — as mesmas três faixas da régua da Central.
-	match GameDef.faixa_de(result_score, limiar_fraco, limiar_forte):
-		GameDef.Faixa.FORTE:
-			# Estouros pela tela, sempre a partir de um ponto: cada um é
-			# um eco do soco, e não um fogo de artifício solto no ar.
-			if verdict_time < 5.0 and verdict_time >= proximo_fogo:
-				proximo_fogo = verdict_time + 0.55
-				var ponto := Vector2(randf_range(180.0, 900.0), randf_range(280.0, 900.0))
-				fx.onda(ponto, 6.0, randf_range(150.0, 260.0), Color(Paleta.AMBAR, 0.5), 6.0, 0.5)
-				fx.explosao(ponto, 22, CORES_FESTA, 820.0)
-				fx.raios(ponto, 3, Paleta.CREME, 520.0)
-			if verdict_time < 3.0 and randf() < delta * 22.0:
-				fx.chuva_de_brasas(TELA.x, 2, CORES_FESTA)
-		GameDef.Faixa.MEDIA:
-			if verdict_time >= proximo_fogo:
-				proximo_fogo = verdict_time + 0.85
-				fx.onda(_alvo(), 90.0, 450.0, Color(Paleta.AMBAR, 0.45), 7.0, 0.85)
-		_:
-			if verdict_time < 2.2 and randf() < delta * 9.0:
-				fx.estilhacos(Vector2(randf_range(180.0, 900.0), 420.0), 2, Color("6b7b98"))
+func _manter_festa(_delta: float) -> void:
+	## A COMEMORAÇÃO QUE CONTINUA é do nível, e o intervalo entre os
+	## estouros também. Um impacto leve tem intervalo zero e não comemora
+	## nada: dizer "mandou bem" a quem não mandou é o jeito mais rápido
+	## de a máquina perder a credibilidade.
+	var nivel := ScoreTier.de(result_score)
+	var intervalo := float(nivel["festa_intervalo"])
+	if intervalo <= 0.0 or verdict_time >= 5.0 or verdict_time < proximo_fogo:
+		return
+	proximo_fogo = verdict_time + intervalo
+	ImpactDirector.festa(fx, _alvo(), nivel, CORES_FESTA)
 
 # ======================================================================
 # ENTRADA DE COMANDOS
@@ -478,12 +620,17 @@ func _input(event: InputEvent) -> void:
 			if event.keycode == KEY_T:
 				_teste_de_golpe()
 			return
+		# TECLADO É BANCADA. Num salão os comandos entram pelos botões do
+		# gabinete ou pela serial; deixar 5/C e 1/Enter valendo sempre é
+		# deixar um teclado esquecido no armário virar crédito de graça.
 		if event.keycode in [KEY_5, KEY_C]:
-			_add_credit()
+			if _simulador_liberado():
+				_add_credit()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode in [KEY_1, KEY_ENTER, KEY_KP_ENTER]:
-			_pressionou_start()
+			if _simulador_liberado():
+				_pressionou_start()
 			get_viewport().set_input_as_handled()
 			return
 		if event.keycode == KEY_SPACE:
@@ -498,26 +645,113 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 
-	if event is InputEventJoypadButton and event.pressed and not central_aberta:
-		if event.is_action_pressed("input_credito"):
-			_add_credit()
-		elif event.is_action_pressed("input_start"):
-			_pressionou_start()
+	if event is InputEventJoypadButton:
+		_botao_do_gabinete(event as InputEventJoypadButton)
 		return
 
 	if central_aberta and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_click_central(event.position)
+		if calib_ativo:
+			_click_calibracao(event.position)
+		else:
+			_click_central(event.position)
+
+## A BARRA DE ESPAÇO É BANCADA, NUNCA SALÃO.
+##
+## O golpe de verdade vem do MPU-6050 e de mais nada. A barra existe para
+## montar e regular a máquina sem bater no saco cem vezes — e, ligada num
+## salão, é uma pessoa tirando 9999 sem encostar no equipamento. Ela só
+## responde com a chave da Central ligada, com a Central aberta na frente
+## do técnico, ou com `PUNCH_SIMULACAO=1` na bancada de quem desenvolve.
+func _simulador_liberado() -> bool:
+	return simulacao_bancada or central_aberta or simulacao_por_ambiente
+
+## UM APERTO NA PLACA ZERO DELAY.
+##
+## Três coisas acontecem aqui, nesta ordem: capturar um mapeamento em
+## curso, recusar repique, e só então agir. Soltar o botão nunca faz
+## nada — processar solta e aperta dobraria todo comando.
+func _botao_do_gabinete(evento: InputEventJoypadButton) -> void:
+	if not evento.pressed:
+		return
+	var nome := Input.get_joy_name(evento.device)
+	var guid := Input.get_joy_guid(evento.device)
+
+	# 1) A CENTRAL ESTÁ ESPERANDO ESTE APERTO?
+	if central_aberta and not mapeando.is_empty():
+		_gravar_botao(evento.button_index, guid, nome)
+		return
+	if central_aberta:
+		return
+
+	var agora := Time.get_ticks_msec()
+	if _combina(botao_start, evento.button_index, guid):
+		if agora - ultimo_start_ms < REPIQUE_MS:
+			return
+		ultimo_start_ms = agora
+		contador_start += 1
+		_pressionou_start()
+	elif _combina(botao_credito, evento.button_index, guid):
+		if agora - ultimo_credito_ms < REPIQUE_MS:
+			return
+		ultimo_credito_ms = agora
+		contador_credito += 1
+		_add_credit()
+
+## Grava o botão capturado no papel que a Central pediu.
+##
+## O MESMO BOTÃO NÃO PODE ASSUMIR OS DOIS PAPÉIS. Numa máquina em que
+## START e CRÉDITO fossem o mesmo aperto, cada partida consumiria uma
+## ficha e começaria junto — ou nenhuma das duas coisas aconteceria na
+## hora certa. Recusar é melhor do que aceitar e deixar a máquina
+## indefinida.
+func _gravar_botao(indice: int, guid: String, nome: String) -> void:
+	var outro := botao_credito if mapeando == "start" else botao_start
+	if _combina(outro, indice, guid):
+		_show_notice("ESSE BOTÃO JÁ É O OUTRO COMANDO — ESCOLHA OUTRO")
+		sons.play("error", -6.0)
+		return
+	var mapa := {"guid": guid, "index": indice, "nome": nome}
+	if mapeando == "start":
+		botao_start = mapa
+		contador_start = 0
+	else:
+		botao_credito = mapa
+		contador_credito = 0
+	mapeando = ""
+	sons.play("menu", -8.0)
+	_show_notice("BOTÃO %d GRAVADO EM %s" % [indice, "START" if mapa == botao_start else "CRÉDITO"])
+	_salvar()
+
+## Um aperto combina com um mapeamento quando o índice bate e o controle
+## também — ou quando ainda não há controle gravado, caso em que o índice
+## sozinho decide. É esse "ou" que faz os padrões de fábrica servirem de
+## rede antes de alguém mapear qualquer coisa.
+func _combina(mapa: Dictionary, indice: int, guid: String) -> bool:
+	if int(mapa.get("index", -1)) != indice:
+		return false
+	var esperado := str(mapa.get("guid", ""))
+	return esperado.is_empty() or esperado == guid
+
+func _mapa_de_botao(bruto: Variant, indice_padrao: int) -> Dictionary:
+	var d: Dictionary = bruto if bruto is Dictionary else {}
+	return {
+		"guid": str(d.get("guid", "")),
+		"index": int(d.get("index", indice_padrao)),
+		"nome": str(d.get("nome", "")),
+	}
 
 func _apertou_espaco() -> void:
 	## Na janela do soco, a barra de espaço CARREGA; fora dela, é START.
 	if state == GameDef.State.ARMED:
+		if not _simulador_liberado():
+			return
 		carga_tempo = 0.0
 		sons.play("charge")
 	else:
 		_pressionou_start()
 
 func _soltou_espaco() -> void:
-	if state != GameDef.State.ARMED:
+	if state != GameDef.State.ARMED or not _simulador_liberado():
 		_cancelar_carga()
 		return
 	var tempo_carga := carga_tempo
@@ -547,8 +781,12 @@ func _pressionou_start() -> void:
 func _iniciar_rodada() -> void:
 	if game_mode == "credit":
 		if credits <= 0:
-			_show_notice("INSIRA 1 CRÉDITO — SELECT OU TECLA C")
-			sons.play("error", -6.0)
+			# NEGADO TEM SOM PRÓPRIO, e não o de erro genérico: faltar
+			# ficha não é defeito, e quem ouve tem de entender a
+			# diferença sem ler a tela.
+			_show_notice("INSIRA 1 CRÉDITO")
+			sons.play("start_negado", -3.0)
+			aviso_de_credito = 0.0
 			return
 		credits -= 1
 		credito_gasto = true
@@ -638,17 +876,22 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	var alvo := _alvo()
 	moldura.impacto(0.4 + forca * 0.6)
 	sons.play("hit", 1.5)
+	sons.play("subgrave", -4.0)
 	sons.stop("charge")
-	sons.music(-32.0)
-	tremor = 10.0 + forca * 22.0
-	clarao = 0.25 + forca * 0.45
-	fx.onda(alvo, 30.0, 500.0 + forca * 400.0, Color(Paleta.VERMELHO, 0.6), 16.0, 0.7)
-	fx.onda(alvo, 20.0, 300.0 + forca * 260.0, Color(Paleta.CREME, 0.75), 9.0, 0.38)
-	fx.faiscas(alvo, 30 + int(forca * 50.0), Paleta.AMBAR, 700.0 + forca * 600.0)
-	fx.explosao(alvo, 18 + int(forca * 26.0), CORES_FESTA, 900.0 + forca * 700.0)
-	# A ESTRELA DE PANCADA precisa saber a hora exata do golpe: ela dura
-	# um terço de segundo e é o desenho que diz "bateu", antes de
-	# qualquer número aparecer.
+	# A TRILHA SAI DA FRENTE DO GOLPE. Não para — abaixa e volta sozinha,
+	# porque parar e recomeçar a música a cada soco é o que faz uma
+	# máquina parecer travada entre uma rodada e outra.
+	sons.duck(14.0, 2.2)
+	# O NÍVEL MANDA NO ESPETÁCULO. Um impacto leve e um soco perfeito não
+	# podem sacudir a máquina do mesmo jeito, e é a receita do nível que
+	# diz quanto de cada coisa entra.
+	pancada_nivel = ScoreTier.de(result_score)
+	var receita := ImpactDirector.golpe(fx, alvo, pancada_nivel, CORES_FESTA)
+	tremor = float(receita["tremor"])
+	clarao = float(receita["clarao"])
+	hitstop_left = float(receita["hitstop"])
+	zoom_alvo = float(receita["zoom"])
+	zoom_impacto = float(receita["zoom"])
 	pancada_tempo = 0.0
 	pancada_forca = forca
 	plays += 1
@@ -657,7 +900,7 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	photo_retained = posicao_no_ranking > 0
 	statistics = StatisticsStore.record(
 		statistics, result_score,
-		GameDef.faixa_de(result_score, limiar_fraco, limiar_forte),
+		GameDef.faixa_de(result_score),
 		posicao_no_ranking > 0
 	)
 	_salvar()
@@ -668,7 +911,7 @@ func _disparar_veredito() -> void:
 	## O momento em que a máquina diz quanto valeu o soco. Um por golpe.
 	verdict_time = 0.0
 	proximo_fogo = 0.0
-	var classe := GameDef.classificar(result_score, limiar_fraco, limiar_forte)
+	var classe := GameDef.classificar(result_score)
 	var cor: Color = classe["cor_faixa"]
 	moldura.set_estado(LedFrame.RESULTADO, cor)
 	# A tela inteira toma a cor da faixa, de leve: o veredito chega ao
@@ -676,41 +919,225 @@ func _disparar_veredito() -> void:
 	fundo.matiz = Color(cor, 0.10)
 	var alvo := _alvo()
 
-	match classe["faixa"] as GameDef.Faixa:
-		GameDef.Faixa.FORTE:
-			if str(classe["label"]) == "LENDÁRIO":
-				sons.play("legendary", 0.5)
-			else:
-				sons.play("win", 0.5)
-			tremor = 30.0
-			clarao = 0.85
-			# O QUE SAI DE UM SOCO NÃO É CONFETE. Brasas explodindo do
-			# ponto do impacto, raios girando junto e três anéis em
-			# sequência: a comemoração passa a ter a mesma linguagem da
-			# pancada que a provocou, e não a de uma festa de aniversário.
-			fx.explosao(alvo, 120, CORES_FESTA, 1500.0)
-			fx.raios(alvo, 16, Paleta.AMBAR, 900.0)
-			fx.chuva_de_brasas(TELA.x, 70, CORES_FESTA)
-			for i in range(3):
-				fx.onda(alvo, 60.0 + float(i) * 90.0, 900.0 + float(i) * 220.0,
-					Color(Paleta.AMBAR if i != 1 else Paleta.CREME, 0.60 - float(i) * 0.14),
-					18.0 - float(i) * 4.0, 0.9 + float(i) * 0.25)
-		GameDef.Faixa.MEDIA:
-			sons.play("medium")
-			tremor = 14.0
-			fx.explosao(alvo, 46, CORES_FESTA, 900.0)
-			fx.faiscas(alvo, 40, Paleta.AMBAR, 700.0)
-			fx.onda(alvo, 60.0, 560.0, Color(Paleta.AMBAR, 0.55), 12.0, 0.9)
-		_:
-			sons.play("lose")
-			tremor = 9.0
-			fx.estilhacos(alvo, 34, Color("6b7b98"))
-			fx.poeira(alvo + Vector2(0, 240.0), 26, Color(0.45, 0.50, 0.62, 0.45), 260.0)
+	# O SOM E A COMEMORAÇÃO SÃO DO NÍVEL, não da faixa grossa.
+	#
+	# Antes três faixas decidiam por oito níveis, e NOCAUTE, PESO-PESADO,
+	# LENDÁRIO e SOCO PERFEITO caíam todos no mesmo bloco: mesma
+	# explosão, mesmo som, só a palavra mudando. Era exatamente o que a
+	# pessoa que joga duas vezes seguidas percebe.
+	var nivel: Dictionary = classe["nivel"]
+	sons.play(str(nivel["som"]), 0.5)
+	# O veredito é a fala da máquina: a trilha desce por todo o tempo em
+	# que o nome do nível está sendo anunciado.
+	sons.duck(16.0, 3.0)
+	var receita := ImpactDirector.golpe(fx, alvo, nivel, CORES_FESTA)
+	tremor = maxf(tremor, float(receita["tremor"]) * 0.8)
+	clarao = maxf(clarao, float(receita["clarao"]) * 0.7)
 
 	if posicao_no_ranking == 1:
 		for sound in ["win", "medium", "lose", "legendary"]:
 			sons.stop(sound)
 		sons.play("record", -2.0)
+
+# ======================================================================
+# ASSISTENTE DE CALIBRAÇÃO
+# ======================================================================
+## CALIBRAR É MEDIR A MÁQUINA, NÃO ADIVINHAR NÚMEROS.
+##
+## Cada gabinete responde diferente: o saco, a mola, onde o sensor foi
+## parafusado, o quanto o pé da máquina cede. Regular isso por tentativa
+## e erro nos passos de − e + significa descobrir que errou depois de a
+## fila reclamar. O assistente mede: quatro passos, cinco golpes fracos,
+## cinco fortes, e a conta sai por percentis em `Calibracao`.
+const CALIB_PASSOS := ["REPOUSO", "GOLPES FRACOS", "GOLPES FORTES", "SUGESTÃO"]
+const CALIB_REPOUSO_S := 4.0
+const CALIB_BOTOES := {
+	"calib_avancar": Rect2(560, 1600, 400, 72),
+	"calib_repetir": Rect2(120, 1600, 400, 72),
+	"calib_salvar": Rect2(560, 1690, 400, 72),
+	"calib_cancelar": Rect2(120, 1690, 400, 72),
+}
+
+var calib_ativo := false
+var calib_passo := 0
+var calib_repouso_left := 0.0
+var calib_ruido := 0.0
+var calib_fracos: Array[float] = []
+var calib_fortes: Array[float] = []
+var calib_picos: Array[float] = []
+var calib_sugestao: Dictionary = {}
+
+func _abrir_calibracao() -> void:
+	calib_ativo = true
+	calib_passo = 0
+	calib_repouso_left = CALIB_REPOUSO_S
+	calib_ruido = 0.0
+	calib_fracos.clear()
+	calib_fortes.clear()
+	calib_picos.clear()
+	calib_sugestao = {}
+	_show_notice("CALIBRAÇÃO: DEIXE O SACO PARADO")
+
+func _fechar_calibracao() -> void:
+	calib_ativo = false
+	calib_sugestao = {}
+
+## O relógio do passo de repouso. Só ele corre sozinho; os outros esperam
+## golpe, e golpe não tem hora.
+func _processar_calibracao(delta: float) -> void:
+	if not calib_ativo or calib_passo != 0:
+		return
+	calib_repouso_left = maxf(0.0, calib_repouso_left - delta)
+	if calib_repouso_left <= 0.0:
+		calib_passo = 1
+		sons.play("menu", -8.0)
+
+## Um golpe chegou durante a calibração.
+##
+## Ele NÃO vira pontuação, não conta partida e não entra no ranking: a
+## Central está aberta e a máquina está sendo medida, não jogada.
+func _calibracao_recebeu(velocidade: float, pico: float) -> void:
+	match calib_passo:
+		0:
+			# Em repouso, qualquer coisa que chegue é ruído — e o ruído é
+			# justamente o que se quer medir.
+			calib_ruido = maxf(calib_ruido, pico)
+		1:
+			calib_fracos.append(velocidade)
+			calib_picos.append(pico)
+			sons.play("tick", -6.0)
+			if calib_fracos.size() >= Calibracao.AMOSTRAS:
+				calib_passo = 2
+				sons.play("menu", -8.0)
+		2:
+			calib_fortes.append(velocidade)
+			calib_picos.append(pico)
+			sons.play("tick", -3.0)
+			if calib_fortes.size() >= Calibracao.AMOSTRAS:
+				calib_passo = 3
+				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_picos, calib_ruido)
+				sons.play("record", -6.0)
+
+func _click_calibracao(p: Vector2) -> void:
+	if CALIB_BOTOES["calib_cancelar"].has_point(p):
+		_fechar_calibracao()
+		_show_notice("CALIBRAÇÃO CANCELADA — NADA FOI MUDADO")
+	elif CALIB_BOTOES["calib_repetir"].has_point(p):
+		_abrir_calibracao()
+	elif CALIB_BOTOES["calib_avancar"].has_point(p):
+		# Pular à mão serve para quem já tem o número na cabeça e só quer
+		# a parte seguinte. Nunca inventa amostra: pular deixa o passo com
+		# o que colheu, e a sugestão sai do que existe.
+		if calib_passo == 0:
+			calib_repouso_left = 0.0
+		elif calib_passo < 3:
+			calib_passo += 1
+			if calib_passo == 3:
+				calib_sugestao = Calibracao.sugerir(calib_fracos, calib_fortes, calib_picos, calib_ruido)
+	elif CALIB_BOTOES["calib_salvar"].has_point(p):
+		if calib_sugestao.is_empty():
+			return
+		hit_min_speed = float(calib_sugestao["vmin"])
+		hit_max_speed = float(calib_sugestao["vmax"])
+		sensor_vmin = hit_min_speed
+		sensor_amin = float(calib_sugestao["amin"])
+		_aplicar_faixas()
+		_salvar()
+		# O firmware precisa saber também: é ele que decide o que virar
+		# HIT antes de qualquer coisa chegar ao jogo.
+		_enviar_config()
+		_fechar_calibracao()
+		_show_notice("CALIBRAÇÃO SALVA E ENVIADA AO SENSOR")
+
+func _draw_calibracao() -> void:
+	var caixa := Rect2(60, 300, 960, 1500)
+	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
+	_placa(caixa.grow(-5.0), 19.0, Color("240810"))
+	_texto_arcade("CALIBRAÇÃO", 396.0, 62, Paleta.AMBAR, LARGURA_UTIL)
+
+	# A trilha dos quatro passos, com o atual aceso.
+	for i in range(CALIB_PASSOS.size()):
+		var r := Rect2(110.0 + float(i) * 220.0, 440.0, 200.0, 54.0)
+		var feito := i < calib_passo
+		var atual := i == calib_passo
+		var cor: Color = Paleta.VERDE if feito else (Paleta.AMBAR if atual else Color("4a1420"))
+		_cartao(r, cor if (feito or atual) else Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+		_texto(
+			str(CALIB_PASSOS[i]), r.position.y + 34.0, 15,
+			Color("2b0a13") if (feito or atual) else Paleta.TINTA_LEVE,
+			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+		)
+
+	match calib_passo:
+		0:
+			_texto_arcade("NÃO ENCOSTE NO SACO", 620.0, 56, Color.WHITE, LARGURA_UTIL)
+			_rotulo("medindo o ruído de repouso do sensor", 690.0, Paleta.TINTA_FRACA)
+			_texto_arcade("%.1f s" % calib_repouso_left, 820.0, 96, Paleta.AMBAR, LARGURA_UTIL)
+			_rotulo("maior pico visto: %.2f g" % calib_ruido, 900.0, Paleta.CIANO)
+		1:
+			_passo_de_golpes("CINCO GOLPES FRACOS", "bata de leve, como quem testa", calib_fracos)
+		2:
+			_passo_de_golpes("CINCO GOLPES FORTES", "bata com tudo, como o melhor cliente", calib_fortes)
+		_:
+			_resultado_da_calibracao()
+
+	var pode_avancar := calib_passo < 3
+	_botao(CALIB_BOTOES["calib_avancar"], "PULAR ESTE PASSO" if pode_avancar else "—", false, Paleta.CIANO, 19)
+	_botao(CALIB_BOTOES["calib_repetir"], "COMEÇAR DE NOVO", false, Paleta.ROXO, 19)
+	_botao(
+		CALIB_BOTOES["calib_salvar"], "SALVAR E ENVIAR AO SENSOR",
+		not calib_sugestao.is_empty(), Paleta.VERDE, 18
+	)
+	_botao(CALIB_BOTOES["calib_cancelar"], "CANCELAR", false, Paleta.VERMELHO, 19)
+
+func _passo_de_golpes(titulo: String, dica: String, amostras: Array) -> void:
+	_texto_arcade(titulo, 600.0, 52, Color.WHITE, LARGURA_UTIL)
+	_rotulo(dica, 664.0, Paleta.TINTA_FRACA)
+	# Uma casa por golpe: a pessoa que está batendo vê quantos faltam sem
+	# precisar contar de cabeça enquanto bate.
+	for i in range(Calibracao.AMOSTRAS):
+		var r := Rect2(180.0 + float(i) * 148.0, 730.0, 128.0, 128.0)
+		var tem := i < amostras.size()
+		_cartao(r, Paleta.AMBAR if tem else Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+		_texto(
+			"%.1f" % float(amostras[i]) if tem else "—", r.position.y + 76.0, 26,
+			Color("2b0a13") if tem else Paleta.TINTA_LEVE,
+			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+		)
+	_rotulo("m/s medidos pelo sensor", 900.0, Paleta.CIANO)
+
+func _resultado_da_calibracao() -> void:
+	if calib_sugestao.is_empty():
+		_texto_arcade("SEM AMOSTRAS SUFICIENTES", 620.0, 44, Paleta.VERMELHO, LARGURA_UTIL)
+		_rotulo("volte e registre os golpes", 690.0, Paleta.TINTA_FRACA)
+		return
+	_texto_arcade("SUGESTÃO", 580.0, 52, Paleta.VERDE, LARGURA_UTIL)
+	var linhas := [
+		["VELOCIDADE MÍNIMA", "%.1f m/s" % float(calib_sugestao["vmin"]), str(calib_sugestao["porque_vmin"])],
+		["VELOCIDADE MÁXIMA", "%.1f m/s" % float(calib_sugestao["vmax"]), str(calib_sugestao["porque_vmax"])],
+		["SENSIBILIDADE", "%.1f g" % float(calib_sugestao["amin"]), str(calib_sugestao["porque_amin"])],
+	]
+	for i in range(linhas.size()):
+		var y := 660.0 + float(i) * 118.0
+		_cartao(Rect2(120, y - 40.0, 840, 100), Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+		_texto(str(linhas[i][0]), y, 20, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 400.0)
+		_texto(str(linhas[i][1]), y, 30, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_RIGHT, 150.0, 780.0)
+		_texto(str(linhas[i][2]), y + 30.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 150.0, 780.0)
+
+	# A CURVA QUE VAI VALER, desenhada antes de salvar. É o único jeito de
+	# alguém discordar da sugestão com fundamento.
+	_rotulo("A CURVA COM ESTES NÚMEROS", 1070.0, Paleta.CREME)
+	var antes_min := hit_min_speed
+	var antes_max := hit_max_speed
+	hit_min_speed = float(calib_sugestao["vmin"])
+	hit_max_speed = float(calib_sugestao["vmax"])
+	_curva_desenhada(Rect2(120, 1100, 840, 180))
+	hit_min_speed = antes_min
+	hit_max_speed = antes_max
+	_apoio(
+		"salvando, os valores vão para a máquina E para o firmware do sensor",
+		1352.0, Paleta.TINTA_FRACA
+	)
 
 # ======================================================================
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
@@ -812,19 +1239,60 @@ func _on_serial_line(line: String) -> void:
 				msg["peak_g"],
 			]
 		"SATURATION":
-			_show_notice("SATURAÇÃO NO %s — GOLPE ACIMA DA ESCALA" % str(msg["source"]))
+			# SATURAÇÃO NÃO VIRA 9999. O sensor chegou ao fim da escala e
+			# parou de medir: a máquina não sabe quanto aquele golpe valeu,
+			# e chutar o teto seria inventar. Fica registrado para a
+			# Central, que é onde alguém pode aumentar a faixa do MPU.
+			saturacao_recente = "%s às %s" % [
+				str(msg["source"]), Time.get_time_string_from_system(true)
+			]
+			_show_notice("SATURAÇÃO NO %s — AUMENTE A FAIXA DO SENSOR" % str(msg["source"]))
 		"ERROR":
 			_show_notice("ERRO DO FIRMWARE: %s" % str(msg["code"]))
 			sons.play("error", -8.0)
 
+## TEMPO MORTO ENTRE DOIS GOLPES ACEITOS, em milissegundos.
+##
+## Depois do impacto o saco balança, e o MPU-6050 vê o balanço como uma
+## sequência de eventos menores. Sem tempo morto, um soco vira três — e o
+## segundo, mais fraco, seria o que ficaria no placar.
+const TEMPO_MORTO_MS := 900
+## Um soco de verdade dura dezenas de milissegundos. Um toque, um esbarrão
+## ou um tranco no gabinete duram muito menos.
+const DURACAO_MINIMA_MS := 12.0
+
 func _receber_hit(msg: Dictionary) -> void:
 	var speed := float(msg["speed"])
-	if state != GameDef.State.ARMED:
-		# Golpe fora de hora: registra na telemetria, não vira ponto.
-		telemetria = "último golpe: %.2f m/s, %.1fg, eixo %s" % [
-			speed, float(msg["accel"]), str(msg["axis"])
-		]
+	var pico := float(msg.get("accel", 0.0))
+	var duracao := float(msg.get("duration_ms", 0.0))
+	telemetria = "último evento: %.2f m/s, %.1fg, %.0f ms, eixo %s" % [
+		speed, pico, duracao, str(msg.get("axis", "?"))
+	]
+	# 0) CALIBRANDO: o golpe vira AMOSTRA, e não pontuação. Não conta
+	#    partida, não entra no ranking, não gasta ficha.
+	if calib_ativo:
+		_calibracao_recebeu(speed, pico)
 		return
+	# 1) FORA DE ARMED NÃO PONTUA. Nem na abertura, nem na foto, nem no
+	#    resultado, nem com a Central aberta.
+	if state != GameDef.State.ARMED or central_aberta:
+		return
+	# 2) UM GOLPE POR RODADA.
+	if golpe_registrado:
+		return
+	# 3) TEMPO MORTO: o balanço do saco depois do impacto não é um golpe.
+	if Time.get_ticks_msec() - ultimo_golpe_ms < TEMPO_MORTO_MS:
+		return
+	# 4) O EVENTO PRECISA TER FÍSICA DE SOCO. Duração e pico de aceleração
+	#    não entram na nota — eles decidem se aquilo foi um soco.
+	if duracao < DURACAO_MINIMA_MS:
+		telemetria += "  •  recusado: curto demais"
+		return
+	if pico < sensor_amin:
+		telemetria += "  •  recusado: pico abaixo de %.1fg" % sensor_amin
+		return
+	golpe_registrado = true
+	ultimo_golpe_ms = Time.get_ticks_msec()
 	_cancelar_carga()
 	_processar_golpe(speed, false)
 
@@ -853,7 +1321,10 @@ func _teste_de_golpe() -> void:
 		var speed := randf_range(hit_min_speed + 1.0, hit_max_speed * 0.9)
 		_show_notice("GOLPE SIMULADO — %.1f m/s" % speed)
 		if state == GameDef.State.ARMED:
-			_receber_hit({"speed": speed, "accel": 8.0, "axis": sensor_eixo})
+			_receber_hit({
+				"speed": speed, "accel": maxf(sensor_amin, 8.0),
+				"duration_ms": 45.0, "axis": sensor_eixo,
+			})
 
 # ======================================================================
 # CENTRAL TÉCNICA (F9)
@@ -900,9 +1371,24 @@ func _passo_visor(chave: String) -> Rect2:
 		Vector2(r.size.x - LADO_BOTAO * 2.0 - 16.0, r.size.y)
 	)
 
+## Um controle só responde se estiver NA PÁGINA ABERTA. Os retângulos
+## continuam existindo mesmo quando não estão desenhados, e um botão
+## invisível que responde é a pior espécie de defeito: o técnico clica
+## num lugar vazio e a máquina muda de comportamento.
+func _visivel_na_pagina(chave: String) -> bool:
+	var pagina := int(PAGINA_DO_CONTROLE.get(chave, -1))
+	return pagina < 0 or pagina == central_pagina
+
 func _click_central(p: Vector2) -> void:
-	# Passos primeiro: são a maioria dos cliques.
+	# As abas primeiro: elas ficam por cima de tudo.
+	if ABA_RECT.has_point(p):
+		central_pagina = clampi(int((p.x - ABA_RECT.position.x) / ABA_LARGURA), 0, PAGINAS.size() - 1)
+		mapeando = ""
+		return
+	# Passos depois: são a maioria dos cliques.
 	for chave in PASSOS:
+		if not _visivel_na_pagina(chave):
+			continue
 		if _passo_menos(chave).has_point(p):
 			_ajustar(chave, -1)
 			_salvar()
@@ -912,54 +1398,88 @@ func _click_central(p: Vector2) -> void:
 			_salvar()
 			return
 
+	# Um clique fora de qualquer botão cancela um mapeamento em curso:
+	# quem desistiu não fica com a máquina esperando um aperto para sempre.
+	var acertou := false
+	for chave in BOTOES_SIMPLES:
+		if _visivel_na_pagina(chave) and (BOTOES_SIMPLES[chave] as Rect2).has_point(p):
+			acertou = true
+			break
+	if not acertou:
+		mapeando = ""
+		return
+
 	if BOTOES_SIMPLES["fechar"].has_point(p) or BOTOES_SIMPLES["salvar"].has_point(p):
 		_fechar_central()
 		return
+	elif _visivel_na_pagina("mapear_start") and BOTOES_SIMPLES["mapear_start"].has_point(p):
+		mapeando = "" if mapeando == "start" else "start"
+		return
+	elif _visivel_na_pagina("mapear_credito") and BOTOES_SIMPLES["mapear_credito"].has_point(p):
+		mapeando = "" if mapeando == "credito" else "credito"
+		return
+	elif _visivel_na_pagina("simulacao") and BOTOES_SIMPLES["simulacao"].has_point(p):
+		simulacao_bancada = not simulacao_bancada
+		_show_notice(
+			"SIMULAÇÃO DE BANCADA LIGADA — DESLIGUE ANTES DE ABRIR"
+			if simulacao_bancada else "SIMULAÇÃO DE BANCADA DESLIGADA"
+		)
 	elif BOTOES_SIMPLES["modo_livre"].has_point(p):
 		game_mode = "free"
 	elif BOTOES_SIMPLES["modo_ficha"].has_point(p):
 		game_mode = "credit"
-	elif BOTOES_SIMPLES["eixo"].has_point(p):
+	elif _visivel_na_pagina("eixo") and BOTOES_SIMPLES["eixo"].has_point(p):
 		var eixos := ["X", "Y", "Z"]
 		sensor_eixo = eixos[(eixos.find(sensor_eixo) + 1) % 3]
-	elif BOTOES_SIMPLES["enviar_config"].has_point(p):
+	elif _visivel_na_pagina("enviar_config") and BOTOES_SIMPLES["enviar_config"].has_point(p):
 		_enviar_config()
 		_show_notice("CONFIG ENVIADA AO ARDUINO")
-	elif BOTOES_SIMPLES["testar"].has_point(p):
+	elif _visivel_na_pagina("calibrar") and BOTOES_SIMPLES["calibrar"].has_point(p):
+		_abrir_calibracao()
+		return
+	elif _visivel_na_pagina("testar") and BOTOES_SIMPLES["testar"].has_point(p):
 		_teste_de_golpe()
-	elif BOTOES_SIMPLES["camera"].has_point(p):
+	elif _visivel_na_pagina("camera") and BOTOES_SIMPLES["camera"].has_point(p):
 		camera_enabled = not camera_enabled
 		camera_service.set_enabled(camera_enabled)
 		_show_notice(camera_service.status)
-	elif BOTOES_SIMPLES["trocar_camera"].has_point(p):
+	elif _visivel_na_pagina("trocar_camera") and BOTOES_SIMPLES["trocar_camera"].has_point(p):
 		camera_service.cycle_camera()
 		_show_notice(camera_service.status)
-	elif BOTOES_SIMPLES["foto_teste"].has_point(p):
+	elif _visivel_na_pagina("testar_som") and BOTOES_SIMPLES["testar_som"].has_point(p):
+		# O SOCO DE TESTE DA MESA toca o impacto e o nível mais alto por
+		# cima da trilha: é o pior caso de mistura, e é nele que se regula.
+		sons.play("hit", 1.5)
+		sons.play("subgrave", -4.0)
+		sons.play("nivel_peso", 0.5)
+		sons.duck(16.0, 2.5)
+		_show_notice("SOCO DE TESTE — CONFIRA A MISTURA")
+	elif _visivel_na_pagina("foto_teste") and BOTOES_SIMPLES["foto_teste"].has_point(p):
 		var test_path := camera_service.capture_photo()
 		if test_path.is_empty():
 			_show_notice(camera_service.status)
 		else:
 			RankingStore.delete_photo(test_path)
 			_show_notice("CAPTURA DA CÂMERA APROVADA")
-	elif BOTOES_SIMPLES["zerar"].has_point(p):
+	elif _visivel_na_pagina("zerar") and BOTOES_SIMPLES["zerar"].has_point(p):
 		if not _confirmar("contadores"):
 			return
 		credits = 0
 		plays = 0
 		_show_notice("CONTADORES ZERADOS")
-	elif BOTOES_SIMPLES["zerar_stats"].has_point(p):
+	elif _visivel_na_pagina("zerar_stats") and BOTOES_SIMPLES["zerar_stats"].has_point(p):
 		if not _confirmar("estatisticas"):
 			return
 		statistics = {}
 		_show_notice("ESTATÍSTICAS ZERADAS")
-	elif BOTOES_SIMPLES["zerar_ranking"].has_point(p):
+	elif _visivel_na_pagina("zerar_ranking") and BOTOES_SIMPLES["zerar_ranking"].has_point(p):
 		if not _confirmar("ranking"):
 			return
 		RankingStore.clear_photos(ranking)
 		ranking.clear()
 		_photo_cache.clear()
 		_show_notice("RANKING E FOTOS ZERADOS")
-	elif BOTOES_SIMPLES["reconectar"].has_point(p):
+	elif _visivel_na_pagina("reconectar") and BOTOES_SIMPLES["reconectar"].has_point(p):
 		if link != null:
 			link.close_port()
 		_tentar_conectar()
@@ -967,15 +1487,13 @@ func _click_central(p: Vector2) -> void:
 	elif BOTOES_SIMPLES["padroes"].has_point(p):
 		game_mode = "credit"
 		porta_configurada = ""
-		hit_min_speed = 0.8
-		hit_max_speed = 12.0
+		hit_min_speed = ScoreCurve.DEFAULT_MIN_SPEED
+		hit_max_speed = ScoreCurve.DEFAULT_MAX_SPEED
 		score_exponent = ScoreCurve.DEFAULT_EXPONENT
 		score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
-		limiar_fraco = GameDef.LIMIAR_FRACO_PADRAO
-		limiar_forte = GameDef.LIMIAR_FORTE_PADRAO
 		sensor_eixo = "X"
 		sensor_raio = 0.45
-		sensor_vmin = 0.8
+		sensor_vmin = ScoreCurve.DEFAULT_MIN_SPEED
 		sensor_amin = 3.5
 		_show_notice("PADRÕES RESTAURADOS")
 	else:
@@ -984,19 +1502,30 @@ func _click_central(p: Vector2) -> void:
 	_salvar()
 
 ## Um clique num − ou + . Cada valor tem o seu passo e os seus limites,
-## e o saneamento das faixas fica com `GameDef.limiares`.
+## e o saneamento fica com `ScoreCurve.sanitize`, chamado por
+## `_aplicar_faixas` logo depois de qualquer ajuste.
 func _ajustar(chave: String, direcao: int) -> void:
 	match chave:
-		"limiar_fraco":
-			limiar_fraco = limiar_fraco + direcao * 10
-		"limiar_forte":
-			limiar_forte = limiar_forte + direcao * 10
 		"vmin":
-			hit_min_speed = clampf(hit_min_speed + direcao * 0.1, 0.2, hit_max_speed - 0.5)
+			hit_min_speed = clampf(
+				hit_min_speed + direcao * 0.1,
+				ScoreCurve.MIN_SPEED_MIN, minf(ScoreCurve.MIN_SPEED_MAX, hit_max_speed - 0.5)
+			)
 		"vmax":
-			hit_max_speed = clampf(hit_max_speed + direcao * 0.5, hit_min_speed + 0.5, 40.0)
+			hit_max_speed = clampf(
+				hit_max_speed + direcao * 0.5,
+				maxf(ScoreCurve.MAX_SPEED_MIN, hit_min_speed + 0.5), ScoreCurve.MAX_SPEED_MAX
+			)
 		"curva":
 			score_exponent = clampf(score_exponent + direcao * 0.05, ScoreCurve.EXPONENT_MIN, ScoreCurve.EXPONENT_MAX)
+		"zona":
+			score_dead_zone = clampf(score_dead_zone + direcao * 0.01, 0.0, ScoreCurve.DEAD_ZONE_MAX)
+		"vol_musica":
+			volume_musica = clampf(volume_musica + direcao, -40.0, 6.0)
+			sons.set_volumes(volume_musica, volume_efeitos)
+		"vol_efeitos":
+			volume_efeitos = clampf(volume_efeitos + direcao, -40.0, 6.0)
+			sons.set_volumes(volume_musica, volume_efeitos)
 		"porta":
 			_girar_porta(direcao)
 		"raio":
@@ -1040,18 +1569,33 @@ func _carregar() -> void:
 	# primeira linha do ranking, para o dono não perder a marca da casa
 	# ao atualizar o software.
 	var antigo := int(data.get("best_score", 0))
-	ranking = RankingStore.migrate(data.get("ranking", []), antigo)
+	# A versão gravada decide se as marcas ainda estão na escala antiga.
+	# Ausente quer dizer "arquivo de antes de existir versão", ou seja,
+	# escala 0 a 999 — e é essa a única vez que a conversão acontece.
+	var esquema := int(data.get("ranking_schema", RankingStore.ESQUEMA_LEGADO))
+	ranking = RankingStore.migrate(data.get("ranking", []), antigo, esquema)
+	if esquema < RankingStore.ESQUEMA:
+		# Grava a nova versão já, e não só no próximo `_salvar`: uma queda
+		# de energia entre a conversão e o primeiro salvamento converteria
+		# tudo de novo no religar.
+		# Grava a versão nova AGORA, e não só no próximo `_salvar`: uma
+		# queda de energia entre a conversão e o primeiro salvamento
+		# converteria tudo outra vez no religar.
+		_converteu_esquema = true
 	porta_configurada = str(data.get("port", porta_configurada))
 	hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
 	hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
 	score_exponent = float(data.get("score_exponent", score_exponent))
 	score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
-	limiar_fraco = int(data.get("limiar_fraco", limiar_fraco))
-	limiar_forte = int(data.get("limiar_forte", limiar_forte))
 	sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 	sensor_raio = float(data.get("sensor_raio", sensor_raio))
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
+	simulacao_bancada = bool(data.get("simulacao_bancada", false))
+	volume_musica = float(data.get("volume_musica", volume_musica))
+	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
+	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
+	botao_credito = _mapa_de_botao(data.get("botao_credito", {}), 4)
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
 	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
 	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
@@ -1062,6 +1606,7 @@ func _salvar() -> void:
 		"credits": credits,
 		"plays": plays,
 		"ranking": ranking,
+		"ranking_schema": RankingStore.ESQUEMA,
 		# Mantido para uma eventual volta a uma versão anterior do jogo.
 		"best_score": _melhor(),
 		"port": porta_configurada,
@@ -1069,12 +1614,15 @@ func _salvar() -> void:
 		"hit_max_speed": hit_max_speed,
 		"score_exponent": score_exponent,
 		"score_dead_zone": score_dead_zone,
-		"limiar_fraco": limiar_fraco,
-		"limiar_forte": limiar_forte,
 		"sensor_eixo": sensor_eixo,
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
 		"sensor_amin": sensor_amin,
+		"simulacao_bancada": simulacao_bancada,
+		"volume_musica": volume_musica,
+		"volume_efeitos": volume_efeitos,
+		"botao_start": botao_start,
+		"botao_credito": botao_credito,
 		"camera_enabled": camera_enabled,
 		"camera_mirrored": camera_mirrored,
 		"statistics": statistics,
@@ -1086,11 +1634,17 @@ func _salvar() -> void:
 func _draw() -> void:
 	fundo.visible = true
 	moldura.visible = false
-	# O TREMOR SACODE A TELA INTEIRA: um deslocamento só, antes de tudo.
+	# TREMOR E ZOOM SACODEM A TELA INTEIRA: uma transformação só, antes de
+	# tudo. O zoom cresce a partir do PONTO DO SOCO e não do centro da
+	# tela — crescer pelo centro afastaria a imagem justamente do lugar
+	# onde a pessoa está olhando.
 	_deslocamento = Vector2.ZERO
 	if tremor > 0.1:
 		_deslocamento = Vector2(randf_range(-tremor, tremor), randf_range(-tremor, tremor))
-		draw_set_transform(_deslocamento, 0.0, Vector2.ONE)
+	var escala := Vector2.ONE * zoom_impacto
+	var origem := _deslocamento + ALVO_DO_SOCO - ALVO_DO_SOCO * zoom_impacto
+	if tremor > 0.1 or zoom_impacto != 1.0:
+		draw_set_transform(origem, 0.0, escala)
 
 	if state == GameDef.State.IDLE:
 		if intro_active:
@@ -1112,61 +1666,26 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if central_aberta:
 		_draw_central()
+		# O ASSISTENTE COBRE A CENTRAL. Enquanto ele está no ar, mexer nos
+		# passos por baixo mudaria justamente os números que ele está
+		# medindo — e o técnico veria a sugestão brigar com o que ele
+		# acabou de ajustar.
+		if calib_ativo:
+			_draw_calibracao()
 
-## A ESTRELA DE PANCADA.
+## O IMPACTO NA TELA, entregue ao diretor de efeitos.
 ##
-## O desenho que diz "BATEU" antes de qualquer número: um estrelão
-## irregular abrindo no ponto do golpe, com rachaduras saindo dele e um
-## anel de riscos convergindo. É a gramática de história em quadrinhos, e
-## ela existe porque anel e faísca sozinhos dizem "alguma coisa
-## aconteceu" — não dizem "levou um soco".
-##
-## As pontas NÃO são sorteadas por quadro: um estrelão que muda de forma
-## a cada quadro vira ruído. O molde é fixo e só a escala se move.
-const PANCADA_DURACAO := 0.40
-const PANCADA_PONTAS := 14
+## Cada nível tem o seu desenho — estrelão, rachaduras, túnel de luz,
+## palco reagindo — e a receita mora em `ScoreTier`. Aqui só se decide
+## QUANDO desenhar; o QUE desenhar é do diretor.
 func _draw_pancada() -> void:
-	if pancada_tempo < 0.0:
+	if pancada_tempo < 0.0 or pancada_nivel.is_empty():
 		return
-	var t := clampf(pancada_tempo / PANCADA_DURACAO, 0.0, 1.0)
-	var centro := _alvo()
-	var escala := lerpf(0.35, 1.0, ease(t, 0.28)) * (0.75 + pancada_forca * 0.55)
-	var some := pow(1.0 - t, 1.6)
-
-	# Riscos convergindo: chegam de fora e morrem no ponto do impacto.
-	for i in range(20):
-		var ang := float(i) * TAU / 20.0 + 0.17
-		var de := 420.0 + (1.0 - t) * 420.0
-		var ate := de - lerpf(220.0, 40.0, t)
-		draw_line(
-			centro + Vector2.from_angle(ang) * de, centro + Vector2.from_angle(ang) * ate,
-			Color(Paleta.AMBAR, some * 0.55), lerpf(8.0, 2.0, t), true
-		)
-
-	var fora := PackedVector2Array()
-	var dentro := PackedVector2Array()
-	for i in range(PANCADA_PONTAS * 2):
-		var ang := float(i) * TAU / float(PANCADA_PONTAS * 2) - PI * 0.5
-		# O denteado alterna longo/curto e ainda varia de ponta a ponta,
-		# porque um estrelão perfeitamente regular lê como engrenagem.
-		var longo := i % 2 == 0
-		var variacao := 0.82 + 0.18 * sin(float(i) * 2.7)
-		var raio := (330.0 if longo else 170.0) * variacao * escala
-		fora.append(centro + Vector2.from_angle(ang) * raio)
-		dentro.append(centro + Vector2.from_angle(ang) * raio * 0.72)
-	draw_colored_polygon(fora, Color(Paleta.VERMELHO, some * 0.85))
-	draw_colored_polygon(dentro, Color(Paleta.AMBAR, some * 0.95))
-	draw_polyline(fora + PackedVector2Array([fora[0]]), Color(Paleta.CREME, some), 5.0, true)
-
-	# Rachaduras: três traços quebrados saindo do miolo.
-	for i in range(3):
-		var ang := float(i) * TAU / 3.0 + 0.6
-		var ponta := centro
-		var caminho := PackedVector2Array([centro])
-		for k in range(3):
-			ponta += Vector2.from_angle(ang + sin(float(k) * 2.1 + float(i)) * 0.45) * (110.0 * escala)
-			caminho.append(ponta)
-		draw_polyline(caminho, Color(Paleta.CREME, some * 0.8), lerpf(9.0, 2.0, t), true)
+	ImpactDirector.desenhar(
+		self, pancada_nivel,
+		clampf(pancada_tempo / ImpactDirector.PANCADA_DURACAO, 0.0, 1.0),
+		_alvo(), pancada_forca
+	)
 
 ## O CLARÃO DO SOCO NUM FUNDO CLARO. Lavar a tela de branco não funciona
 ## aqui — branco sobre quase-branco não é clarão, é nada. O golpe acende
@@ -1227,7 +1746,7 @@ func _pagina_recordes(alpha: float) -> void:
 			_texto("—", meio, 34, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 		else:
 			_draw_player_photo(Rect2(linha.position + Vector2(210.0, 11.0), Vector2(76.0, 76.0)), str(ranking[i].get("photo_path", "")), alpha)
-			_texto("%03d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
+			_texto("%04d" % RankingStore.score_at(ranking, i), meio, 44, Color(Paleta.TINTA, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 40.0)
 			_texto("PONTOS", meio, 18, Color(Paleta.TINTA_LEVE, alpha), HORIZONTAL_ALIGNMENT_RIGHT, linha.position.x, linha.size.x - 190.0)
 	_texto("POSIÇÕES %02d–%02d" % [page * 5 + 1, page * 5 + 5], 1152.0, 26, Color(Paleta.CIANO, alpha))
 
@@ -1295,91 +1814,63 @@ func _draw_partida() -> void:
 
 ## A TELA QUE ESPERA O SOCO.
 ##
-## Não há mais saco desenhado nem barra de tempo. O saco de pancadas é a
-## peça FÍSICA que a pessoa tem na frente do corpo; desenhar um segundo
-## saco na tela dividia a atenção entre dois alvos, e o de pixel não é o
-## que se acerta. E a barra que esvaziava contava um tempo que ninguém
-## pediu — com o crédito já debitado, ela só servia para apressar.
+## Não há saco desenhado, não há barra de tempo e — desde a escala de
+## quatro dígitos — não há mais CÍRCULO DE PLACAR aqui. O círculo é o
+## objeto que revela a nota; mostrá-lo antes do golpe, mesmo vazio,
+## promete um número que ainda não existe e ensina a pessoa a olhar para
+## o lugar errado justamente quando ela deveria estar olhando para o saco
+## de verdade.
 ##
-## No lugar entra um FAROL: o mesmo visor que vai mostrar a pontuação,
-## piscando e mandando anéis para fora, dizendo "estou armado, pode
-## vir". Quem soca vê o número nascer exatamente onde o farol estava.
+## O que fica é um ALVO: anéis concêntricos respirando no ponto onde o
+## soco aterrissa, com o farol mandando anéis para fora. Chamada, e não
+## instrumento.
 func _draw_espera_do_soco() -> void:
-	var carregando := carga_tempo >= 0.0
-	# ÂMBAR, E NÃO VERMELHO, ENQUANTO ESPERA. O painel já é vermelho
-	# sobre vermelho; um farol vermelho dentro dele desaparece a três
-	# metros, que é exatamente a distância de quem ainda está decidindo
-	# se soca. Assim que a carga começa, a cor passa a ser a da faixa.
-	var cor := Paleta.AMBAR
-	if carregando:
-		cor = GameDef.classificar(carga_pontos, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+	_draw_farol(Paleta.AMBAR)
+	var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
+	_texto_arcade("SOQUE AGORA!", 1420.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
+	_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1488.0, Color.WHITE)
+	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1556.0, Paleta.AMBAR)
 
-	_draw_farol(cor, carregando)
-
-	if carregando:
-		# CARREGANDO (teclado, sem sensor): o número exato que sai se
-		# soltar agora, no mesmo visor e no mesmo formato em que ele vai
-		# aparecer no resultado. Quem carrega não adivinha quanto vale
-		# quanto: solta quando o número que está vendo serve.
-		_rotulo("PONTOS SE SOLTAR AGORA", 785.0, cor)
-		VisorLed.desenhar(self, "%03d" % carga_pontos, ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, Color.WHITE)
-		var piscada := 0.6 + 0.4 * sin(animation_time * 9.0)
-		_texto_arcade("SOLTE!", 1430.0, 72, Color(Paleta.AMBAR, piscada), LARGURA_UTIL)
-	else:
-		_rotulo("ESTOU PRONTO", 785.0, cor)
-		VisorLed.desenhar(self, "---", ALVO_DO_SOCO + Vector2(0.0, 20.0), 168.0, cor)
-		var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
-		_texto_arcade("SOQUE AGORA!", 1400.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
-		var dica := "ACERTE O ALVO COM TODA A FORÇA" if _sensor_ligado() \
-			else "SEGURE E SOLTE ESPAÇO PARA SIMULAR"
-		_rotulo(dica, 1468.0, Color.WHITE)
-		# A MARCA A BATER FICA DENTRO DO VISOR, não embaixo dele: a faixa
-		# vermelha do fundo começa perto de 1500 px e engole qualquer
-		# texto miúdo que caia ali. Dentro do vidro escuro ela é legível
-		# e, de quebra, fica ao lado do número que vai substituí-la.
-		_rotulo("RECORDE DA CASA  %03d" % _melhor(), 1105.0, Paleta.AMBAR)
+	# O SIMULADOR DE BANCADA aparece só quando está liberado. Em salão
+	# não existe barra de espaço, e anunciá-la seria ensinar um atalho
+	# que, se existisse, seria fraude.
+	if _simulador_liberado():
+		_apoio("BANCADA: SEGURE E SOLTE ESPAÇO", 1620.0, Paleta.ROXO)
+		if carga_tempo >= 0.0:
+			_texto_arcade("%04d" % carga_pontos, 1706.0, 66, Paleta.ROXO, LARGURA_UTIL)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
 	# Nos primeiros setenta e cinco segundos não há relógio nenhum: a
-	# máquina espera calada, que é o que se pediu. Só quando ela vai
-	# mesmo desistir é que avisa — e avisa dizendo que a ficha volta,
-	# senão o aviso vira ameaça.
+	# máquina espera calada, que é o que se pediu. Só quando ela vai mesmo
+	# desistir é que avisa — e avisa dizendo que a ficha volta, senão o
+	# aviso vira ameaça.
 	if espera_left <= GameDef.AVISO_DE_VOLTA:
 		var segundos := maxi(0, int(ceil(espera_left)))
-		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1660.0, Color.WHITE)
+		_apoio("VOLTANDO EM %02d  •  O CRÉDITO É DEVOLVIDO" % segundos, 1786.0, Color.WHITE)
 
-## O FAROL: anéis saindo do alvo, em batidas.
+## O FAROL E O ALVO: anéis saindo do ponto do soco, em batidas.
 ##
-## Três anéis defasados, sempre no mesmo compasso, e um halo respirando
-## por trás. É a única coisa que se move nesta tela, e move sempre para
-## FORA — na direção de quem está olhando, chamando o soco. Anéis
-## entrando para dentro leriam como contagem regressiva, que é
-## exatamente o que esta tela deixou de ter.
-func _draw_farol(cor: Color, carregando: bool) -> void:
+## Três anéis defasados, sempre no mesmo compasso, e o alvo respirando no
+## meio. Tudo se move para FORA — na direção de quem está olhando,
+## chamando o punho. Anéis entrando leriam como contagem regressiva, que
+## é exatamente o que esta tela deixou de ter.
+func _draw_farol(cor: Color) -> void:
 	var centro := ALVO_DO_SOCO
 	var compasso := 1.15
 	for i in range(3):
 		var fase := fmod(animation_time / compasso + float(i) / 3.0, 1.0)
 		var raio := lerpf(330.0, 620.0, ease(fase, 0.45))
 		draw_arc(centro, raio, 0.0, TAU, 96, Color(cor, (1.0 - fase) * 0.55), 10.0, true)
-	# O anel do visor: correndo em volta enquanto espera, cheio conforme
-	# a carga quando alguém está simulando pelo teclado.
-	draw_circle(centro, 326.0, Color("250911"))
-	draw_arc(centro, 327.0, 0.0, TAU, 192, Color("6d2835"), 4.0, true)
-	var carga := clampf(float(carga_pontos) / float(GameDef.SCORE_MAX), 0.0, 1.0)
-	for i in range(60):
-		var angulo := float(i) / 60.0 * TAU - PI * 0.5
-		var aceso := false
-		if carregando:
-			aceso = float(i) / 60.0 <= carga
-		else:
-			# Três marcas correndo, do jeito que um letreiro de fliperama
-			# fica quando está ligado e ocioso.
-			var passo := fmod(animation_time * 0.55, 1.0)
-			var d := fmod(float(i) / 60.0 - passo + 1.0, 1.0)
-			aceso = d < 0.06 or absf(d - 0.3333) < 0.03 or absf(d - 0.6667) < 0.03
-		draw_arc(centro, 347.0, angulo, angulo + 0.065, 5, cor if aceso else Color("57212c"), 14.0, true)
+	var respiro := 0.5 + 0.5 * sin(animation_time * 2.2)
+	Icones.alvo(self, centro, lerpf(268.0, 288.0, respiro), cor)
+	# Cantos de mira em volta do alvo: dizem "é AQUI" sem escrever nada.
+	var recuo := lerpf(330.0, 348.0, respiro)
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			var canto := centro + Vector2(sx * recuo, sy * recuo)
+			draw_line(canto, canto - Vector2(sx * 70.0, 0.0), Color(cor, 0.85), 8.0, true)
+			draw_line(canto, canto - Vector2(0.0, sy * 70.0), Color(cor, 0.85), 8.0, true)
 
 ## A ABERTURA GIRA EM TRÊS CAPÍTULOS.
 ##
@@ -1394,7 +1885,7 @@ const ABERTURA_DURACAO := 8.0
 
 func _draw_show_idle() -> void:
 	var chegada := ease(abertura_chegada, 0.4)
-	_texto("LAZER & SPORT", 220.0, 28, Color(Paleta.CIANO, chegada))
+	_texto("LAZER & SPORT GAMES", 220.0, 28, Color(Paleta.CIANO, chegada))
 	var capitulo := int(state_time / ABERTURA_DURACAO) % ABERTURA_CAPITULOS
 	# Cada capítulo entra com o seu próprio esmaecer; sem isso só o
 	# primeiro teria entrada e os outros dariam um salto seco.
@@ -1410,9 +1901,18 @@ func _draw_show_idle() -> void:
 	var pulse := 0.8 + 0.2 * sin(animation_time * 2.6)
 	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), chegada, 3.0)
 	_texto("PRESSIONE START", 1635.0, 46, Color(Color.WHITE, chegada))
+	# O LUGAR DO CRÉDITO PISCA quando alguém aperta START sem saldo.
+	var cor_credito := Color(Paleta.CIANO, chegada)
+	if aviso_de_credito >= 0.0:
+		var bate := 0.5 + 0.5 * sin(aviso_de_credito * 16.0)
+		cor_credito = Color(Paleta.VERMELHO.lerp(Paleta.AMBAR, bate), chegada)
+		_cartao(
+			Rect2(300, 1700, 480, 62), Color(Paleta.VERMELHO, 0.20 * bate),
+			Color(Paleta.AMBAR, bate), chegada, 3.0
+		)
 	_texto(
 		"JOGO LIVRE" if game_mode == "free" else "CRÉDITOS  %02d" % credits,
-		1740.0, 26, Color(Paleta.CIANO, chegada)
+		1740.0, 26, cor_credito
 	)
 	# CARIMBO DA BUILD. Discreto, mas na tela que fica ligada o dia
 	# inteiro: é ele que responde "atualizei e não mudou nada" sem
@@ -1425,7 +1925,7 @@ func _capitulo_da_marca(alpha: float) -> void:
 	_texto_arcade("CHALLENGE", 1010.0, 80, Color(Paleta.AMBAR, alpha), LARGURA_UTIL)
 	_texto("QUAL É A SUA FORÇA?", 1120.0, 32, Color(Color.WHITE, alpha))
 	_texto("RECORDE DA CASA", 1270.0, 24, Color(Color("d8b6a6"), alpha))
-	_texto("%03d" % _melhor(), 1400.0, 98, Color(Paleta.AMBAR, alpha))
+	_texto("%04d" % _melhor(), 1400.0, 98, Color(Paleta.AMBAR, alpha))
 
 ## Quantos capítulos existem e em qual estamos. Sem isso o rodízio parece
 ## a tela trocando sozinha por defeito.
@@ -1455,7 +1955,7 @@ func _draw_score_hero() -> void:
 	# o anel de um golpe fraco não pode ser igual ao de um nocaute.
 	var color := Paleta.CIANO
 	if verdict_time >= 0.0:
-		color = GameDef.classificar(result_score, limiar_fraco, limiar_forte)["cor_faixa"] as Color
+		color = GameDef.classificar(result_score)["cor_faixa"] as Color
 	_draw_campo_de_forca(center, color, progress, measuring)
 	_draw_colunas_de_forca(color, progress)
 	for i in range(12):
@@ -1473,7 +1973,7 @@ func _draw_score_hero() -> void:
 	# reconhece não é o formato do algarismo: é o SEGMENTO APAGADO, que
 	# continua visível atrás do número. Nenhuma fonte dá isso.
 	VisorLed.desenhar(
-		self, "---" if measuring else "%03d" % int(round(displayed_score)),
+		self, "----" if measuring else "%04d" % int(round(displayed_score)),
 		center + Vector2(0.0, 20.0), 168.0, Color.WHITE if not measuring else color
 	)
 	if verdict_time >= 0.0:
@@ -1483,8 +1983,12 @@ func _draw_score_hero() -> void:
 		# velocidade é o que o sensor de fato viu. Quem duvida do placar
 		# ("essa máquina está roubando") tem aqui o número cru.
 		_apoio("%.1f m/s no sensor" % result_speed, 1330.0, Paleta.TINTA_FRACA)
-		var title := "%dº LUGAR" % posicao_no_ranking if posicao_no_ranking > 0 else "BOM SOCO!"
-		_texto_arcade(title, 1430.0, 64, color, LARGURA_UTIL)
+		# O NOME DO NÍVEL VEM ANTES DA COLOCAÇÃO. A pessoa quer saber o
+		# que ela fez — "NOCAUTE" — e só depois onde isso a coloca. A
+		# ordem inversa transformava o veredito numa tabela.
+		_texto_arcade(ScoreTier.nome_de(result_score), 1440.0, 84, color, LARGURA_UTIL)
+		if posicao_no_ranking > 0:
+			_rotulo("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1520.0, Paleta.AMBAR)
 
 ## O VAZIO ATRÁS DO PLACAR ERA O MAIOR PEDAÇO DA TELA.
 ##
@@ -1584,90 +2088,30 @@ func _draw_ranking_reveal() -> void:
 		_draw_player_photo(Rect2(card.position + Vector2(124, 12), Vector2(120, 120)), str(ranking[i].get("photo_path", "")), 1.0)
 		_texto("%02d" % (i + 1), y + 91.0, 45, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 22.0)
 		_texto("VOCÊ" if selected else "JOGADOR", y + 64.0, 26, color, HORIZONTAL_ALIGNMENT_LEFT, card.position.x + 270.0)
-		_texto("%03d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
+		_texto("%04d" % RankingStore.score_at(ranking, i), y + 106.0, 62, Paleta.TINTA, HORIZONTAL_ALIGNMENT_RIGHT, card.position.x, card.size.x - 35.0)
 	_rotulo("SEU SOCO", 1400.0, Paleta.TINTA_FRACA)
-	_texto_arcade("%03d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
+	_texto_arcade("%04d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
 
 # ---------------------------------------------------------------- central
 func _draw_central() -> void:
-	# Véu sobre o jogo: a Central cobre a tela, mas o técnico continua
-	# vendo que a máquina está ligada por trás.
-	draw_rect(Rect2(Vector2.ZERO, TELA), Color("120409", 0.94))
 	var caixa := Rect2(40, 96, 1000, 1790)
-	_placa(Rect2(caixa.position + Vector2(0.0, 8.0), caixa.size), 22.0, Paleta.SOMBRA)
-	# Borda DOURADA e miolo mais claro que o fundo. Com a moldura em
-	# marinho, que neste tema é quase o preto da tela, o painel não se
-	# separava do jogo atrás e a Central parecia colada por cima.
-	_placa(caixa, 22.0, Paleta.AMBAR)
+	_placa(caixa, 22.0, Paleta.CARTAO_BORDA)
 	_placa(caixa.grow(-5.0), 19.0, Color("2b0a13"))
 	_letreiro("CENTRAL TÉCNICA", Vector2(110.0, 204.0), 44, Paleta.CREME)
 	_texto("Configuração, diagnóstico e calibração", 240.0, 18, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 110.0)
 	_botao(BOTOES_SIMPLES["fechar"], "×", false, Paleta.VERMELHO, 32)
+	_abas_da_central()
 
-	# ---- modo de operação
-	_secao(Rect2(80, 262, 920, 138), "MODO DE OPERAÇÃO", Paleta.ROSA)
-	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
-	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
-
-	# ---- faixas do placar
-	_secao(Rect2(80, 416, 920, 244), "FAIXAS DO PLACAR (0 – 999)", Paleta.AMBAR)
-	_regua_das_faixas(Rect2(110, 470, 860, 28))
-	_stepper("limiar_fraco", "%03d" % limiar_fraco, "ATÉ AQUI É FRACO", GameDef.COR_FRACA)
-	_stepper("limiar_forte", "%03d" % limiar_forte, "DAQUI É FORTE", GameDef.COR_FORTE)
-
-	# ---- velocidade e dificuldade, cada uma na sua linha
-	_secao(Rect2(80, 676, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
-	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0 PONTOS", Paleta.CIANO)
-	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  999 PONTOS", Paleta.CIANO)
-	_stepper(
-		"curva", "γ %.2f" % score_exponent,
-		"CURVA %s  •  ZONA MORTA %.0f%%" % [ScoreCurve.difficulty_name(score_exponent), score_dead_zone * 100.0],
-		Paleta.ROXO
-	)
-
-	# ---- sensor e firmware
-	_secao(Rect2(80, 976, 920, 274), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
-	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
-	draw_circle(Vector2(560, 1010.0), 7.0, dot)
-	_texto(serial_status, 1016.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
-	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
-	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
-	_texto("EIXO DO GOLPE", 1128.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
-	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
-	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
-
-	# ---- câmera, em seção própria
-	_secao(Rect2(80, 1266, 920, 154), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
-	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
-	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
-	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
-	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
-	_texto(cam_status, 1404.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
-
-	# ---- ações no firmware
-	_secao(Rect2(80, 1436, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
-	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
-	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
-
-	# ---- ranking e diagnóstico
-	_secao(Rect2(80, 1572, 920, 214), "MELHORES DA CASA E DIAGNÓSTICO", Paleta.VERMELHO)
-	# A faixa começa ABAIXO da linha de base do título. Antes ela subia
-	# até 1508 com o título em 1512, e as células cobriam o nome da seção.
-	_lista_do_ranking(Rect2(110, 1618, 860, 42))
-	_texto(
-		telemetria if telemetria != "" else "sem telemetria ainda",
-		1684.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-	)
-	var resumo := StatisticsStore.summary(statistics)
-	_texto(
-		"Hoje %d  •  7 dias %d  •  média %03d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
-		1706.0, 14, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
-	)
-	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
-	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
-	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
-	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+	match central_pagina:
+		1:
+			_central_golpe()
+		2:
+			_central_camera()
+		3:
+			_central_dados()
+		_:
+			_central_operacao()
 
 	_botao(BOTOES_SIMPLES["padroes"], "RESTAURAR PADRÕES", false, Paleta.AMBAR, 19)
 	_botao(BOTOES_SIMPLES["salvar"], "SALVAR E FECHAR", true, Paleta.VERDE, 21)
@@ -1680,6 +2124,232 @@ func _draw_central() -> void:
 		1872.0, 14, Paleta.TINTA_LEVE
 	)
 
+func _abas_da_central() -> void:
+	for i in range(PAGINAS.size()):
+		var r := Rect2(
+			ABA_RECT.position + Vector2(float(i) * ABA_LARGURA, 0.0),
+			Vector2(ABA_LARGURA - 6.0, ABA_RECT.size.y)
+		)
+		var atual := i == central_pagina
+		_cartao(r, Paleta.AMBAR if atual else Color("330c16"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+		_texto(
+			str(PAGINAS[i]), r.position.y + 40.0, 20,
+			Color("2b0a13") if atual else Paleta.TINTA_FRACA,
+			HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x
+		)
+
+# ---------------------------------------------------------- OPERAÇÃO
+func _central_operacao() -> void:
+	_secao(Rect2(80, 350, 920, 138), "MODO DE OPERAÇÃO", Paleta.ROSA)
+	_botao(BOTOES_SIMPLES["modo_livre"], "LIVRE", game_mode == "free", Paleta.CIANO, 22)
+	_botao(BOTOES_SIMPLES["modo_ficha"], "1 FICHA", game_mode == "credit", Paleta.ROSA, 22)
+
+	# ---- os dois botões físicos do gabinete
+	_secao(Rect2(80, 504, 920, 400), "BOTÕES DO GABINETE (ZERO DELAY)", Paleta.CIANO)
+	_texto(
+		"A placa aparece como controle USB e o índice muda de porta para porta. Mapeie aqui.",
+		578.0, 15, Paleta.TINTA_FRACA
+	)
+	_botao(
+		BOTOES_SIMPLES["mapear_start"],
+		"AGUARDANDO START" if mapeando == "start" else "MAPEAR START",
+		mapeando == "start", Paleta.VERDE, 19
+	)
+	_botao(
+		BOTOES_SIMPLES["mapear_credito"],
+		"AGUARDANDO CRÉDITO" if mapeando == "credito" else "MAPEAR CRÉDITO",
+		mapeando == "credito", Paleta.AMBAR, 19
+	)
+	_ficha_do_botao(botao_start, "START", Rect2(110, 706, 400, 150), contador_start)
+	_ficha_do_botao(botao_credito, "CRÉDITO", Rect2(570, 706, 400, 150), contador_credito)
+
+	# ---- a chave que libera a barra de espaço
+	_secao(Rect2(80, 920, 920, 200), "SIMULAÇÃO DE BANCADA", Paleta.ROXO)
+	_botao(
+		BOTOES_SIMPLES["simulacao"],
+		"LIGADA" if simulacao_bancada else "DESLIGADA",
+		simulacao_bancada, Paleta.VERMELHO if simulacao_bancada else Paleta.ROXO, 20
+	)
+	_texto(
+		"Ligada, a barra de espaço vale como soco. Serve para montar e regular a máquina —",
+		1000.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
+	)
+	_texto(
+		"num salão, é qualquer pessoa tirando 9999 sem encostar no equipamento.",
+		1024.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
+	)
+	if simulacao_bancada:
+		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1076.0, 18, Paleta.VERMELHO)
+
+	_secao(Rect2(80, 1136, 920, 130), "SALDO", Paleta.AMBAR)
+	_texto(
+		"Créditos %02d  •  partidas contadas %d  •  modo %s" % [
+			credits, plays, "livre" if game_mode == "free" else "1 ficha"
+		],
+		1210.0, 20, Paleta.CREME
+	)
+
+## A ficha de um botão mapeado: qual controle, qual índice, e um contador
+## que sobe a cada aperto. O contador é o que prova que o mapeamento
+## pegou — sem ele, o técnico aperta o botão e não sabe se o problema é a
+## placa, o índice ou o jogo.
+func _ficha_do_botao(mapa: Dictionary, titulo: String, rect: Rect2, contador: int) -> void:
+	_cartao(rect, Color("240810"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+	_texto(titulo, rect.position.y + 34.0, 20, Paleta.CREME, HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x)
+	var indice := int(mapa.get("index", -1))
+	_texto(
+		"BOTÃO %d" % indice if indice >= 0 else "NÃO MAPEADO",
+		rect.position.y + 68.0, 18,
+		Paleta.AMBAR if indice >= 0 else Paleta.VERMELHO,
+		HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x
+	)
+	var nome := str(mapa.get("nome", ""))
+	_texto(
+		nome if not nome.is_empty() else "controle não identificado",
+		rect.position.y + 98.0, 14, Paleta.TINTA_LEVE,
+		HORIZONTAL_ALIGNMENT_CENTER, rect.position.x + 8.0, rect.size.x - 16.0
+	)
+	_texto(
+		"apertado %d ×" % contador, rect.position.y + 128.0, 16, Paleta.VERDE,
+		HORIZONTAL_ALIGNMENT_CENTER, rect.position.x, rect.size.x
+	)
+
+# ------------------------------------------------------------- GOLPE
+func _central_golpe() -> void:
+	_secao(Rect2(80, 350, 920, 284), "VELOCIDADE E DIFICULDADE", Paleta.CIANO)
+	_stepper("vmin", "%.1f m/s" % hit_min_speed, "MÍNIMA  =  0000 PONTOS", Paleta.CIANO)
+	_stepper("vmax", "%.1f m/s" % hit_max_speed, "MÁXIMA  =  9999 PONTOS", Paleta.CIANO)
+	_stepper(
+		"curva", "γ %.2f" % score_exponent,
+		"CURVA  %s" % ScoreCurve.difficulty_name(score_exponent), Paleta.ROXO
+	)
+	_stepper("zona", "%.0f%%" % (score_dead_zone * 100.0), "ZONA MORTA", Paleta.ROXO)
+
+	_secao(Rect2(80, 650, 920, 260), "OS OITO NÍVEIS (0000 – 9999)", Paleta.AMBAR)
+	_regua_dos_niveis(Rect2(110, 710, 860, 40))
+	_texto(
+		"As faixas são fixas. Quem decide quanta gente chega a cada uma é a curva.",
+		744.0, 15, Paleta.TINTA_FRACA
+	)
+	_curva_desenhada(Rect2(110, 760, 860, 60))
+	_botao(BOTOES_SIMPLES["calibrar"], "ASSISTENTE DE CALIBRAÇÃO", false, Paleta.VERDE, 20)
+
+	_secao(Rect2(80, 926, 920, 300), "SENSOR DE SOCO (MPU-6050)", Paleta.ROXO)
+	var dot := Paleta.VERDE if _sensor_ligado() else Paleta.AMBAR
+	draw_circle(Vector2(560, 972.0), 7.0, dot)
+	_texto(serial_status, 978.0, 15, Paleta.para_texto(dot), HORIZONTAL_ALIGNMENT_LEFT, 578.0, 400.0)
+	_stepper("porta", porta_configurada if not porta_configurada.is_empty() else "AUTO", "PORTA SERIAL", Paleta.CIANO)
+	_botao(BOTOES_SIMPLES["eixo"], "EIXO  %s" % sensor_eixo, false, Paleta.ROXO, 20)
+	_texto("EIXO DO GOLPE", 1102.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, BOTOES_SIMPLES["eixo"].position.x, BOTOES_SIMPLES["eixo"].size.x)
+	_stepper("raio", "%.2f m" % sensor_raio, "RAIO DO BRAÇO", Paleta.CIANO)
+	_stepper("amin", "%.1f g" % sensor_amin, "SENSIBILIDADE", Paleta.CIANO)
+
+	_secao(Rect2(80, 1252, 920, 120), "AÇÕES NO FIRMWARE", Paleta.VERDE)
+	_botao(BOTOES_SIMPLES["enviar_config"], "ENVIAR CONFIG", false, Paleta.VERDE, 19)
+	_botao(BOTOES_SIMPLES["testar"], "TESTAR SENSOR", false, Paleta.AMBAR, 19)
+
+	_texto(
+		telemetria if telemetria != "" else "sem telemetria ainda",
+		1420.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	if not saturacao_recente.is_empty():
+		_texto(
+			"SATURAÇÃO DO SENSOR: %s — aumente a faixa do MPU-6050" % saturacao_recente,
+			1452.0, 15, Paleta.VERMELHO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		)
+
+## A CURVA DESENHADA, do jeito que ela vai pagar.
+##
+## Um expoente é um número abstrato: a diferença entre 2,80 e 3,20 só
+## existe no traço. Quem regula precisa VER o que a mudança faz antes de
+## salvar, senão regula por tentativa e erro em cima da fila do salão.
+func _curva_desenhada(rect: Rect2) -> void:
+	_cartao(rect, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 1.5)
+	var amostras := ScoreCurve.amostrar(hit_min_speed, hit_max_speed, score_exponent, score_dead_zone, 64)
+	if amostras.is_empty():
+		return
+	var v_max: float = (amostras[amostras.size() - 1] as Vector2).x
+	var pontos := PackedVector2Array()
+	for a in amostras:
+		var p: Vector2 = a
+		pontos.append(Vector2(
+			rect.position.x + rect.size.x * clampf(p.x / maxf(v_max, 0.01), 0.0, 1.0),
+			rect.end.y - rect.size.y * clampf(p.y / float(GameDef.SCORE_MAX), 0.0, 1.0)
+		))
+	draw_polyline(pontos, Paleta.AMBAR, 3.0, true)
+	_texto("0 m/s", rect.end.y + 20.0, 13, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, rect.position.x, rect.size.x)
+	_texto("%.0f m/s" % v_max, rect.end.y + 20.0, 13, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_RIGHT, rect.position.x, rect.size.x)
+
+# ------------------------------------------------------------ CÂMERA
+func _central_camera() -> void:
+	_secao(Rect2(80, 350, 920, 470), "CÂMERA DAS FOTOS DO RANKING", Paleta.ROSA)
+	_botao(BOTOES_SIMPLES["camera"], "CÂMERA ON" if camera_enabled else "CÂMERA OFF", camera_enabled, Paleta.ROXO, 16)
+	_botao(BOTOES_SIMPLES["trocar_camera"], "TROCAR CÂMERA", false, Paleta.CIANO, 16)
+	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
+	var previa := Rect2(340, 500, 400, 260)
+	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
+	if camera_service != null and camera_service.available():
+		_draw_texture_cover(camera_service.preview_texture(), previa, 1.0, camera_mirrored)
+	else:
+		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
+	var cam_status := camera_service.status if camera_service != null else "SEM SERVIÇO"
+	_texto(cam_status, 792.0, 16, Paleta.TINTA_FRACA)
+	# QUANTAS VEZES A PONTE PRECISOU SER RELIGADA. Uma ponte que
+	# ressuscita o tempo todo é cabo ou porta USB com defeito, não
+	# software — e sem esse número ninguém tem como saber a diferença.
+	var religadas := camera_service.reinicios_da_ponte() if camera_service != null else 0
+	if religadas > 0:
+		_texto(
+			"ponte religada %d × nesta sessão — se for muito, troque o cabo ou a porta USB" % religadas,
+			818.0, 14, Paleta.AMBAR
+		)
+
+	_secao(Rect2(80, 850, 920, 290), "MESA DE SOM", Paleta.VERDE)
+	_stepper("vol_musica", "%+.0f dB" % volume_musica, "TRILHA", Paleta.CIANO)
+	_stepper("vol_efeitos", "%+.0f dB" % volume_efeitos, "EFEITOS E VOZ", Paleta.AMBAR)
+	_botao(BOTOES_SIMPLES["testar_som"], "TOCAR SOCO DE TESTE", false, Paleta.VERDE, 19)
+
+	_secao(Rect2(80, 1170, 920, 170), "COMO A FOTO É USADA", Paleta.AMBAR)
+	_texto("A foto é tirada ANTES de o sensor armar, recortada em quadrado pelo centro", 1236.0, 15, Paleta.TINTA_FRACA)
+	_texto("e guardada só se a marca entrar no Top 20. As descartadas são apagadas.", 1262.0, 15, Paleta.TINTA_FRACA)
+	_texto("Fotos guardadas: %d" % _fotos_guardadas(), 1306.0, 18, Paleta.CREME)
+
+# ------------------------------------------------------------- DADOS
+func _central_dados() -> void:
+	_secao(Rect2(80, 350, 920, 220), "MELHORES DA CASA", Paleta.VERMELHO)
+	_lista_do_ranking(Rect2(110, 410, 860, 42))
+	var resumo := StatisticsStore.summary(statistics)
+	_texto(
+		"Hoje %d  •  7 dias %d  •  média %04d  •  Top 5: %d" % [resumo["today"], resumo["last7"], resumo["average"], resumo["top5_entries"]],
+		502.0, 16, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto("Recorde da casa: %04d" % _melhor(), 532.0, 18, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+
+	_secao(Rect2(80, 600, 920, 180), "DIAGNÓSTICO", Paleta.CIANO)
+	_texto(serial_status, 664.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
+	_texto(
+		telemetria if telemetria != "" else "sem telemetria ainda",
+		692.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	_texto(
+		"START %d apertos  •  CRÉDITO %d apertos" % [contador_start, contador_credito],
+		720.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	_secao(Rect2(80, 796, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
+	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
+	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
+	_botao(BOTOES_SIMPLES["reconectar"], "RECONECTAR", false, Paleta.CIANO, 14)
+
+## Quantas fotos existem na pasta do ranking. Serve para o técnico
+## perceber sobra de arquivo — foto sem dono é disco enchendo à toa.
+func _fotos_guardadas() -> int:
+	var dir := DirAccess.open(RankingStore.PHOTO_DIR)
+	if dir == null:
+		return 0
+	return dir.get_files().size()
+
 ## As cinco marcas em uma linha só: o técnico precisa VER o que vai
 ## apagar antes de apertar ZERAR RANKING.
 func _lista_do_ranking(rect: Rect2) -> void:
@@ -1691,7 +2361,7 @@ func _lista_do_ranking(rect: Rect2) -> void:
 		_cartao(celula, Paleta.tinta_clara(cor, 0.14) if tem else Paleta.VAZIO, Paleta.CARTAO_BORDA, 1.0, 0.0)
 		_texto("%dº" % (i + 1), celula.position.y + 20.0, 13, Color(Paleta.para_texto(cor)), HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x)
 		_texto(
-			"%03d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
+			"%04d" % RankingStore.score_at(ranking, i) if tem else "—", celula.position.y + 44.0, 22,
 			Paleta.TINTA if tem else Paleta.TINTA_LEVE,
 			HORIZONTAL_ALIGNMENT_CENTER, celula.position.x, celula.size.x
 		)
@@ -1717,24 +2387,33 @@ func _stepper(chave: String, valor: String, legenda: String, accent: Color) -> v
 	var r: Rect2 = PASSOS[chave]
 	_texto(legenda, r.end.y + 28.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_CENTER, r.position.x, r.size.x)
 
-## A régua das três faixas, do jeito que o cliente vai ver no placar.
-## Mexer num limite muda esta barra na hora: o técnico regula olhando o
-## resultado, não imaginando o resultado.
-func _regua_das_faixas(rect: Rect2) -> void:
-	var lim := GameDef.limiares(limiar_fraco, limiar_forte)
-	var faixas := [
-		[0.0, float(lim.x) / GameDef.SCORE_MAX, GameDef.COR_FRACA, "FRACO"],
-		[float(lim.x) / GameDef.SCORE_MAX, float(lim.y) / GameDef.SCORE_MAX, GameDef.COR_MEDIA, "MÉDIO"],
-		[float(lim.y) / GameDef.SCORE_MAX, 1.0, GameDef.COR_FORTE, "FORTE"],
-	]
-	for f in faixas:
-		var x0 := rect.position.x + rect.size.x * float(f[0])
-		var x1 := rect.position.x + rect.size.x * float(f[1])
-		var cor: Color = f[2]
-		draw_rect(Rect2(x0, rect.position.y, x1 - x0, rect.size.y), cor)
-		if x1 - x0 > 90.0:
-			_texto(str(f[3]), rect.position.y + rect.size.y * 0.70, 15, Color(1, 1, 1, 0.95), HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0)
+## A RÉGUA DOS OITO NÍVEIS, na largura de cada um.
+##
+## Ela é de LEITURA: as faixas são fixas e não há o que arrastar aqui. O
+## que ela mostra é a desproporção — os quatro níveis de cima ocupam um
+## quinto da escala, e é vendo isso que o técnico entende por que quase
+## ninguém chega ao topo, em vez de achar que a máquina está quebrada.
+func _regua_dos_niveis(rect: Rect2) -> void:
+	var teto := float(GameDef.SCORE_MAX + 1)
+	for nivel in ScoreTier.NIVEIS:
+		var x0 := rect.position.x + rect.size.x * (float(nivel["min"]) / teto)
+		var x1 := rect.position.x + rect.size.x * (float(int(nivel["max"]) + 1) / teto)
+		draw_rect(Rect2(x0, rect.position.y, x1 - x0, rect.size.y), nivel["cor"] as Color)
+		if x1 - x0 > 96.0:
+			# Preto sobre cor clara, branco sobre cor escura. A cor do
+			# nível é dado de projeto e vai de creme a azul-acinzentado:
+			# um contraste fixo apagaria metade dos nomes.
+			var cor: Color = nivel["cor"]
+			var tinta := Color.BLACK if cor.get_luminance() > 0.55 else Color.WHITE
+			_texto(
+				str(nivel["nome"]), rect.position.y + rect.size.y * 0.66, 14, tinta,
+				HORIZONTAL_ALIGNMENT_CENTER, x0, x1 - x0
+			)
 	draw_rect(rect, Paleta.CARTAO_BORDA, false, 2.0)
+	# O teto da escala fica marcado à direita: é o único ponto da régua
+	# que uma pessoa pode alcançar e não é uma faixa, é um alvo.
+	_texto("9999", rect.end.y + 22.0, 15, Paleta.CREME, HORIZONTAL_ALIGNMENT_RIGHT, rect.position.x, rect.size.x)
+	_texto("0000", rect.end.y + 22.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, rect.position.x, rect.size.x)
 
 ## Retângulo de cantos redondos. O Godot só desenha retângulo de canto
 ## vivo, e canto vivo em peça grande destoa do resto da tela — a placa,

@@ -147,9 +147,29 @@ def main() -> int:
     estado = destino.with_name("estado.txt")
     intervalo = 1.0 / max(args.fps, 1.0)
 
+    estado_tmp = estado.with_name("estado.tmp.txt")
+    contador = 0
+
     def anotar(texto: str) -> None:
+        """Publica o estado E O CONTADOR DE QUADROS.
+
+        O contador existe porque a data de modificação do arquivo tem
+        resolução de UM SEGUNDO em vários sistemas de arquivos: com ela,
+        o jogo não consegue distinguir "quinze quadros novos" de "a
+        ponte travou há novecentos milissegundos". Com um contador que
+        só sobe, travamento é contador parado, e isso se detecta em
+        décimos de segundo.
+
+        Escrito em temporário e renomeado, como o JPEG: uma leitura no
+        meio da escrita devolveria uma linha cortada, e uma linha
+        cortada vira um contador errado.
+        """
         try:
-            estado.write_text(texto, encoding="utf-8")
+            estado_tmp.write_text(
+                "%s|%d|%d" % (texto, contador, int(time.time() * 1000)),
+                encoding="utf-8",
+            )
+            os.replace(estado_tmp, estado)
         except OSError:
             pass
 
@@ -160,11 +180,14 @@ def main() -> int:
             while True:
                 escrever(destino, temporario, imagem_de_teste(args.width, quadro_n), args.quality)
                 quadro_n += 1
+                contador = quadro_n
+                anotar("PADRAO DE TESTE")
                 time.sleep(intervalo)
         except KeyboardInterrupt:
             return 0
         finally:
             temporario.unlink(missing_ok=True)
+            estado_tmp.unlink(missing_ok=True)
 
     captura = None
     nome_backend = ""
@@ -194,8 +217,12 @@ def main() -> int:
                 quadro = cv2.resize(quadro, (args.width, int(quadro.shape[0] * escala)))
             if escrever(destino, temporario, quadro, args.quality):
                 quadros += 1
-                if quadros % 60 == 0:
-                    anotar(f"CONECTADA ({nome_backend}) — {quadros} quadros")
+                contador = quadros
+                # O ESTADO É ESCRITO A CADA QUADRO, e não a cada sessenta.
+                # É ele que carrega o contador; publicado de quatro em
+                # quatro segundos, o contador não serviria para detectar
+                # travamento nenhum.
+                anotar(f"CONECTADA ({nome_backend})")
             time.sleep(intervalo)
     except KeyboardInterrupt:
         return 0
@@ -203,6 +230,7 @@ def main() -> int:
         if captura is not None:
             captura.release()
         temporario.unlink(missing_ok=True)
+        estado_tmp.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

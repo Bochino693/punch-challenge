@@ -162,27 +162,34 @@ voltar e diz, na mesma linha, que a ficha volta junto. Antes a janela era
 de oito segundos e a rodada morria com o crédito já debitado: quem
 hesitou pagou e não jogou.
 
-**Carregando, o visor mostra o VALOR EXATO.** Enquanto a barra de espaço
-está pressionada, o número no visor mostra
-quantos pontos o golpe vale *se soltar agora* — não a fração do tempo
-segurado. A conversão de tempo em pontos é uma curva, então uma barra
-proporcional ao tempo mostraria 60 % quando o golpe valeria 640. É a
-mesma chamada de `ScoreCurve.points_from_charge` que o placar usa depois, e
-por isso o número prometido e o número pago não têm como divergir.
+**O GOLPE VEM DO SENSOR, E DE MAIS NADA.** O MPU-6050 mede e manda
+`HIT,<velocidade>,<pico_g>,<duração_ms>,<eixo>`; o Godot valida e calcula
+a nota. O Arduino nunca manda pontos. A barra de espaço é um **simulador
+de bancada** com chave própria na Central: em salão ela não pontua e a
+tela nem a menciona — anunciar um atalho que, se existisse, seria fraude
+é pior do que não ter o atalho.
 
-**O resultado tem três faixas**, e é isso que faz o cliente jogar de novo:
+**O resultado tem OITO NÍVEIS**, de 0000 a 9999, e cada um tem
+apresentação própria — cor, animação, partículas, tremor e som:
 
-| Faixa | Padrão | O que a tela faz |
+| Pontos | Nível | O que a tela faz |
 | --- | --- | --- |
-| **Forte** | 700 a 999 | `NOCAUTE!`, `PESO-PESADO` ou `LENDÁRIO` — confete, fogos, tremor e clarão. |
-| **Média** | 330 a 699 | `BOM GOLPE` ou `GOLPE FORTE` — âmbar, faíscas e anéis pulsando. |
-| **Fraca** | 0 a 329 | `FRACO!` ou `GOLPE LEVE` — cinza, estilhaços caindo. |
+| 0–1799 | `IMPACTO LEVE` | pulso pequeno, poucas faíscas, som seco, sem tremor |
+| 1800–3999 | `BOM GOLPE` | dois anéis vermelhos, riscos e som de couro com grave leve |
+| 4000–6499 | `GOLPE FORTE` | explosão radial amarela, brasas, tremor médio, grave encorpado |
+| 6500–7999 | `EXPLOSIVO` | flash branco, rachaduras no ponto do golpe, onda dupla e subgrave |
+| 8000–8999 | `NOCAUTE` | hit-stop de 95 ms, zoom de impacto, três ondas e sirene curta |
+| 9000–9699 | `PESO-PESADO` | túnel de luz, brasas densas, câmera sacudindo e fanfarra |
+| 9700–9998 | `LENDÁRIO` | o palco inteiro reage, raios dourados e música de vitória |
+| 9999 | `SOCO PERFEITO` | congelamento de 360 ms, explosão branca e dourada, coro |
 
-Os dois limites são ajustáveis na Central Técnica: a mecânica de cada
-máquina responde diferente, e uma faixa errada faz todo mundo ganhar (ou
-todo mundo perder), que é o jeito mais rápido de esvaziar a fila. A
-mesma faixa manda na cor da moldura de LEDs, no anel do placar e na
-cor do veredito — os três nunca discordam sobre o que é um golpe forte.
+As faixas são **fixas** e moram numa tabela só (`scripts/fx/score_tier.gd`).
+Elas descrevem o espetáculo, não a dificuldade: quem decide quanta gente
+chega a cada nível é a **curva**, pela velocidade mínima, máxima e pelo
+expoente. Um teste recusa duas receitas de efeito iguais — oito níveis
+escritos como oito blocos de `if` viram dois níveis com a mesma animação
+e só o texto mudando, e é isso que a pessoa que joga duas vezes seguidas
+percebe.
 
 **A contagem é o suspense.** O número sobe de zero até a pontuação em
 cerca de dois segundos, com tique a cada passo e a coluna de potência
@@ -210,10 +217,10 @@ momento pelo qual o cliente pagou.
 - A marca da casa montada como letreiro de parque: placa creme, moldura
   marinho e lâmpadas correndo em volta.
 - Contagem regressiva animada `3, 2, 1` e tela de espera que aguarda o soco sem consumir a ficha.
-- Pontuação de 0 a 999 baseada em curva gradual `smoothstep + gamma`.
+- Pontuação de 0000 a 9999 baseada em curva gradual `smoothstep + gamma`.
   O padrão difícil usa expoente `2,00`; o cálculo antigo com `0,8`, que
   favorecia demais golpes médios, não é mais utilizado.
-- Sete vereditos, distribuídos pelas três faixas ajustáveis.
+- Oito níveis de golpe, cada um com cor, animação, partículas, tremor e som próprios.
 - Ranking das cinco melhores marcas, persistente, com foto local do
   jogador quando a câmera está disponível e com a posição
   conquistada anunciada no fim da rodada. Cinco e não uma: com recorde
@@ -294,11 +301,18 @@ restante do jogo continua funcionando.
 | Seção | Para quê |
 | --- | --- |
 | **Modo de operação** | Livre ou 1 ficha por partida. |
-| **Faixas do placar** | Os dois limites que separam fraco, médio e forte. A régua colorida acima muda na hora — o técnico regula olhando o resultado. |
-| **Velocidade que vira ponto** | Velocidades mínima/máxima e expoente da curva gradual. |
-| **Sensor e firmware** | Porta serial, eixo do golpe, raio do braço e sensibilidade. |
-| **Ações no firmware** | Enviar configuração, testar sensor, câmera e fotografia. |
-| **Diagnóstico** | Telemetria, estatísticas, ranking, fotos e reconexão. |
+| **Botões do gabinete** | Mapeamento da placa Zero Delay: aperte o botão de verdade e o jogo grava controle, índice e nome. Um contador por botão prova que pegou. |
+| **Simulação de bancada** | A chave que libera a barra de espaço. Desligada de fábrica. |
+| **Velocidade e dificuldade** | Mínima, máxima, expoente e zona morta — com a curva desenhada. |
+| **Os oito níveis** | Régua de leitura. Mostra a desproporção real: os quatro níveis de cima ocupam um quinto da escala. |
+| **Assistente de calibração** | Mede a máquina em quatro passos em vez de regular por tentativa e erro. |
+| **Sensor e firmware** | Porta serial, eixo do golpe, raio do braço, sensibilidade e envio de configuração. |
+| **Câmera e som** | Prévia ao vivo, troca de câmera, foto de teste, volumes de trilha e efeitos, soco de teste. |
+| **Dados** | Ranking, estatísticas, telemetria, contadores dos botões e o que apagar. |
+
+A Central tem **quatro páginas**, e um controle só responde na página
+aberta: os retângulos continuam existindo quando não estão desenhados, e
+botão invisível que responde é a pior espécie de defeito.
 
 Cada par `−` / `+` sai da tabela `PASSOS` no topo de `scripts/main.gd`: o
 mesmo retângulo desenha o botão e confere o clique, e o valor é
@@ -307,32 +321,45 @@ cobrir uma área de toque.
 
 ## Calibração da pontuação
 
-1. Na Central Técnica, deixe a mínima em `0,8 m/s`, a máxima em `12,0 m/s`
-   e a curva difícil em `γ 2,00`.
-2. Faça dez golpes leves e anote aproximadamente as velocidades
-   (aparecem na linha de diagnóstico).
-3. Faça dez golpes fortes com segurança e anote o maior valor repetível.
-4. Use como mínima o valor de um golpe fraco verdadeiro.
-5. Use como máxima o maior golpe que a mecânica suporta de forma repetível.
+Use o **assistente**, na Central Técnica → GOLPE → *Assistente de
+calibração*. Quatro passos:
 
-Depois disso, ajuste as faixas em **ATÉ AQUI É FRACO** e **DAQUI É
-FORTE**. Uma referência que costuma funcionar em máquina nova é deixar a
-criança tirando "médio" e o adulto empenhado tirando "forte" — se todo
-mundo estiver tirando nocaute, suba o limite; se ninguém conseguir,
-desça.
+1. **Repouso** — não encoste no saco por quatro segundos. Mede o ruído do
+   sensor parado, que é o piso da sensibilidade.
+2. **Cinco golpes fracos** — bata de leve, como quem testa.
+3. **Cinco golpes fortes** — bata com tudo, como o melhor cliente da noite.
+4. **Sugestão** — velocidade mínima, máxima e sensibilidade, cada uma com
+   o motivo escrito ao lado, e a curva **desenhada** antes de salvar.
+
+A conta usa **percentis**, não mínimo e máximo: em cinco socos, um
+escorrega no saco e outro pega de raspão, e com o extremo a calibração
+inteira dependeria do pior e do melhor golpe do dia. O piso desce 15 %
+abaixo do percentil 20 dos fracos, para quem bate de leve ver *algum*
+ponto; o teto sobe 8 % acima do percentil 80 dos fortes, para 9999
+continuar raro — se o teto fosse o golpe mais forte já medido, o primeiro
+cliente forte zeraria o desafio na primeira noite.
+
+Salvando, os valores vão para a máquina **e** para o firmware do sensor.
+
+Parâmetros de fábrica: mínima `1,2 m/s`, máxima `16,0 m/s`, zona morta
+`8 %`, expoente `γ 2,80`.
 
 ## Teste sem Arduino
 
-Durante a janela do soco, **segure a barra de espaço para carregar e
-solte para socar**: quanto mais tempo segura, mais forte o golpe. O
-número grande na tela mostra, a cada instante, exatamente quantos pontos
-sairão se você soltar naquele momento. A carga máxima exige cerca de
-`2,8 s`; sensor e teclado passam pela mesma curva. Fora da janela, a barra de espaço
-faz o papel do START. `C` adiciona crédito e `F9` abre a Central Técnica.
+Ligue a chave **SIMULAÇÃO DE BANCADA** na Central (página OPERAÇÃO), ou
+rode o jogo com `PUNCH_SIMULACAO=1` no ambiente. Com ela ligada:
 
-Essas instruções só aparecem no rodapé **quando o sensor não está
-conectado** — ou seja, na bancada de montagem. Com o Arduino no lugar, o
-cliente nunca vê instrução de teclado numa máquina de ficha.
+- **segure a barra de espaço para carregar e solte para socar** — o visor
+  mostra, a cada instante, exatamente quantos pontos sairão;
+- `1` / `Enter` fazem o papel do START e `5` / `C` adicionam crédito.
+
+Desligada — que é como ela sai de fábrica — nada disso responde, e a tela
+não menciona teclado nenhum. Num salão, a barra de espaço ligada é
+qualquer pessoa tirando 9999 sem encostar no equipamento, e um teclado
+esquecido no armário vira crédito de graça.
+
+A Central mostra a chave em **vermelho** quando está ligada, com o aviso
+`DESLIGUE ANTES DE ABRIR O SALÃO`.
 
 Com o Arduino ligado, o botão **TESTAR SENSOR** (ou a tecla `T` na
 Central) pede um golpe sintético à placa: se ele aparece na tela e o

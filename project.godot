@@ -16,7 +16,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 config/name="Punch Challenge"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.4", "GL Compatibility")
+config/features=PackedStringArray("4.6", "GL Compatibility")
 boot_splash/bg_color=Color(0.098, 0.0235, 0.051, 1)
 boot_splash/image="res://assets/branding/selo_lazer.png"
 config/icon="res://assets/icon.png"
@@ -30,24 +30,39 @@ window/size/mode=3
 window/size/window_width_override=540
 window/size/window_height_override=960
 window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
 window/handheld/orientation=1
 
 [input]
 
-input_start={
+cabinet_start={
 "deadzone": 0.2,
 "events": [Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":6,"pressure":0.0,"pressed":true,"script":null)
 ]
 }
-input_credito={
+cabinet_credit={
 "deadzone": 0.2,
 "events": [Object(InputEventJoypadButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"button_index":4,"pressure":0.0,"pressed":true,"script":null)
 ]
 }
+
+[punch]
+
+; A CHAVE DA SIMULACAO DE BANCADA, no arquivo de projeto.
+;
+; Terceira porta para a mesma coisa, e de proposito: a chave da Central
+; serve ao tecnico no salao, PUNCH_SIMULACAO=1 serve a bancada de quem
+; desenvolve, e este ajuste serve a uma build feita so para feira ou
+; demonstracao -- em que a maquina precisa nascer com a barra de espaco
+; valendo, sem ninguem lembrar de ligar nada.
+;
+; Falso aqui, sempre. Uma build de salao com isto verdadeiro e qualquer
+; pessoa tirando 9999 sem encostar no equipamento.
+debug_simulation=false
 
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 anti_aliasing/quality/msaa_2d=2
-environment/defaults/default_clear_color=Color(0.0196, 0.0314, 0.0863, 1)
+environment/defaults/default_clear_color=Color(0.098, 0.0235, 0.051, 1)

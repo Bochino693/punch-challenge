@@ -4,20 +4,39 @@ extends RefCounted
 const LIMIT := 20
 const PHOTO_DIR := "user://ranking_photos"
 
-static func migrate(raw: Variant, old_best := 0) -> Array[Dictionary]:
+## A VERSÃO DO ESQUEMA DAS MARCAS GUARDADAS.
+##
+##   1 — escala 0 a 999, como saiu das primeiras máquinas;
+##   2 — escala 0 a 9999.
+##
+## A conversão de 1 para 2 multiplica por dez. Ela precisa acontecer UMA
+## VEZ e ficar registrada: sem a versão gravada, toda abertura
+## multiplicaria de novo e o recorde da casa iria para o teto em três
+## dias. É por isso que a versão é um número no arquivo, e não uma
+## adivinhação a partir do maior valor encontrado — uma casa que nunca
+## passou de 90 pontos ficaria indistinguível de uma já convertida.
+const ESQUEMA := 2
+const ESQUEMA_LEGADO := 1
+const FATOR_LEGADO := 10
+
+## `esquema` é a versão que estava gravada no disco. O padrão é a atual,
+## para quem monta uma lista na mão (testes, ferramentas) não ser
+## convertido sem querer.
+static func migrate(raw: Variant, old_best := 0, esquema := ESQUEMA) -> Array[Dictionary]:
+	var fator := FATOR_LEGADO if esquema <= ESQUEMA_LEGADO else 1
 	var result: Array[Dictionary] = []
 	if raw is Array:
 		for item in raw:
 			if item is Dictionary:
-				var entry := _sanitize_entry(item)
+				var entry := _sanitize_entry(item, fator)
 				if int(entry["score"]) > 0:
 					result.append(entry)
 			else:
-				var score := clampi(int(item), 0, GameDef.SCORE_MAX)
+				var score := clampi(int(item) * fator, 0, GameDef.SCORE_MAX)
 				if score > 0:
 					result.append(_new_entry(score, "", "LEGADO"))
 	if result.is_empty() and old_best > 0:
-		result.append(_new_entry(clampi(old_best, 0, GameDef.SCORE_MAX), "", "LEGADO"))
+		result.append(_new_entry(clampi(old_best * fator, 0, GameDef.SCORE_MAX), "", "LEGADO"))
 	result.sort_custom(_higher_score)
 	if result.size() > LIMIT:
 		result.resize(LIMIT)
@@ -70,10 +89,10 @@ static func _new_entry(score: int, photo_path: String, source: String) -> Dictio
 		"source": source,
 	}
 
-static func _sanitize_entry(value: Dictionary) -> Dictionary:
+static func _sanitize_entry(value: Dictionary, fator := 1) -> Dictionary:
 	var entry := value.duplicate(true)
 	entry["id"] = str(entry.get("id", "%d-%d" % [Time.get_ticks_usec(), randi()]))
-	entry["score"] = clampi(int(entry.get("score", 0)), 0, GameDef.SCORE_MAX)
+	entry["score"] = clampi(int(entry.get("score", 0)) * fator, 0, GameDef.SCORE_MAX)
 	entry["photo_path"] = str(entry.get("photo_path", ""))
 	entry["created_at"] = str(entry.get("created_at", ""))
 	entry["source"] = str(entry.get("source", "LEGADO"))

@@ -117,3 +117,64 @@ Vale lembrar que fotografar clientes num estabelecimento tem
 implicações — um aviso visível na máquina informando que há câmera é o
 mínimo, e a LGPD trata imagem de pessoa identificável como dado pessoal.
 O desligamento existe para isso.
+
+## Instalação no Windows, em um passo
+
+Rode `tools/instalar_camera_windows.ps1` — botão direito, "Executar com o
+PowerShell". Ele procura o Python (`py -3`, depois `python`), instala o
+OpenCV para o usuário e varre os índices de câmera, dizendo quais
+respondem.
+
+Não precisa de administrador. E o jogo roda sem nada disso: sem a ponte
+ele só deixa de tirar foto para o ranking.
+
+O script existe porque "câmera não funciona" era a mesma mensagem para
+quatro problemas diferentes — Python ausente, OpenCV ausente, cabo/driver
+e webcam ocupada por outro programa. Ele separa os quatro e diz qual é.
+
+## Como o jogo sabe que a imagem é NOVA
+
+A ponte publica, ao lado do JPEG, um `estado.txt` no formato
+`TEXTO|contador|epoch_ms`. O contador sobe a cada quadro escrito.
+
+A data de modificação do arquivo não serve para isso: ela tem resolução
+de **um segundo** em vários sistemas de arquivos, e com ela o jogo não
+consegue distinguir "quinze quadros novos" de "a ponte travou há
+novecentos milissegundos".
+
+Com o contador, o jogo:
+
+- lê primeiro o `estado.txt`, que tem dezenas de bytes, e só abre o JPEG
+  quando o contador andou — sem quadro novo não há por que ler dezenas de
+  milhares de bytes quinze vezes por segundo;
+- detecta **imagem congelada com processo vivo** (a webcam trava sem
+  devolver erro ao OpenCV, e a ponte fica republicando o mesmo quadro).
+  Três segundos com o contador parado e a ponte é religada;
+- detecta **processo morto** e religa também. Antes a máquina só anunciava
+  "desconectada" e ficava assim até alguém reiniciar o jogo — num salão,
+  a noite inteira sem foto.
+
+A Central Técnica, na página CÂMERA, mostra quantas vezes a ponte foi
+religada na sessão. Muitas religadas é cabo ou porta USB, não software.
+
+## A câmera SIGMA-W420
+
+É uma webcam USB genérica: aparece no Gerenciador de Dispositivos do
+Windows como `SIGMA-W420` em "Câmeras" e não precisa de driver próprio.
+
+Caminho de leitura, em ordem:
+
+1. `CameraServer` do Godot. No Godot 4.6 ele **começa dormindo** e só
+   enumera câmeras depois de `set_monitoring_feeds(true)` — sem essa
+   chamada a lista volta vazia e o jogo conclui, errado, que não há
+   câmera nenhuma.
+2. Se o feed nativo não entregar quadro em 2,5 s, cai para a ponte.
+3. A ponte tenta `CAP_DSHOW` e depois `CAP_MSMF`. DirectShow abre webcams
+   baratas que o Media Foundation recusa; em algumas outras é o
+   contrário.
+
+**Validação física pendente.** Nada aqui foi testado com a SIGMA-W420
+ligada: o ambiente de desenvolvimento não tem webcam, e o que se provou
+foi o caminho do arquivo (modo `--pattern`), a leitura do contador e o
+religamento. A confirmação com a câmera de verdade tem de ser feita no
+computador do gabinete.

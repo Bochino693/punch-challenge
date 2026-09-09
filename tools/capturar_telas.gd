@@ -35,7 +35,13 @@ func _initialize() -> void:
 		{"nome": "07_lendario", "fn": _lendario},
 		{"nome": "08_forte", "fn": _forte},
 		{"nome": "09_leve", "fn": _leve},
-		{"nome": "10_central", "fn": _central},
+		{"nome": "10_central_operacao", "fn": _central.bind(0)},
+		{"nome": "11_central_golpe", "fn": _central.bind(1)},
+		{"nome": "12_central_camera", "fn": _central.bind(2)},
+		{"nome": "13_central_dados", "fn": _central.bind(3)},
+		{"nome": "14_calibracao_repouso", "fn": _calibracao.bind(0)},
+		{"nome": "15_calibracao_golpes", "fn": _calibracao.bind(1)},
+		{"nome": "16_calibracao_sugestao", "fn": _calibracao.bind(3)},
 	]
 
 func _process(_delta: float) -> bool:
@@ -66,7 +72,7 @@ func _preparar(estado: int) -> void:
 	jogo.animation_time = 3.0
 
 func _abertura() -> void:
-	jogo.ranking = RankingStore.migrate([872, 705, 640, 512, 388])
+	jogo.ranking = RankingStore.migrate([8720, 7050, 6400, 5120, 3880])
 	jogo.plays = 431
 	jogo.credits = 3
 	_preparar(GameDef.State.IDLE)
@@ -102,7 +108,7 @@ func _impacto() -> void:
 	jogo.carga_tempo = -1.0
 	_preparar(GameDef.State.MEASURING)
 	jogo.state_time = 0.25
-	jogo.result_score = 903
+	jogo.result_score = 9034
 
 func _resultado(pontos: int, veredito: float) -> void:
 	_preparar(GameDef.State.RESULT)
@@ -115,20 +121,40 @@ func _resultado(pontos: int, veredito: float) -> void:
 	jogo.verdict_time = veredito
 	jogo.result_time = 1.9 if veredito >= 0.0 else 1.0
 	if veredito >= 0.0:
-		jogo.moldura.set_estado(LedFrame.RESULTADO, GameDef.classificar(pontos, jogo.limiar_fraco, jogo.limiar_forte)["cor_faixa"])
+		jogo.moldura.set_estado(LedFrame.RESULTADO, GameDef.classificar(pontos)["cor_faixa"])
 
 func _contando() -> void:
-	_resultado(903, -1.0)
+	_resultado(9030, -1.0)
 
 func _lendario() -> void:
-	_resultado(961, 1.6)
+	_resultado(9610, 1.6)
 
 func _forte() -> void:
-	_resultado(645, 1.6)
+	_resultado(6450, 1.6)
 
 func _leve() -> void:
-	_resultado(148, 1.6)
+	_resultado(1480, 1.6)
 
-func _central() -> void:
+func _central(pagina: int) -> void:
 	_preparar(GameDef.State.IDLE)
 	jogo.central_aberta = true
+	jogo.central_pagina = pagina
+
+## O assistente de calibração, com amostras plantadas para as telas
+## saírem cheias — vazias elas não mostram o que se quer conferir.
+func _calibracao(passo: int) -> void:
+	_central(1)
+	jogo._abrir_calibracao()
+	jogo.calib_passo = passo
+	jogo.calib_repouso_left = 2.4
+	jogo.calib_ruido = 0.6
+	if passo >= 1:
+		jogo.calib_fracos.assign([2.4, 2.0, 3.1])
+		jogo.calib_picos.assign([4.0, 5.2, 9.8])
+	if passo >= 3:
+		jogo.calib_fracos.assign([2.4, 2.0, 3.1, 2.2, 2.6])
+		jogo.calib_fortes.assign([11.0, 12.5, 13.9, 12.1, 11.6])
+		jogo.calib_picos.assign([4.0, 5.2, 9.8, 4.6, 10.4, 11.0, 9.1, 12.3, 10.0, 9.4])
+		jogo.calib_sugestao = Calibracao.sugerir(
+			jogo.calib_fracos, jogo.calib_fortes, jogo.calib_picos, jogo.calib_ruido
+		)
