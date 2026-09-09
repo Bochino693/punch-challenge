@@ -103,7 +103,14 @@ func desenhar(tela: CanvasItem) -> void:
 				frio.a *= 0.25
 				tela.draw_line(atras, p.posicao, frio, p.tamanho * 0.7, true)
 				tela.draw_line(p.posicao - vel.normalized() * comprimento * 0.35, p.posicao, cor, p.tamanho, true)
-				tela.draw_circle(p.posicao, p.tamanho * 0.7, Color(1, 1, 1, cor.a * 0.85), true, -1.0, true)
+				# ANTISSERRILHADO SÓ NA PARTÍCULA GRANDE. Numa faísca de
+				# poucos pixels a borda lisa não se vê, e ela custa o
+				# dobro da geometria — pago em cada uma das centenas que
+				# voam ao mesmo tempo. É aí que a festa fica pesada.
+				tela.draw_circle(
+					p.posicao, p.tamanho * 0.7, Color(1, 1, 1, cor.a * 0.85),
+					true, -1.0, p.tamanho >= 7.0
+				)
 			"raio":
 				# RAIO: o mesmo símbolo que está no emblema, girando. Dá
 				# à festa a linguagem da máquina em vez da de carnaval.
@@ -119,7 +126,7 @@ func desenhar(tela: CanvasItem) -> void:
 				])
 				Traco.poligono(tela, pontos_e, cor)
 			_:
-				tela.draw_circle(p.posicao, p.tamanho, cor, true, -1.0, true)
+				tela.draw_circle(p.posicao, p.tamanho, cor, true, -1.0, p.tamanho >= 7.0)
 
 
 ## O contorno de um raio de seis pontas, na escala e no giro pedidos.
