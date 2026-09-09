@@ -24,9 +24,6 @@ const ArcadeStage = preload("res://scripts/presentation/arcade_stage.gd")
 const FOCO := Vector2(0.481, 0.29)
 ## Altura do piso, em fração da tela.
 const HORIZONTE := 0.58
-## Em quantas faixas o céu é pintado. Bastante para o degradê não
-## mostrar bandas, pouco o suficiente para não pesar num PC de salão.
-const FAIXAS_DO_CEU := 64
 
 var tempo := 0.0
 var fx := PunchFX.new()

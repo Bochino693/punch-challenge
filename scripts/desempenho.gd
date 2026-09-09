@@ -69,6 +69,7 @@ func medir(delta: float) -> void:
 		qualidade = maxf(PISO, qualidade - QUEDA * delta)
 	elif fps > ALVO_ALTO:
 		qualidade = minf(1.0, qualidade + SUBIDA * delta)
+	aplicar_teto()
 
 ## Quadros por segundo medidos, ou 0 enquanto não há amostra suficiente.
 func fps() -> float:
@@ -88,3 +89,25 @@ func pior_ms() -> float:
 ## Quantas partículas pedir, dado quantas o efeito gostaria de soltar.
 func quantas(cheio: int) -> int:
 	return maxi(1, int(round(float(cheio) * qualidade)))
+
+## O TETO POSTO À MÃO, na Central.
+##
+## O vigia automático acerta na maioria das máquinas, e erra em duas
+## situações: num PC que oscila (e aí ele fica subindo e descendo a
+## qualidade o tempo todo) e num PC bom em que o operador prefere menos
+## efeito por gosto. O teto resolve as duas — e AUTO, que é o padrão,
+## deixa tudo como está.
+##
+## Ele é um TETO, não um valor fixo: com o teto em MÉDIO, uma máquina que
+## não dá conta continua caindo abaixo dele sozinha. Nenhum ajuste da
+## Central pode obrigar a máquina a gastar mais do que ela aguenta.
+const TETOS := {"AUTO": 1.0, "ALTO": 1.0, "MEDIO": 0.65, "BAIXO": 0.40}
+var teto := "AUTO"
+
+func aplicar_teto() -> void:
+	qualidade = minf(qualidade, float(TETOS.get(teto, 1.0)))
+
+## O próximo teto da roda, para o botão da Central.
+func proximo_teto() -> String:
+	var nomes := ["AUTO", "ALTO", "MEDIO", "BAIXO"]
+	return str(nomes[(nomes.find(teto) + 1) % nomes.size()])

@@ -91,6 +91,18 @@ static func _passar_do_ponto(t: float, forca := 1.9) -> float:
 static func _janela(tempo: float, inicio: float, duracao: float) -> float:
 	return clampf((tempo - inicio) / duracao, 0.0, 1.0)
 
+## QUANTO DO ENFEITE DO FUNDO SE DESENHA.
+##
+## O cenário é a camada que o jogo paga em TODA tela, o tempo inteiro —
+## medido, ele era mais de um terço do quadro. Quando a máquina não está
+## dando conta, cortar aqui rende mais do que cortar em qualquer outro
+## lugar, e é onde ninguém repara: as fagulhas do rodapé e os riscos das
+## laterais são atmosfera, não informação.
+static var enfeite := 1.0
+
+static func _quantos(cheio: int) -> int:
+	return maxi(1, int(round(float(cheio) * enfeite)))
+
 static func background(canvas: CanvasItem, time: float) -> void:
 	canvas.draw_rect(Rect2(0, 0, 1080, 1920), FLOOR)
 	# Grandes planos vermelhos, centro livre para a leitura a distância.
@@ -100,14 +112,29 @@ static func background(canvas: CanvasItem, time: float) -> void:
 	Traco.poligono(canvas, PackedVector2Array([Vector2(230, 1920), Vector2(1080, 1630), Vector2(1080, 1920)]), Color("cc102a"))
 	for side in [0.0, 1.0]:
 		var x := lerpf(28.0, 1052.0, side)
-		for layer in range(9):
-			canvas.draw_line(Vector2(x, 320), Vector2(x, 1590), Color(RED, 0.035), 8.0 + layer * 5.0, true)
+		# O NÉON DOS DOIS LADOS, EM TRÊS CAMADAS E NÃO EM NOVE.
+		#
+		# Eram nove barras empilhadas, de 8 a 48 px de largura, 1270 px de
+		# altura, cada uma com alfa 0,035 — nove níveis de tinta em
+		# duzentos e cinquenta e cinco, invisíveis uma a uma. Somadas
+		# pintavam SEISCENTOS E QUARENTA MIL pixels por quadro só para
+		# fazer um brilho, e este é o fundo: ele paga esse preço em TODA
+		# tela do jogo, o tempo inteiro. Medido, o fundo era 37% do quadro
+		# — mais do que o placar, os efeitos e a moldura juntos.
+		#
+		# Três camadas com o alfa somado dão o mesmo halo por um terço da
+		# conta.
+		for layer in range(3):
+			canvas.draw_line(
+				Vector2(x, 320), Vector2(x, 1590),
+				Color(RED, 0.105), 10.0 + float(layer) * 15.0, true
+			)
 		canvas.draw_line(Vector2(x, 320), Vector2(x, 1590), RED, 4.0, true)
-		for i in range(12):
+		for i in range(_quantos(12)):
 			var y := 455.0 + i * 86.0
 			var light := 0.25 + 0.75 * pow(0.5 + 0.5 * sin(time * 3.2 - i * 0.65), 3.0)
 			canvas.draw_line(Vector2(x - 9, y), Vector2(x + 9, y - 7), Color(GOLD, light), 5.0, true)
-	for i in range(22):
+	for i in range(_quantos(22)):
 		var speed := 26.0 + float(i % 4) * 16.0
 		var y := fposmod(float(i) * 97.0 - time * speed, 1860.0)
 		var x := 65.0 + fposmod(float(i) * 157.0, 950.0)

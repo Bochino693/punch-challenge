@@ -89,6 +89,21 @@ var pattern_mode := false
 ## A última foto tirada, ainda em memória. Quem for desenhá-la não
 ## precisa relê-la do disco.
 var ultima_foto: Image = null
+
+## O ÚLTIMO QUADRO QUE A CÂMERA ENTREGOU — E ELE NÃO SE APAGA.
+##
+## AQUI ESTAVA O ÚLTIMO CAMINHO QUE LEVAVA DE VOLTA AO MARROM. Toda vez
+## que a ponte era religada — por queda do processo, por imagem congelada,
+## por troca de câmera — `_matar_ponte()` zerava a textura, e a tela
+## caía no boneco desenhado pelos dois ou três segundos até o primeiro
+## quadro novo chegar. Do lado de fora isso é indistinguível de a câmera
+## ter desligado, e acontecia várias vezes por noite.
+##
+## Esta cópia sobrevive à religada. Enquanto a câmera estiver LIGADA na
+## Central, a tela mostra a última imagem que existiu — parada por um
+## instante, e infinitamente melhor do que um desenho. Ela só é
+## descartada quando o operador desliga a câmera de propósito.
+var _ultima_textura: ImageTexture = null
 var _melhor_imagem: Image = null
 var _melhor_nota := -1.0
 var _obturador_ate_ms := 0
@@ -208,6 +223,10 @@ func _atender_pedido() -> void:
 		Pedido.FECHAR:
 			enabled = false
 			_derrubar()
+			# Desligar de propósito é a ÚNICA coisa que apaga a memória
+			# da imagem: em todo o resto ela é o que impede a tela de
+			# voltar ao boneco.
+			_ultima_textura = null
 			estado = Estado.DESLIGADA
 			status = "CÂMERA DESATIVADA"
 		Pedido.EXAME_ENTRAR:
@@ -396,6 +415,7 @@ func _colher_quadro_da_ponte(agora: int) -> void:
 				_bridge_texture = ImageTexture.create_from_image(pronta)
 			else:
 				_bridge_texture.update(pronta)
+			_ultima_textura = _bridge_texture
 			status = "CÂMERA CONECTADA (PONTE)"
 	if _bridge_pid > 0 and _tarefa_leitura == -1:
 		_tarefa_leitura = WorkerThreadPool.add_task(_ler_quadro, false, "camera: ler quadro")
@@ -565,7 +585,9 @@ func _on_camera_feeds_updated(_id: int = 0) -> void:
 		pedir_abertura()
 
 func preview_texture() -> Texture2D:
-	return _texture if _texture != null else _bridge_texture
+	if _texture != null:
+		return _texture
+	return _bridge_texture if _bridge_texture != null else _ultima_textura
 
 func available() -> bool:
 	if not enabled:
@@ -594,7 +616,10 @@ func tem_imagem() -> bool:
 		return false
 	if _feed != null:
 		return _native_ok
-	return _bridge_texture != null and _bridge_pid > 0
+	# `_ultima_textura` entra aqui de propósito: enquanto a câmera está
+	# ligada, o que existiu uma vez continua valendo de imagem. É esta
+	# linha que cumpre o "ligou, não volta mais para o boneco".
+	return _bridge_texture != null or _ultima_textura != null
 
 ## A FICHA DA PONTE, numa linha: qual Python, qual índice, qual
 ## back-end. Sem ela, "não conecta" continua sendo um mistério — e foi
@@ -610,50 +635,13 @@ func ficha_da_ponte() -> String:
 		backend_preferido if not backend_preferido.is_empty() else "automático",
 	]
 
-## A MARCA DA CASA GRAVADA NA FOTO.
+## A MARCA NÃO ENTRA NA FOTO.
 ##
-## A foto do ranking é a única coisa desta máquina que sai do salão: ela
-## fica na tela para a fila inteira ver e, quando o operador fotografa a
-## tela com o celular, viaja. Sem a marca, é uma cara solta; com ela, é a
-## cara de alguém que jogou o Punch Challenge da Lazer & Sport.
-##
-## No canto INFERIOR DIREITO e pequena — um sexto da largura. Marca de
-## fotógrafo é assinatura, não legenda: grande demais ela vira o assunto
-## da imagem, e o assunto é a pessoa.
-const SELO_FRACAO := 0.30
-const SELO_MARGEM := 10
-var _selo: Image = null
-var _selo_pronto := false
-
-func _assinar(foto: Image) -> void:
-	if not _selo_pronto:
-		_selo_pronto = true
-		if ResourceLoader.exists("res://assets/logo_lazersport.png"):
-			var textura: Texture2D = load("res://assets/logo_lazersport.png")
-			if textura != null:
-				_selo = textura.get_image()
-	if _selo == null:
-		return
-	var largura := int(float(foto.get_width()) * SELO_FRACAO)
-	var altura := int(float(largura) * float(_selo.get_height()) / float(_selo.get_width()))
-	if largura < 8 or altura < 8:
-		return
-	# Cópia redimensionada a cada foto: são poucas por noite, e guardar a
-	# versão pronta amarraria o selo ao tamanho da primeira miniatura.
-	var carimbo := _selo.duplicate()
-	carimbo.resize(largura, altura, Image.INTERPOLATE_LANCZOS)
-	# `blend_rect` exige o MESMO formato nas duas imagens, e a foto vem do
-	# JPEG em RGB8 enquanto o logotipo tem transparência. Sem esta
-	# conversão a chamada falha em silêncio e a foto sai sem marca.
-	if carimbo.get_format() != Image.FORMAT_RGBA8:
-		carimbo.convert(Image.FORMAT_RGBA8)
-	if foto.get_format() != Image.FORMAT_RGBA8:
-		foto.convert(Image.FORMAT_RGBA8)
-	var destino := Vector2i(
-		foto.get_width() - largura - SELO_MARGEM,
-		foto.get_height() - altura - SELO_MARGEM
-	)
-	foto.blend_rect(carimbo, Rect2i(Vector2i.ZERO, Vector2i(largura, altura)), destino)
+## Ela chegou a ser gravada no canto da imagem salva, e foi um erro: a
+## foto é o rosto de uma pessoa, e carimbo dentro dela some quando a
+## miniatura do ranking é pequena e atrapalha quando é grande. A marca
+## mora na TELA, ao lado do retrato — onde ela é grande o bastante para
+## ser lida e não disputa um pixel sequer com a cara de quem jogou.
 
 ## POR QUE NÃO SAIU FOTO, em poucas palavras.
 ##
@@ -721,7 +709,6 @@ func capture_photo() -> String:
 	if mirrored:
 		image.flip_x()
 	image.resize(THUMB_SIZE, THUMB_SIZE, Image.INTERPOLATE_LANCZOS)
-	_assinar(image)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PHOTO_DIR))
 	var path := "%s/player_%d.jpg" % [PHOTO_DIR, Time.get_ticks_usec()]
 	# A FOTO FICA NA MÃO, e não só no disco.

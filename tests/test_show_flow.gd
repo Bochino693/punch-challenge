@@ -48,7 +48,7 @@ func run() -> void:
 	_test_camera_acesa_nao_apaga()
 	_test_contagem_espera_a_camera()
 	_test_laco_de_atracao()
-	_test_selo_na_foto()
+	_test_teto_de_efeitos()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -460,6 +460,17 @@ func _test_camera_acesa_nao_apaga() -> void:
 	assert(not camera.available())
 	assert(camera.tem_imagem())
 	camera._last_frame_ms = Time.get_ticks_msec()
+	camera._ultima_textura = camera._bridge_texture
+
+	# A RELIGADA DA PONTE NÃO APAGA A IMAGEM DA TELA. Era o último
+	# caminho que levava de volta ao boneco: `_matar_ponte` zerava a
+	# textura e a tela ficava no desenho ate o primeiro quadro novo.
+	camera._matar_ponte()
+	assert(camera._bridge_texture == null)
+	assert(camera.tem_imagem())
+	assert(camera.preview_texture() != null)
+	camera._bridge_pid = 999999
+	camera._bridge_texture = camera._ultima_textura
 
 	# UM PEDIDO DE ABERTURA NÃO DERRUBA O QUE JÁ ESTÁ ACESO. Era daqui
 	# que vinha o acende-e-apaga: várias origens pediam "atualize" o
@@ -488,6 +499,9 @@ func _test_camera_acesa_nao_apaga() -> void:
 	assert(camera.estado == camera.Estado.DESLIGADA)
 	assert(camera._bridge_pid <= 0)
 	assert(not camera.pronta())
+	# E só o desligamento explícito apaga a memória da imagem.
+	assert(not camera.tem_imagem())
+	assert(camera._ultima_textura == null)
 
 	camera.enabled = true
 	camera.forcar_ponte = false
@@ -563,26 +577,36 @@ func _test_laco_de_atracao() -> void:
 	assert(jogo.atracao_relogio == 0.0)
 	jogo.central_aberta = false
 
-# ------------------------------------- a marca da casa gravada na foto
-func _test_selo_na_foto() -> void:
-	var camera: CameraService = jogo.camera_service
-	var foto := Image.create(320, 320, false, Image.FORMAT_RGB8)
-	foto.fill(Color(0.10, 0.10, 0.10))
-	# O fundo e lido DA IMAGEM, e nao da constante que a preencheu: 0,10
-	# em ponto flutuante vira 25/255 = 0,098 dentro de um RGB8, e comparar
-	# com o valor ideal falha por uma diferenca que nao existe na imagem.
-	var fundo := foto.get_pixel(20, 20)
-	camera._assinar(foto)
-	# ALGUM pixel do canto inferior direito mudou. Nao se aponta um pixel
-	# exato: o logotipo tem margem transparente, e transparente sobre o
-	# fundo nao muda nada -- um teste preso a uma coordenada quebraria no
-	# dia em que alguem recortasse o arquivo do logotipo.
-	var marcados := 0
-	for x in range(220, 315):
-		for y in range(250, 315):
-			if not foto.get_pixel(x, y).is_equal_approx(fundo):
-				marcados += 1
-	assert(marcados > 200)
-	# E o canto oposto continua intacto -- marca de fotografo e
-	# assinatura, nao camada por cima da imagem inteira.
-	assert(foto.get_pixel(20, 20).is_equal_approx(fundo))
+# ----------------------------------------- o teto de efeitos
+func _test_teto_de_efeitos() -> void:
+	var d: Desempenho = jogo.desempenho
+	var antes := d.teto
+	d.teto = "AUTO"
+	d.qualidade = 1.0
+	d.aplicar_teto()
+	assert(is_equal_approx(d.qualidade, 1.0))
+
+	# O teto CORTA, nunca levanta. Com MEDIO, uma qualidade cheia desce.
+	d.teto = "MEDIO"
+	d.qualidade = 1.0
+	d.aplicar_teto()
+	assert(d.qualidade < 1.0)
+
+	# E uma maquina que ja esta abaixo do teto continua abaixo: nenhum
+	# ajuste da Central pode obrigar a maquina a gastar mais do que ela
+	# aguenta.
+	d.qualidade = 0.20
+	d.aplicar_teto()
+	assert(is_equal_approx(d.qualidade, 0.20))
+
+	# A roda do botao passa pelos quatro e volta.
+	d.teto = "AUTO"
+	var voltas: Array[String] = []
+	for i in range(4):
+		d.teto = d.proximo_teto()
+		voltas.append(d.teto)
+	assert(voltas[3] == "AUTO")
+
+	d.teto = antes
+	d.qualidade = 1.0
+	d.aplicar_teto()

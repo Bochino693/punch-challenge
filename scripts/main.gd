@@ -126,6 +126,7 @@ const BOTOES_SIMPLES := {
 	"zerar_stats": Rect2(327, 1064, 207, 60),
 	"zerar_ranking": Rect2(544, 1064, 207, 60),
 	"reconectar": Rect2(761, 1064, 209, 60),
+	"teto_efeitos": Rect2(680, 940, 290, 56),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -145,6 +146,7 @@ const PAGINA_DO_CONTROLE := {
 	"forcar_ponte": 2, "sondar_camera": 2, "instalar_camera": 2, "diagnosticar": 2,
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
+	"teto_efeitos": 3,
 }
 ## As abas, no topo da caixa.
 const ABA_LARGURA := 230.0
@@ -340,6 +342,8 @@ var camera_backend := ""
 ## O interpretador que o diagnóstico provou ter OpenCV, guardado entre
 ## sessões. Sem ele, toda vez que a máquina liga a ponte recomeça a
 ## adivinhar qual Python usar.
+## O teto de efeitos escolhido na Central, guardado entre sessões.
+var teto_efeitos := "AUTO"
 var camera_python := ""
 var camera_python_args := ""
 var camera_mirrored := true
@@ -531,6 +535,9 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	desempenho.medir(delta)
+	# O cenário é a camada mais cara do jogo; quando a máquina aperta, ela
+	# encolhe junto com os efeitos.
+	ArcadeStage.enfeite = desempenho.qualidade
 	_socorro_da_camera(delta)
 	_laco_de_atracao(delta)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
@@ -1809,6 +1816,11 @@ func _click_central(p: Vector2) -> void:
 		ranking.clear()
 		_photo_cache.clear()
 		_show_notice("RANKING E FOTOS ZERADOS")
+	elif _tocou("teto_efeitos", p):
+		desempenho.teto = desempenho.proximo_teto()
+		desempenho.aplicar_teto()
+		teto_efeitos = desempenho.teto
+		_show_notice("TETO DE EFEITOS: %s" % desempenho.teto)
 	elif _tocou("reconectar", p):
 		if link != null:
 			link.close_port()
@@ -1939,6 +1951,9 @@ func _carregar() -> void:
 	camera_index = int(data.get("camera_index", camera_index))
 	camera_backend = str(data.get("camera_backend", camera_backend))
 	camera_python = str(data.get("camera_python", camera_python))
+	teto_efeitos = str(data.get("teto_efeitos", teto_efeitos))
+	desempenho.teto = teto_efeitos
+	desempenho.aplicar_teto()
 	camera_python_args = str(data.get("camera_python_args", camera_python_args))
 	camera_ponte_escolhida = bool(data.get("camera_ponte_escolhida", false))
 	if camera_ponte_escolhida:
@@ -1974,6 +1989,7 @@ func _salvar() -> void:
 		"camera_index": camera_index,
 		"camera_backend": camera_backend,
 		"camera_python": camera_python,
+		"teto_efeitos": teto_efeitos,
 		"camera_python_args": camera_python_args,
 		"camera_forcar_ponte": camera_forcar_ponte,
 		"camera_ponte_escolhida": camera_ponte_escolhida,
@@ -2198,16 +2214,17 @@ func _draw_partida() -> void:
 	# A marca acompanha a rodada inteira, à direita e discreta — menos na
 	# contagem, onde ela é desenhada ao lado do visor da foto.
 	if state != GameDef.State.COUNTDOWN:
-		_marca_lateral(1800.0, 0.40)
+		_marca_lateral(1766.0, 0.70, 78.0)
 	match state:
 		GameDef.State.COUNTDOWN:
 			_texto_arcade("FAÇA SUA POSE", 340.0, 72, Paleta.CIANO, LARGURA_UTIL)
 			var rect := Rect2(180, 470, 720, 720)
 			_cartao(Rect2(170, 460, 740, 740), Color("330c16"), Paleta.CIANO, 1.0, 4.0)
-			# A MARCA DA CASA AO LADO DO VISOR, à direita, na mesma altura
-			# do enquadramento. É a assinatura de quem fez a máquina, no
-			# lugar em que ela não disputa com o rosto nem com a contagem.
-			_marca_lateral(1215.0)
+			# A MARCA DA CASA LOGO ABAIXO DO VISOR, à direita e grande o
+			# bastante para se ler de pé na frente da máquina. Fora da
+			# foto: dentro dela o carimbo some na miniatura do ranking e
+			# atrapalha no retrato grande.
+			_marca_lateral(1218.0)
 			if pose_finished:
 				# SEM FOTO, A CÂMERA CONTINUA À VISTA. Cair no boneco
 				# desenhado com a webcam acesa na frente da pessoa é o
@@ -2763,6 +2780,10 @@ func _draw_ranking_reveal() -> void:
 	_rotulo("SEU SOCO", 1400.0, Paleta.TINTA_FRACA)
 	_texto_arcade("%04d" % result_score, 1520.0, 100, Paleta.TINTA, LARGURA_UTIL)
 	_rotulo("START • JOGAR NOVAMENTE", 1706.0, Paleta.AMBAR)
+	# NO RANKING ELA É GRANDE. Esta é a tela que o pessoal fotografa com
+	# o celular para mandar no grupo — é a que mais sai do salão, e a
+	# única em que a marca da casa vale um lugar de destaque.
+	_marca_lateral(1770.0, 0.95, 104.0)
 
 ## Chegada com batida: passa do ponto e volta. É o que faz a linha
 ## PARECER ter peso ao cair no lugar, em vez de deslizar até parar.
@@ -3183,6 +3204,14 @@ func _central_dados() -> void:
 	_texto(
 		"câmera: %s" % (camera_service.status if camera_service != null else "—"),
 		948.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# O TETO À MÃO, para quando o automático errar. Ele acerta na maioria
+	# das máquinas e erra em duas: num PC que oscila, ficando subindo e
+	# descendo a qualidade o tempo todo, e num PC bom em que o operador
+	# prefere menos efeito por gosto.
+	_botao(
+		BOTOES_SIMPLES["teto_efeitos"], "EFEITOS: %s" % desempenho.teto,
+		desempenho.teto != "AUTO", Paleta.ROXO, 17
 	)
 
 	_secao(Rect2(80, 1010, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
@@ -3673,10 +3702,9 @@ func _marca_da_casa(y: float, altura: float, alpha := 1.0) -> void:
 ## tem de ir para o 3-2-1 e para a câmera, e uma marca ao lado é uma
 ## segunda coisa pedindo o olho no segundo em que a pessoa está se
 ## ajeitando para a foto.
-func _marca_lateral(y: float, alpha := 0.55) -> void:
+func _marca_lateral(y: float, alpha := 0.85, altura := 96.0) -> void:
 	if logo == null:
 		return
-	var altura := 54.0
 	var largura := altura * logo.get_width() / float(logo.get_height())
 	draw_texture_rect(
 		logo, Rect2(Vector2(1000.0 - largura, y), Vector2(largura, altura)),
