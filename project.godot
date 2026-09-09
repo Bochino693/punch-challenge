@@ -46,6 +46,20 @@ cabinet_credit={
 ]
 }
 
+[punch]
+
+; A CHAVE DA SIMULACAO DE BANCADA, no arquivo de projeto.
+;
+; Terceira porta para a mesma coisa, e de proposito: a chave da Central
+; serve ao tecnico no salao, PUNCH_SIMULACAO=1 serve a bancada de quem
+; desenvolve, e este ajuste serve a uma build feita so para feira ou
+; demonstracao -- em que a maquina precisa nascer com a barra de espaco
+; valendo, sem ninguem lembrar de ligar nada.
+;
+; Falso aqui, sempre. Uma build de salao com isto verdadeiro e qualquer
+; pessoa tirando 9999 sem encostar no equipamento.
+debug_simulation=false
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

@@ -344,7 +344,15 @@ func _ready() -> void:
 	camera_service.enabled = camera_enabled
 	camera_service.mirrored = camera_mirrored
 	add_child(camera_service)
-	simulacao_por_ambiente = OS.get_environment("PUNCH_SIMULACAO") == "1"
+	# TRÊS PORTAS PARA A MESMA CHAVE, e de propósito: a da Central serve
+	# ao técnico no salão, a variável de ambiente serve à bancada de quem
+	# desenvolve, e o ajuste de projeto serve a uma build feita só para
+	# feira ou demonstração — em que a máquina precisa nascer com a barra
+	# de espaço valendo, sem ninguém lembrar de ligar nada.
+	simulacao_por_ambiente = (
+		OS.get_environment("PUNCH_SIMULACAO") == "1"
+		or bool(ProjectSettings.get_setting("punch/debug_simulation", false))
+	)
 	sons.set_volumes(volume_musica, volume_efeitos)
 	_aplicar_faixas()
 	if _converteu_esquema:
