@@ -464,7 +464,7 @@ func _test_camera_acesa_nao_apaga() -> void:
 	# UM PEDIDO DE ABERTURA NÃO DERRUBA O QUE JÁ ESTÁ ACESO. Era daqui
 	# que vinha o acende-e-apaga: várias origens pediam "atualize" o
 	# tempo todo, e cada pedido matava a ponte que estava entregando.
-	camera.refresh()
+	camera.pedir_abertura()
 	camera._atender_pedido()
 	assert(camera._bridge_pid == 999999)
 	assert(camera.pronta())

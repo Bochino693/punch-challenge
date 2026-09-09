@@ -86,6 +86,9 @@ var pattern_mode := false
 ## contraste: entre um quadro preto, um borrado de movimento e um nítido,
 ## é o nítido que tem a maior distância entre o claro e o escuro. No fim
 ## a máquina não tira uma foto, ela ESCOLHE uma entre umas quarenta.
+## A última foto tirada, ainda em memória. Quem for desenhá-la não
+## precisa relê-la do disco.
+var ultima_foto: Image = null
 var _melhor_imagem: Image = null
 var _melhor_nota := -1.0
 var _obturador_ate_ms := 0
@@ -526,16 +529,8 @@ func _acordar_servidor() -> void:
 	if CameraServer.has_method("set_monitoring_feeds"):
 		CameraServer.call("set_monitoring_feeds", true)
 
-## AS PORTAS ANTIGAS, agora fininhas.
-##
-## `refresh`, `set_enabled` e `cycle_camera` continuam existindo porque o
-## resto do jogo as chama — mas nenhuma delas mexe mais na webcam. Todas
-## viraram pedidos, atendidos por `_supervisionar()` no próximo quadro.
-## É isso que acaba com a corrida: duas ordens no mesmo quadro deixam de
-## ser duas aberturas simultâneas e passam a ser uma só, a última.
-func refresh(_forcado := false) -> void:
-	pedir_abertura()
-
+## Ligar e desligar pela Central. Como tudo o mais, só anota a intenção:
+## quem age é `_supervisionar()`, no próximo quadro.
 func set_enabled(value: bool) -> void:
 	if value:
 		pedir_abertura()
@@ -600,9 +595,6 @@ func tem_imagem() -> bool:
 	if _feed != null:
 		return _native_ok
 	return _bridge_texture != null and _bridge_pid > 0
-
-func camera_count() -> int:
-	return CameraServer.get_feed_count()
 
 ## A FICHA DA PONTE, numa linha: qual Python, qual índice, qual
 ## back-end. Sem ela, "não conecta" continua sendo um mistério — e foi
@@ -732,6 +724,17 @@ func capture_photo() -> String:
 	_assinar(image)
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PHOTO_DIR))
 	var path := "%s/player_%d.jpg" % [PHOTO_DIR, Time.get_ticks_usec()]
+	# A FOTO FICA NA MÃO, e não só no disco.
+	#
+	# Aqui estava o "ela desliga por um instante para tirar a foto". No
+	# quadro do obturador o jogo gravava o JPEG, e logo em seguida a tela
+	# PEDIA ESSE MESMO ARQUIVO DE VOLTA para desenhar: abrir, ler,
+	# decodificar. São dezenas de milissegundos de ida e volta ao disco no
+	# meio da linha do desenho — um quadro perdido bem no instante em que
+	# a prévia troca pela foto, e o que se vê é a imagem sumir e voltar.
+	# Guardando a imagem que JÁ ESTÁ na memória, a troca é instantânea e o
+	# disco vira só o arquivo do ranking.
+	ultima_foto = image
 	var error := image.save_jpg(path, 0.86)
 	if error != OK:
 		status = "ERRO AO SALVAR FOTO"
@@ -913,14 +916,6 @@ func caminho_da_ponte() -> String:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	return _materialize_bridge_script(data_dir)
 
-## Compatibilidade: o resto do jogo pede o exame por estes dois nomes, e
-## os dois só anotam a intenção no mesmo fluxo de sempre.
-func pausar_para_exame() -> void:
-	pedir_exame()
-
-func retomar_apos_exame() -> void:
-	terminar_exame()
-
 ## O DIAGNÓSTICO ENTREGA O QUE PROVOU. Índice, back-end e — o que
 ## faltava — o interpretador. Sem esta última peça o exame dizia
 ## "câmera 0 pronta via DSHOW" e o jogo continuava tentando abrir a ponte
@@ -944,36 +939,14 @@ func caminho_do_inspetor() -> String:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
 	return _copiar_para_disco("res://tools/camera_windows.ps1", data_dir + "/camera_windows.ps1")
 
-## RODA O INSTALADOR DA CÂMERA, do próprio jogo.
+## O INSTALADOR EM JANELA À PARTE FOI REMOVIDO.
 ##
-## Existe porque o operador do salão não é quem abre PowerShell. A
-## mensagem "instale o OpenCV" é correta e inútil para quem está na
-## frente do gabinete às onze da noite: o botão faz o que a mensagem
-## pede.
+## Ele abria o PowerShell com `-NoExit` para o operador acompanhar. Num
+## gabinete em tela cheia essa janela nasce ATRÁS do jogo: quem apertava
+## não via nada acontecer e concluía, com razão, que o botão não fazia
+## nada. Quem faz esse serviço agora é o RESOLVER TUDO da Central, que
+## roda em linha própria e escreve cada passo na própria tela.
 ##
-## Só no Windows — no Linux e no macOS o OpenCV entra pelo gerenciador de
-## pacotes do sistema, e um script de PowerShell ali não teria sentido.
-func instalar_dependencias() -> String:
-	if OS.get_name() != "Windows":
-		return "INSTALAÇÃO AUTOMÁTICA SÓ NO WINDOWS — VEJA docs/CAMERA.md"
-	var data_dir := "user://camera_bridge"
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(data_dir))
-	# O .py precisa estar ao lado do .ps1: o instalador procura a ponte na
-	# própria pasta para poder sondar as câmeras no fim.
-	_materialize_bridge_script(data_dir)
-	var script := _copiar_para_disco("res://tools/instalar_camera_windows.ps1", data_dir + "/instalar_camera_windows.ps1")
-	if script.is_empty():
-		return "INSTALADOR NÃO ENCONTRADO NO PACOTE"
-	var pid := OS.create_process("powershell", PackedStringArray([
-		"-NoExit", "-ExecutionPolicy", "Bypass", "-File", script,
-	]), false)
-	if pid <= 0:
-		return "NÃO FOI POSSÍVEL ABRIR O POWERSHELL"
-	# `-NoExit` de propósito: a janela FICA ABERTA no fim. Fechando
-	# sozinha, o resultado da sondagem de câmeras — que é a informação
-	# mais útil da tela toda — passaria voando.
-	return "INSTALADOR ABERTO NUMA JANELA À PARTE — ACOMPANHE POR LÁ"
-
 func _copiar_para_disco(origem: String, destino: String) -> String:
 	var fonte := FileAccess.open(origem, FileAccess.READ)
 	if fonte == null:

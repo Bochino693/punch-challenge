@@ -30,8 +30,18 @@ const SERIAL_BAUD := 115200
 const ESPERA_DO_SOCO := 90.0
 ## A partir daqui a tela avisa que vai voltar, com o relógio à mostra.
 const AVISO_DE_VOLTA := 15.0
-const CONTAGEM_DURACAO := 1.9 ## Subida do número no resultado.
-const IMPACTO_DURACAO := 0.55 ## Estado MEASURING: flash + onda de choque.
+## O RITMO DA JOGADA É OUTRO DO RITMO DA COMEMORAÇÃO.
+##
+## São dois momentos com donos diferentes. Do soco até o número na tela,
+## quem manda é a ANSIEDADE de quem acabou de bater: ali cada décimo a
+## mais é espera, e espera depois do esforço esfria o golpe. Da revelação
+## do ranking em diante quem manda é a comemoração, e essa pode respirar
+## — foi por tratar os dois com o mesmo relógio que a jogada parecia
+## lenta e a premiação parecia apressada.
+##
+## Aqui é a parte rápida: o flash do impacto e a subida do número.
+const CONTAGEM_DURACAO := 1.25 ## Subida do número no resultado.
+const IMPACTO_DURACAO := 0.38 ## Estado MEASURING: flash + onda de choque.
 const RESULTADO_TIMEOUT := 12.0
 
 

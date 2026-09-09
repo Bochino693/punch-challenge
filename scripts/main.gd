@@ -286,7 +286,7 @@ var zoom_alvo := 1.0
 ## marca, com o alvo do jogo montado nela. Meio segundo, o tempo de a
 ## pessoa entender que a máquina avançou.
 var transicao := -1.0
-const TRANSICAO_DURACAO := 0.52
+const TRANSICAO_DURACAO := 0.38
 var result_score := 0
 var result_speed := 0.0
 var result_simulado := false
@@ -638,8 +638,13 @@ func _processar_contagem(delta: float) -> void:
 	if not pose_finished and countdown_left <= 0.0:
 		pose_finished = true
 		result_photo_path = camera_service.capture_photo() if camera_service != null else ""
-		if not result_photo_path.is_empty():
-			_photo_texture(result_photo_path)
+		if not result_photo_path.is_empty() and camera_service.ultima_foto != null:
+			# A textura sai da imagem que a câmera acabou de entregar, e
+			# não do arquivo recém-gravado: ler o disco de volta no mesmo
+			# quadro é o que fazia a imagem sumir e voltar no obturador.
+			_photo_cache[result_photo_path] = ImageTexture.create_from_image(
+				camera_service.ultima_foto
+			)
 		clarao = 0.65
 		sons.play("shutter", -5.0)
 		return
@@ -2204,7 +2209,15 @@ func _draw_partida() -> void:
 			# lugar em que ela não disputa com o rosto nem com a contagem.
 			_marca_lateral(1215.0)
 			if pose_finished:
-				_draw_player_photo(rect, result_photo_path, 1.0)
+				# SEM FOTO, A CÂMERA CONTINUA À VISTA. Cair no boneco
+				# desenhado com a webcam acesa na frente da pessoa é o
+				# que dá a impressão de a câmera ter desligado justamente
+				# na hora de fotografar.
+				if result_photo_path.is_empty() and camera_service != null and camera_service.tem_imagem():
+					_draw_texture_cover(camera_service.preview_texture(), rect, 1.0, camera_mirrored)
+					draw_rect(rect, Color(Paleta.CIANO, 1.0), false, 3.0)
+				else:
+					_draw_player_photo(rect, result_photo_path, 1.0)
 			elif camera_service != null and camera_service.tem_imagem():
 				# `tem_imagem`, e não `available`: a segunda pergunta se a
 				# imagem é DESTE instante, e um atraso de meio segundo na
@@ -3034,7 +3047,17 @@ func _central_camera() -> void:
 	_botao(BOTOES_SIMPLES["sondar_camera"], "PROCURAR CÂMERA DE NOVO", false, Paleta.CIANO, 16)
 	var previa := Rect2(340, 556, 400, 220)
 	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
-	if camera_service != null and camera_service.tem_imagem():
+	if camera_service != null and camera_service.estado == CameraService.Estado.EXAME:
+		# DURANTE O EXAME A PRÉVIA FICA VAZIA DE PROPÓSITO — a webcam é do
+		# diagnóstico, e só um programa por vez a abre. Sem dizer isso na
+		# tela, o vazio lê como a câmera tendo caído de novo.
+		_draw_avatar(previa, 1.0)
+		_carregando(previa.get_center(), 34.0, Paleta.CIANO)
+		_texto(
+			"EXAMINANDO — A CÂMERA VOLTA NO FIM", previa.end.y + 34.0, 17,
+			Paleta.CIANO, HORIZONTAL_ALIGNMENT_CENTER, previa.position.x - 100.0, previa.size.x + 200.0
+		)
+	elif camera_service != null and camera_service.tem_imagem():
 		_draw_texture_cover(camera_service.preview_texture(), previa, 1.0, camera_mirrored)
 	else:
 		_texto("SEM IMAGEM", previa.position.y + previa.size.y * 0.5, 22, Paleta.TINTA_LEVE)
