@@ -49,7 +49,19 @@ const EXPONENT_MAX := 4.50
 ## real do SEU sensor, raio de braço e jeito de bater, e ajusta minima/
 ## maxima sozinho a partir disso. Estes padrões são o que a máquina usa
 ## enquanto isso não é feito (ou depois de "RESTAURAR PADRÕES").
-const DEFAULT_EXPONENT := 2.20
+##
+## O EXPOENTE BAIXOU DE 2,20 PARA 1,85 (a fronteira de "FÁCIL" em
+## `difficulty_name`), depois de a régua acusar o problema: com 2,20 e a
+## faixa 0,30-5,20 m/s, um soco de 2 m/s -- um golpe bom, longe de fraco
+## -- valia perto de 400 pontos em 9999, e só golpes quase saturando o
+## sensor (4 m/s+) passavam de 6000. É a "curva" que fazia pontuar
+## alto parecer quase impossível, e não o sensor: o expoente sozinho
+## decide o quão generosa a curva é para um golpe MÉDIO, sem mexer no
+## que conta como fraco ou no que exige perfeição para chegar perto de
+## 9999. Com 1,85 o mesmo soco de 2 m/s passa a valer perto de 670, e
+## 3 m/s (um golpe forte, não excepcional) passa de 3200 -- 9999
+## continua exigindo um golpe de verdade excepcional.
+const DEFAULT_EXPONENT := 1.85
 const DEFAULT_DEAD_ZONE := 0.05
 const DEFAULT_MIN_SPEED := 0.30
 const DEFAULT_MAX_SPEED := 5.20
