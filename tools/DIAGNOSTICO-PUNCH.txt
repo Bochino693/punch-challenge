@@ -1,0 +1,39 @@
+PUNCH CHALLENGE -- DIAGNOSTICO DA MAQUINA
+gerado em 2026-09-10 20:41:38
+
+=== 1. A MAQUINA ================================================
+Windows      : nao consegui perguntar
+PowerShell   : 7.4.6
+Processo     : 64 bits
+Politica     : Unrestricted
+
+=== 2. RUNTIME DO VISUAL C++ (VCRUNTIME140.dll) =================
+AUSENTE -- a extensao nativa do jogo NAO vai carregar nesta maquina.
+Isso NAO impede o jogo de funcionar (ele usa a ponte do PowerShell),
+mas se quiser o caminho rapido, instale:
+   Microsoft Visual C++ 2015-2022 Redistributable (x64)
+
+=== 3. ARQUIVOS DO JOGO NESTA PASTA =============================
+executavel   : nenhum .exe nesta pasta (rodando fora da pasta do jogo?)
+gdserial.dll : NAO esta nesta pasta.
+               Se o .exe do jogo esta aqui, a extensao ficou para tras
+               na copia -- leve a PASTA INTEIRA, nao so o .exe.
+               (O jogo funciona assim mesmo, pela ponte.)
+
+=== 4. PORTAS COM, PELAS TRES FONTES ============================
+fonte 1 (.NET GetPortNames) : nenhuma
+fonte 2 (registro SERIALCOMM): nenhuma
+fonte 3 (gerenciador de dispositivos):
+   nenhuma
+UNIAO DAS TRES: NENHUMA PORTA COM NESTA MAQUINA
+
+=== 5. DISPOSITIVOS COM PROBLEMA (driver faltando) ==============
+   nao consegui perguntar (isto so funciona no Windows)
+
+=== 6. ESCUTANDO CADA PORTA (a prova final) =====================
+Nao ha porta COM para escutar.
+Isso quer dizer que o WINDOWS nao esta vendo a placa -- nao o jogo.
+Causas, em ordem: (a) driver CH340 faltando, (b) cabo USB so de
+carga, sem fios de dados, (c) placa sem alimentacao ou queimada.
+
+=== FIM =========================================================

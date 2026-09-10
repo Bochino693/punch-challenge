@@ -120,11 +120,11 @@ const BOTOES_SIMPLES := {
 	"instalar_camera": Rect2(570, 920, 400, 56),
 	"testar_som": Rect2(300, 1498, 480, 60),
 	# --- página DADOS
-	"zerar": Rect2(110, 1358, 207, 60),
-	"zerar_stats": Rect2(327, 1358, 207, 60),
-	"zerar_ranking": Rect2(544, 1358, 207, 60),
-	"reconectar": Rect2(761, 1358, 209, 60),
-	"teto_efeitos": Rect2(680, 1234, 290, 56),
+	"zerar": Rect2(110, 1732, 207, 60),
+	"zerar_stats": Rect2(327, 1732, 207, 60),
+	"zerar_ranking": Rect2(544, 1732, 207, 60),
+	"reconectar": Rect2(761, 1732, 209, 60),
+	"teto_efeitos": Rect2(680, 1284, 290, 56),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -340,6 +340,12 @@ var _proxima_escolha_de_caminho := 0.0
 ## troca de caminho DESLIGAR a varredura cega justamente na máquina onde
 ## as duas são necessárias.
 var _cega_liberada := false
+## Quantas portas CHEGARAM A ABRIR na volta atual. Zero numa volta que
+## já incluiu a varredura cega é o veredito mais importante que a
+## máquina pode dar — ver `_veredito_da_busca`.
+var _portas_que_abriram := 0
+## Voltas seguidas em que NENHUMA porta chegou sequer a abrir.
+var _voltas_sem_abrir_nada := 0
 ## ESTE CAMINHO JÁ ENTREGOU UMA LINHA DE VERDADE NESTA MÁQUINA?
 ##
 ## Se já, ele está provado e não se troca mais — nem depois de um silêncio
@@ -352,6 +358,9 @@ var _caminho_provado := false
 ## "DESCONECTADO" contém "CONECTADO", então a frase que diz que a placa
 ## caiu respondia que a placa estava lá.
 var placa_respondeu := false
+## O DIÁRIO DA BUSCA. Ver `scripts/serial/diario_serial.gd`: é o que
+## permite consertar a máquina do cliente sem estar na frente dela.
+var diario: DiarioSerial = null
 
 ## Câmera e dados locais do proprietário. Nenhum deles depende da rede.
 var camera_service: CameraService
@@ -565,6 +574,8 @@ func _exit_tree() -> void:
 		# fecha e deixa um PowerShell segurando a COM -- e a proxima
 		# partida nao consegue abrir a porta da propria maquina.
 		link.encerrar()
+	if diario != null:
+		diario.encerrar()
 	_photo_cache.clear()
 
 ## Um lugar só onde os parâmetros da curva são saneados.
@@ -1491,8 +1502,14 @@ func _resultado_da_calibracao() -> void:
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
 # ======================================================================
 func _iniciar_serial(evitar := "") -> void:
+	if diario == null:
+		diario = DiarioSerial.new()
 	_soltar_link()
 	link = SerialLink.create_best(evitar)
+	_anotar("caminho escolhido: %s%s" % [
+		link.descricao(),
+		"" if evitar.is_empty() else " (evitando: %s)" % evitar,
+	])
 	link.line_received.connect(_on_serial_line)
 	link.opened.connect(_on_serial_opened)
 	link.closed.connect(_on_serial_closed)
@@ -1506,7 +1523,8 @@ func _iniciar_serial(evitar := "") -> void:
 	_falhas_da_porta_fixa = 0
 	_porta_confirmada = false
 	_caminho_provado = false
-	# `_cega_liberada` NÃO é zerada aqui de propósito: ver o comentário
+	_portas_que_abriram = 0
+	# `_cega_liberada` e `_voltas_sem_abrir_nada` NÃO são zerados aqui de propósito: ver o comentário
 	# dela. O que a máquina descobriu sobre si mesma não se esquece na
 	# troca de caminho.
 	_fila_de_portas = PackedStringArray()
@@ -1528,6 +1546,9 @@ func _iniciar_serial(evitar := "") -> void:
 		serial_status = "SEM CAMINHO ATÉ O ARDUINO — PROCURANDO OUTRO…"
 		if not motivo.is_empty():
 			serial_status += " (%s)" % motivo
+		_anotar("SEM CAMINHO até a placa: %s" % (
+			motivo if not motivo.is_empty() else "sem motivo declarado"
+		))
 		proxima_tentativa = animation_time + 1.0
 		return
 	_tentar_conectar()
@@ -1535,6 +1556,13 @@ func _iniciar_serial(evitar := "") -> void:
 ## Desliga o backend anterior antes de escolher outro. Sem isto os sinais
 ## do backend velho continuariam chegando no jogo depois da troca, e duas
 ## camadas seriais falariam ao mesmo tempo sobre portas diferentes.
+## Anotar nunca pode quebrar o jogo. O diário é uma ferramenta de
+## conserto; se ele não existir (um teste que monta o jogo pela metade,
+## uma pasta sem permissão), a máquina segue trabalhando calada.
+func _anotar(texto: String) -> void:
+	if diario != null:
+		diario.anotar(texto)
+
 func _soltar_link() -> void:
 	if link == null:
 		return
@@ -1698,7 +1726,12 @@ func _tentar_conectar() -> void:
 		serial_status = "SEM CAMINHO ATÉ O ARDUINO — VEJA docs/PROTOCOLO_SERIAL.md"
 		proxima_tentativa = animation_time + 1.0
 		return
+	var antes_das_portas := ", ".join(portas_visiveis)
 	portas_visiveis = link.list_ports()
+	if ", ".join(portas_visiveis) != antes_das_portas:
+		_anotar("portas anunciadas: %s" % (
+			", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "NENHUMA"
+		))
 	_fila_de_portas = _fila_de_tentativas()
 	if _fila_de_portas.is_empty():
 		# PROCURAR TEM DE PARECER PROCURAR. A frase era só
@@ -1710,6 +1743,8 @@ func _tentar_conectar() -> void:
 		_varreduras += 1
 		# Sem porta nenhuma à vista já na primeira busca, a enumeração
 		# desta máquina não está servindo: solta a varredura cega agora.
+		if not _cega_liberada:
+			_anotar("nenhuma porta anunciada — ligando a varredura cega")
 		_cega_liberada = true
 		serial_status = "PROCURANDO ARDUINO… (%s, busca %d, nenhuma porta à vista)" % [
 			link.descricao(), _varreduras
@@ -1724,6 +1759,11 @@ func _tentar_conectar() -> void:
 		_varreduras += 1
 		# Uma volta inteira sem achar: da próxima vez a fila leva também
 		# as portas que ninguém anunciou. Ver `_portas_cegas`.
+		_anotar("volta %d fechada sem achar a placa (%d porta(s) chegaram a abrir)" % [
+			_varreduras, _portas_que_abriram
+		])
+		_voltas_sem_abrir_nada = _voltas_sem_abrir_nada + 1 if _portas_que_abriram == 0 else 0
+		_portas_que_abriram = 0
 		_cega_liberada = true
 		_fila_de_portas = _fila_de_tentativas()
 	var porta := _fila_de_portas[_porta_da_vez]
@@ -1740,6 +1780,7 @@ func _tentar_conectar() -> void:
 		proximo_ping = animation_time + 1.0
 	else:
 		serial_status = "FALHA AO ABRIR %s" % porta
+		_anotar("%s: recusou abrir" % porta)
 		proxima_tentativa = animation_time + 0.8
 
 ## DESISTIR DESTA PORTA E PASSAR PARA A PRÓXIMA, num lugar só.
@@ -1754,6 +1795,10 @@ func _desistir_da_porta(motivo: String) -> void:
 			_show_notice(
 				"%s NÃO RESPONDE — VARRENDO TODAS AS PORTAS" % porta_configurada
 			)
+	var porque := link.motivo_da_falta() if link != null else ""
+	_anotar("%s: %s%s" % [
+		porta_atual, motivo.to_lower(), "" if porque.is_empty() else " — %s" % porque
+	])
 	var tem_outras := _fila_de_tentativas().size() > 1
 	var recado := "%s EM %s%s" % [
 		motivo, porta_atual, " — TENTANDO A PRÓXIMA" if tem_outras else ""
@@ -1897,9 +1942,43 @@ func _vigiar_o_caminho() -> bool:
 	])
 	return true
 
+## O VEREDITO DA BUSCA, EM UMA FRASE QUE RESOLVE ALGUMA COISA.
+##
+## "PROCURANDO ARDUINO…" é honesto e é inútil: quem lê não sabe o que
+## fazer com isso. Depois de uma volta inteira — que já inclui a
+## varredura cega, ou seja, COM1 a COM32 uma por uma — a máquina sabe
+## MUITO mais do que "estou procurando", e o que ela sabe muda o
+## conserto por completo:
+##
+## - Se NENHUMA porta chegou nem a abrir, não existe porta COM nesta
+##   máquina. O Windows não está vendo a placa, e o jogo nunca teve
+##   chance. Isso é driver, cabo ou placa — nunca software do jogo, e
+##   mexer no jogo não vai consertar.
+## - Se portas abriram e todas ficaram mudas, o Windows vê portas mas
+##   nenhuma tem o firmware falando: placa não gravada, gravada com
+##   outra coisa, ou fio de alimentação solto.
+##
+## São dois consertos completamente diferentes, e a máquina é a única
+## que pode dizer qual dos dois é.
+func _veredito_da_busca() -> PackedStringArray:
+	if placa_respondeu:
+		return PackedStringArray()
+	if _varreduras < 1 or not _cega_liberada:
+		return PackedStringArray()
+	if _voltas_sem_abrir_nada >= 1:
+		return PackedStringArray([
+			"NENHUMA PORTA COM NESTA MÁQUINA — o Windows não está vendo a placa.",
+			"Falta o driver (CH340) ou o cabo USB é só de carga. O jogo não conserta isto.",
+		])
+	return PackedStringArray([
+		"AS PORTAS ABREM, MAS NENHUMA RESPONDE — a placa não está falando.",
+		"Confira se ela está gravada com punch_sensor e se tem alimentação.",
+	])
+
 func _trocar_de_caminho(motivo: String) -> void:
 	var anterior := link.nome_do_caminho() if link != null else ""
 	_trocas_de_caminho += 1
+	_anotar("TROCANDO DE CAMINHO (%d ª): %s" % [_trocas_de_caminho, motivo])
 	_iniciar_serial(anterior)
 	var agora := link.descricao() if link != null else "nenhum"
 	serial_status = "TROCANDO DE CAMINHO — %s → %s" % [motivo, agora]
@@ -1910,6 +1989,8 @@ func _on_serial_opened(porta: String) -> void:
 	# contar, e não de quando o jogo pediu. Ver `PORTA_PACIENCIA`.
 	_porta_confirmada = true
 	_porta_aberta_em = animation_time
+	_portas_que_abriram += 1
+	_anotar("%s: aberta, esperando a placa falar" % porta)
 	serial_status = "AGUARDANDO READY — %s" % porta
 
 func _on_serial_closed(_porta: String) -> void:
@@ -1956,6 +2037,7 @@ func _on_serial_line(line: String) -> void:
 	if not placa_respondeu:
 		placa_respondeu = true
 		serial_status = "CONECTADO %s" % porta_atual
+		_anotar("*** A PLACA RESPONDEU em %s: %s" % [porta_atual, line.strip_edges()])
 	match str(msg["type"]):
 		"READY":
 			serial_status = "CONECTADO %s" % porta_atual
@@ -2219,6 +2301,9 @@ var central_rolagem := 0.0
 ## anotada numa tabela: uma tabela de alturas por página envelhece na
 ## primeira seção que alguém mover, e envelhece em silêncio.
 var central_fundo := 0.0
+## Ver `_secao`: as caixas desenhadas no último quadro da Central, para
+## o teste provar que nenhuma invade a outra.
+var _secoes_desenhadas: Array[Rect2] = []
 
 ## Quanto ainda há para rolar na página atual.
 func _rolagem_maxima() -> float:
@@ -3413,6 +3498,7 @@ func _draw_central() -> void:
 	# por cima logo depois. O efeito é o de uma janela com rolagem, sem
 	# precisar de um SubViewport só para isso.
 	central_fundo = 0.0
+	_secoes_desenhadas.clear()
 	draw_set_transform(_deslocamento - Vector2(0.0, central_rolagem), 0.0, Vector2.ONE)
 	match central_pagina:
 		1:
@@ -3716,7 +3802,7 @@ func _central_dados() -> void:
 	# exatamente por que o diagnóstico saía DIFERENTE em cada PC, com a
 	# mesma placa e o mesmo jogo. Quem lê a tela para contar ao telefone
 	# o que está escrito estava lendo duas frases embaralhadas.
-	_secao(Rect2(80, 600, 920, 470), "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
+	_secao(Rect2(80, 600, 920, 520), "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
 	_texto(serial_status, 664.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
@@ -3847,6 +3933,12 @@ func _central_dados() -> void:
 		"sistema: %s  •  velocidade %d bauds" % [OS.get_name(), GameDef.SERIAL_BAUD],
 		1028.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
+	var veredito := _veredito_da_busca()
+	for i in range(veredito.size()):
+		_texto(
+			str(veredito[i]), 1058.0 + float(i) * 24.0, 15, Paleta.VERMELHO,
+			HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		)
 
 	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE
 	#
@@ -3855,21 +3947,21 @@ func _central_dados() -> void:
 	# outro vídeo, outra TV, outra resolução. Sem número, o conserto vira
 	# palpite. Estas quatro linhas são o número — e é o que se manda para
 	# quem for consertar, em vez de "está travado".
-	_secao(Rect2(80, 1090, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
+	_secao(Rect2(80, 1140, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
 	var fps := desempenho.fps()
 	var cor_fps := Paleta.VERDE if fps >= 55.0 else (Paleta.AMBAR if fps >= 40.0 else Paleta.VERMELHO)
 	_texto(
 		"%.0f quadros por segundo  •  pior quadro %.1f ms  •  efeitos em %d%%" % [
 			fps, desempenho.pior_ms(), int(round(desempenho.qualidade * 100.0))
 		],
-		1152.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1202.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
 		"%d chamadas de desenho  •  %d primitivas por quadro" % [
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
 		],
-		1182.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1232.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	# A ESCALA DENUNCIA A TELA DEITADA.
 	#
@@ -3883,12 +3975,12 @@ func _central_dados() -> void:
 		"janela %dx%d  •  escala %.2f%s" % [
 			DisplayServer.window_get_size().x, DisplayServer.window_get_size().y, escala.y, aviso
 		],
-		1212.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
+		1262.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
 		"câmera: %s" % (camera_service.status if camera_service != null else "—"),
-		1242.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1292.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	# O TETO À MÃO, para quando o automático errar. Ele acerta na maioria
 	# das máquinas e erra em duas: num PC que oscila, ficando subindo e
@@ -3899,7 +3991,41 @@ func _central_dados() -> void:
 		desempenho.teto != "AUTO", Paleta.ROXO, 17
 	)
 
-	_secao(Rect2(80, 1304, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	# ---- O DIÁRIO DA BUSCA, NA TELA
+	#
+	# Esta seção existe para uma situação muito concreta: a máquina está
+	# no salão, o Arduino não é encontrado, e quem está na frente dela
+	# não sabe abrir terminal, não tem e-mail no PC e não vai saber
+	# repetir nada por telefone. O que essa pessoa SABE fazer é
+	# fotografar a tela com o celular.
+	#
+	# Então o que ela precisa ver tem de caber numa foto: os últimos
+	# passos da procura, em ordem, com hora. Qual caminho subiu, que
+	# portas apareceram, qual foi tentada, o que cada uma respondeu. Uma
+	# foto disto responde em dez segundos o que meia hora de telefone
+	# não responde.
+	_secao(Rect2(80, 1354, 920, 300), "DIÁRIO DA BUSCA (fotografe esta tela)", Paleta.AMBAR)
+	var passos := diario.recentes() if diario != null else PackedStringArray()
+	if passos.is_empty():
+		_texto(
+			"sem passos anotados ainda", 1414.0, 15, Paleta.TINTA_LEVE,
+			HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		)
+	else:
+		for i in range(passos.size()):
+			_texto(
+				str(passos[i]), 1414.0 + float(i) * 26.0, 14, Paleta.TINTA_LEVE,
+				HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+			)
+	# O ARQUIVO, para quem tem como mandar um arquivo. A pasta é dita por
+	# inteiro porque "está no AppData" não ajuda ninguém a achar nada.
+	var onde := diario.caminho() if diario != null else ""
+	_texto(
+		"arquivo: %s" % (onde if not onde.is_empty() else "só na tela — nenhuma pasta gravável"),
+		1630.0, 13, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+
+	_secao(Rect2(80, 1678, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
 	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)
@@ -4026,6 +4152,14 @@ func _secao(rect: Rect2, titulo: String, cor := Paleta.MARINHO) -> void:
 	# Medir aqui, e não numa tabela de alturas, é o que faz a rolagem
 	# continuar certa quando alguém mover uma seção daqui a seis meses.
 	central_fundo = maxf(central_fundo, rect.end.y)
+	# AS SEÇÕES DESENHADAS NESTE QUADRO, para o teste poder cobrá-las.
+	#
+	# Três linhas do diagnóstico eram escritas em cima das linhas da
+	# seção seguinte, e ninguém percebeu por meses: na tela vira um
+	# borrão que muda de aparência conforme a fonte e a escala do
+	# monitor — que é ao pé da letra por que o diagnóstico saía diferente
+	# em cada PC. Olho humano não pega isso; conta de somar pega.
+	_secoes_desenhadas.append(rect)
 	_cartao(rect, Paleta.tinta_clara(Paleta.MARINHO, 0.045), Paleta.CARTAO_BORDA, 1.0, 0.0)
 	# Tarja colorida na lateral: com sete seções empilhadas, é o que deixa
 	# o técnico achar a que procura sem ler todos os títulos.

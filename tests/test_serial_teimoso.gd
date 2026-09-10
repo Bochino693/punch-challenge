@@ -88,6 +88,8 @@ func run() -> void:
 	await _test_a_ponte_ressuscita_sozinha()
 	_test_despedida_velha_nao_mata_ajudante_novo()
 	await _test_a_central_desenha_o_diagnostico()
+	_test_o_diario_anota_e_grava()
+	await _test_nenhuma_secao_escreve_por_cima_da_outra()
 
 	jogo.queue_free()
 	await process_frame
@@ -445,5 +447,93 @@ func _test_a_central_desenha_o_diagnostico() -> void:
 			jogo.queue_redraw()
 			await process_frame
 			await process_frame
+	jogo.central_aberta = false
+	jogo.central_pagina = 0
+
+# ----------------------------------------------------------------------
+#  10. O DIÁRIO ANOTA, GRAVA E NÃO ENTOPE
+# ----------------------------------------------------------------------
+#
+#  O diário é a peça que permite consertar a máquina do cliente sem
+#  estar na frente dela — e por isso ele não pode ser a peça que falha.
+#  Três coisas se cobram: que ele anote, que a repetição não afogue a
+#  linha diferente (a busca repete a mesma frase dezenas de vezes por
+#  minuto, e é a linha DIFERENTE que interessa), e que ele caiba na
+#  tela.
+func _test_o_diario_anota_e_grava() -> void:
+	var d := DiarioSerial.new()
+	d.anotar("COM5: sem resposta")
+	assert(d.recentes().size() > 0)
+	assert(str(d.recentes()[d.recentes().size() - 1]).ends_with("COM5: sem resposta"))
+
+	# Cem linhas iguais não podem virar cem linhas na tela.
+	for _i in range(100):
+		d.anotar("COM5: sem resposta")
+	assert(d.recentes().size() <= DiarioSerial.LINHAS_NA_TELA)
+	var iguais := 0
+	for linha in d.recentes():
+		if "COM5: sem resposta" in str(linha):
+			iguais += 1
+	assert(iguais < 100)
+
+	# E a linha diferente sobrevive à enxurrada de iguais.
+	d.anotar("*** A PLACA RESPONDEU em COM5: READY,PUNCH_MPU6050,V6")
+	assert("A PLACA RESPONDEU" in str(d.recentes()[d.recentes().size() - 1]))
+
+	# O arquivo: existe, e o que foi anotado está lá dentro.
+	var onde := d.caminho()
+	d.encerrar()
+	if not onde.is_empty():
+		var lido := FileAccess.open(onde, FileAccess.READ)
+		assert(lido != null)
+		var texto := lido.get_as_text()
+		lido.close()
+		assert("A PLACA RESPONDEU" in texto)
+		assert("PUNCH CHALLENGE" in texto)
+
+	# O atalho do Windows tem de ser um .bat plausível — um arquivo que
+	# só estreia na máquina do cliente é como esta máquina quebrou das
+	# outras vezes.
+	var bat := DiarioSerial.ATALHO_DO_DIAGNOSTICO
+	assert(bat.begins_with("@echo off"))
+	assert("diagnostico_windows.ps1" in bat)
+	assert("VCRUNTIME140.dll" in bat)
+	assert(bat.strip_edges().ends_with("pause"))
+	# Sem barra invertida perdida: um `\n` que virasse quebra de linha
+	# no lugar errado quebraria o .bat sem aviso.
+	assert("\\." not in bat)
+
+# ----------------------------------------------------------------------
+#  11. NENHUMA SEÇÃO DA CENTRAL ESCREVE POR CIMA DA OUTRA
+# ----------------------------------------------------------------------
+#
+#  O DEFEITO QUE ISTO IMPEDE DE VOLTAR: as três últimas linhas do
+#  diagnóstico eram desenhadas em 832, 860 e 888 — dentro de uma caixa
+#  que terminava em 780. Caíam por cima das linhas da seção seguinte,
+#  que escreve em 858 e 888. Duas frases no mesmo pixel, e qual fica por
+#  cima depende da fonte e da escala do monitor: o mesmo jogo, com a
+#  mesma placa, mostrando um diagnóstico DIFERENTE em cada PC. Quem lia
+#  a tela para contar por telefone estava lendo duas frases embaralhadas.
+#
+#  Olho humano não pega isso — ainda mais numa página que só se vê
+#  rolando. Conta de somar pega, e é barata.
+func _test_nenhuma_secao_escreve_por_cima_da_outra() -> void:
+	jogo.central_aberta = true
+	for pagina in range(4):
+		jogo.central_pagina = pagina
+		jogo.queue_redraw()
+		await process_frame
+		await process_frame
+		var caixas: Array[Rect2] = jogo._secoes_desenhadas.duplicate()
+		for i in range(caixas.size()):
+			for j in range(i + 1, caixas.size()):
+				var a: Rect2 = caixas[i]
+				var b: Rect2 = caixas[j]
+				# Empilhadas na vertical: a de baixo não pode começar
+				# antes de a de cima terminar.
+				var invade := a.position.y < b.end.y and b.position.y < a.end.y
+				if invade:
+					printerr("página %d: seções sobrepostas %s e %s" % [pagina, a, b])
+				assert(not invade)
 	jogo.central_aberta = false
 	jogo.central_pagina = 0

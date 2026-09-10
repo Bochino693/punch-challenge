@@ -27,7 +27,7 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
 ------------------------------------------------------------------------
 
   No rodape da tela de abertura tem o carimbo da build.
-  Tem de dizer BUILD 46 ou maior.
+  Tem de dizer BUILD 47 ou maior.
 
   Se disser um numero menor, o Godot abriu outra pasta. Volte ao passo 1.
 
@@ -90,6 +90,44 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
       Se disser NAO ENCONTRADO, confira SDA=A4, SCL=A5, VCC e GND.
       Mesmo assim os botoes tem de funcionar: a placa nao trava mais
       por falta de sensor.
+
+
+------------------------------------------------------------------------
+  3B. SE O ARDUINO NAO FOR ENCONTRADO, CLIQUE NO DIAGNOSTICO
+------------------------------------------------------------------------
+
+  Na PASTA DO JOGO (a mesma do .exe) o proprio jogo deixa dois
+  arquivos na primeira vez que abre:
+
+      DIAGNOSTICO.bat
+      diagnostico_windows.ps1
+
+  CLIQUE DUAS VEZES NO DIAGNOSTICO.bat. Ele nao instala nada e nao
+  muda nada no computador. Em uns dez segundos ele responde, na
+  propria tela:
+
+    - se o runtime do Visual C++ esta na maquina;
+    - se o gdserial.dll veio junto na copia;
+    - todas as portas COM, por TRES fontes diferentes;
+    - que dispositivos estao sem driver (o CH340 aparece aqui);
+    - e o que importa de verdade: ele ABRE cada porta e ESCUTA.
+
+  A ultima secao da o VEREDITO:
+
+    "A PLACA ESTA FALANDO nesta maquina, na porta X"
+        Windows, cabo, driver e placa estao certos. O caso e do jogo:
+        abra o jogo, F9 -> DADOS, e mande a FOTO do DIARIO DA BUSCA.
+
+    "NENHUMA PORTA TEM O ARDUINO FALANDO"
+        O problema esta ANTES do jogo. Nesta ordem: cabo USB so de
+        carga (troque o cabo), driver da placa faltando, ou a placa
+        nao esta gravada. Mexer no jogo nao conserta nada disso.
+
+  Tudo isso tambem fica gravado em DIAGNOSTICO-PUNCH.txt, na mesma
+  pasta -- e esse arquivo e o que se manda por e-mail.
+
+  O JOGO TAMBEM ESCREVE SOZINHO um diario em punch_arduino.log, na
+  pasta do .exe, com cada passo da procura. Se preferir, mande esse.
 
 
 ------------------------------------------------------------------------

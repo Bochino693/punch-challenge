@@ -434,7 +434,12 @@ pelos canos padrão (`OS.execute_with_pipe`):
 - **Windows** — `tools/ponte_serial.ps1`, rodando no **PowerShell que já
   vem no Windows**, usando `System.IO.Ports.SerialPort`. Não há Python
   para instalar, não há binário para o antivírus apagar, não há
-  arquitetura errada.
+  arquitetura errada. O script é entregue ao PowerShell **dentro da
+  linha de comando** (comprimido e em base64), e não como arquivo: a
+  receita por arquivo precisaria escrever um `.ps1` no AppData — pasta
+  que pode não ser gravável, cujo caminho tem espaço e o nome de usuário
+  do Windows dentro, e onde um `.ps1` recém-criado é exatamente o que o
+  antivírus procura. Ela continua existindo como plano B.
 - **Linux / macOS** — `tools/ponte_serial.sh`, usando `stty` e `cat`.
 
 O protocolo entre o jogo e o ajudante é o mesmo nos dois:
@@ -454,6 +459,46 @@ Ou seja: `PING`, `CONFIG,…`, `LEDS,…`, `HIT,…`, `BUTTON,START` — todo o
 protocolo V2 desta página atravessa a ponte sem mudar uma vírgula. Quem
 está acima não sabe por qual caminho a linha veio.
 
+### Quando nada disso resolver: o diagnóstico da máquina
+
+Duas ferramentas, e as duas nascem sozinhas — nada para instalar.
+
+**1. O diário da busca.** O jogo anota cada passo da procura: qual
+caminho subiu, que portas o sistema anunciou, qual foi tentada, o que
+cada uma respondeu, quantas vezes a ponte religou. Vai para dois
+lugares: o arquivo `punch_arduino.log`, ao lado do executável, e a
+Central (aba **DADOS**, seção **DIÁRIO DA BUSCA**), onde as últimas oito
+linhas ficam sempre à vista. A seção existe para ser **fotografada com o
+celular** — é o que funciona às nove da noite num salão, onde não há
+e-mail no PC nem paciência para telefone.
+
+**2. `DIAGNOSTICO.bat`.** O jogo o desembrulha na própria pasta na
+primeira vez que abre, junto com `diagnostico_windows.ps1`. Dois cliques,
+não instala nada, e responde de uma vez:
+
+- o runtime do Visual C++ está presente?
+- o `gdserial.dll` veio junto na cópia?
+- as portas COM pelas **três** fontes, e a união delas;
+- que dispositivos estão sem driver (é aqui que um CH340 sem driver
+  aparece, como código 28);
+- e a pergunta que encerra o assunto: ele **abre cada porta COM e
+  escuta**, com o mesmo pulso de DTR que a ponte usa.
+
+O veredito da última seção separa os dois consertos que não têm nada a
+ver um com o outro:
+
+| Veredito | O que quer dizer |
+| --- | --- |
+| `A PLACA ESTA FALANDO nesta maquina, na porta X` | Windows, cabo, driver e placa estão certos. O caso é do jogo — mande a foto do diário. |
+| `NENHUMA PORTA TEM O ARDUINO FALANDO` | O problema é anterior ao jogo: cabo só de carga, driver faltando, ou placa não gravada. Mexer no software não conserta. |
+
+A saída também fica em `DIAGNOSTICO-PUNCH.txt`, na mesma pasta.
+
+E o jogo dá o mesmo veredito sozinho: fechada uma volta inteira da
+varredura (que já inclui `COM1`…`COM32`), se **nenhuma porta chegou nem
+a abrir**, a Central escreve em vermelho que não existe porta COM nesta
+máquina — o que é driver ou cabo, nunca software.
+
 ### O método que sempre funciona
 
 A pergunta prática — *o que eu faço para o Arduino pegar em qualquer PC?*
@@ -463,8 +508,8 @@ que ele tenta, em ordem, e por que nenhuma das etapas pode ficar presa:
 | Etapa | O que o jogo faz | Que falha ela cobre |
 | --- | --- | --- |
 | 1 | Extensão nativa, se carregou | o caminho rápido |
-| 2 | Ponte do sistema (PowerShell / `stty`) | `.dll` ausente, runtime do VC++ ausente, antivírus |
-| 3 | Ponte por `-EncodedCommand` | política de grupo que proíbe arquivos `.ps1` |
+| 2 | Ponte por `-EncodedCommand` (Windows) | `.dll` ausente, runtime do VC++ ausente, AppData não gravável, caminho com espaço ou acento, antivírus escaneando um `.ps1` novo, política de grupo |
+| 3 | Ponte por arquivo `.ps1` | auditoria que recuse linha de comando codificada |
 | 4 | Três fontes de enumeração, em união | registro cego, driver que registrou a porta noutro lugar |
 | 5 | Varredura cega de `COM1`…`COM32` | enumeração que não devolve nada |
 | 6 | Troca de caminho a cada volta perdida | um caminho que não presta nesta máquina |

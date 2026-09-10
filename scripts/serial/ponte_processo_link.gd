@@ -53,6 +53,9 @@ var _proxima_subida_ms := 0
 var _proxima_listagem_ms := 0
 var _falha := ""
 var _sistema := ""
+## No Windows a ponte comeca pelo comando codificado -- ver o comentario
+## em `_programa_e_argumentos`. `false` aqui quer dizer "usar a primeira
+## receita", que no Windows e a codificada.
 var _codificado := false
 var _prazo_da_apresentacao_ms := 0
 ## Quando o ajudante disse alguma coisa pela ultima vez. Ver o vigia de
@@ -77,6 +80,25 @@ var _religadas := 0
 ## Ja funcionou alguma vez nesta sessao? Um ajudante que JA falou merece
 ## paciencia infinita; um que nunca falou merece a troca de receita.
 var _ja_falou := false
+## DA PARA CONFIAR NO `OS.is_process_running` DESTA MAQUINA?
+##
+## Perguntar ao sistema se o ajudante ainda vive e a unica forma honesta
+## de saber (o cano nao avisa -- ver `_laco_leitor`). Mas se essa
+## resposta vier ERRADA em algum sistema, o estrago e total e silencioso:
+## o jogo mataria o ajudante recem-nascido a cada quadro, para sempre, e
+## a tela ficaria "PROCURANDO ARDUINO..." exatamente como antes -- so que
+## agora por culpa do conserto.
+##
+## Nao da para testar todo Windows do mundo daqui. Da para a PROPRIA
+## MAQUINA responder: logo depois de subir um processo com sucesso, ele
+## esta obrigatoriamente vivo. Se a pergunta disser que nao, a resposta
+## nao presta NESTA maquina, e o jogo desliga essa verificacao e passa a
+## depender so dos outros sinais (o prazo da apresentacao e o vigia de
+## silencio, que sao mais lentos mas nunca mentem para pior).
+##
+## Uma verificacao que pode estar errada nunca deve ser a unica coisa
+## entre a maquina e o cliente.
+var _confiar_no_processo := true
 
 const ESPERA_ENTRE_ABERTURAS_MS := 700
 const ESPERA_ENTRE_SUBIDAS_MS := 2500
@@ -160,8 +182,35 @@ func _programa_e_argumentos() -> Array:
 	if not receita_de_teste.is_empty():
 		return receita_de_teste
 	if _sistema == "Windows":
-		if _codificado:
-			return _receita_codificada()
+		# O COMANDO CODIFICADO VEM PRIMEIRO AGORA -- e a inversao e o
+		# conserto de quatro defeitos de uma vez.
+		#
+		# A receita por ARQUIVO precisa escrever um .ps1 dentro do
+		# AppData e mandar o PowerShell executa-lo. Cada uma dessas
+		# etapas e um jeito diferente de morrer numa maquina que nao e a
+		# de quem programa:
+		#
+		#   1. O `user://` pode nao ser gravavel: perfil de rede, perfil
+		#      movel, OneDrive redirecionando o AppData, disco cheio.
+		#   2. O caminho contem um espaco -- a pasta chama-se
+		#      "Punch Challenge" -- e pode conter acentos, porque leva o
+		#      nome de usuario do Windows dentro. Duas coisas que a linha
+		#      de comando erra com facilidade.
+		#   3. Um .ps1 RECEM-ESCRITO dentro do AppData e o desenho exato
+		#      do que antivirus procura. Ele e escaneado na primeira
+		#      execucao (segundos) ou posto em quarentena (sempre).
+		#   4. Politica de grupo que proibe arquivos .ps1 -- o motivo
+		#      original de este caminho existir.
+		#
+		# O comando codificado nao tem NENHUMA dessas etapas: nao escreve
+		# arquivo, nao depende de pasta, nao tem caminho para errar. Ele
+		# ja era o plano B testado e funcionando; passa a ser o plano A.
+		# A receita por arquivo continua existindo como plano B, para o
+		# caso raro de uma auditoria recusar linha de comando codificada.
+		if not _codificado:
+			var codificada := _receita_codificada()
+			if not codificada.is_empty():
+				return codificada
 		var script := _desembrulhar(CAMINHO_WINDOWS, "ponte_serial.ps1")
 		if script.is_empty():
 			return []
@@ -281,9 +330,18 @@ func _receita_codificada() -> Array:
 	var base := comando_codificado()
 	if base.is_empty():
 		return []
+	# AS BANDEIRAS SAO EXATAMENTE AS QUE O TESTE EXERCITA, e nada alem.
+	#
+	# `-WindowStyle Hidden` junto com `-EncodedCommand` e, literalmente, o
+	# desenho que todo antivirus aprendeu a reconhecer como PowerShell
+	# malicioso -- e nao serve para nada aqui, porque um processo aberto
+	# por `execute_with_pipe` ja nasce sem janela. `-ExecutionPolicy`
+	# tambem nao serve: politica de execucao vale para ARQUIVO, e aqui
+	# nao ha arquivo nenhum. Cada bandeira a mais e uma chance a mais de
+	# a maquina do cliente recusar, sem nenhuma chance a mais de
+	# funcionar.
 	return [[
-		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-WindowStyle", "Hidden", "-EncodedCommand", base,
+		"-NoProfile", "-NonInteractive", "-EncodedCommand", base,
 	], _candidatos_de_powershell()]
 
 func _subir() -> void:
@@ -310,6 +368,11 @@ func _subir() -> void:
 		return
 	_cano = canos["stdio"]
 	_pid = int(canos.get("pid", -1))
+	# A AUTOCALIBRACAO: o processo acabou de subir, entao esta vivo. Se o
+	# sistema disser que nao, e o sistema que esta errado -- ver o
+	# comentario de `_confiar_no_processo`.
+	if _confiar_no_processo and _pid > 0 and not OS.is_process_running(_pid):
+		_confiar_no_processo = false
 	_prazo_da_apresentacao_ms = Time.get_ticks_msec() + ESPERA_DA_APRESENTACAO_MS
 	_ultima_linha_ms = Time.get_ticks_msec()
 	_proxima_listagem_ms = 0
@@ -423,7 +486,7 @@ func motivo_da_falta() -> String:
 
 func descricao() -> String:
 	if _sistema == "Windows":
-		return "ponte PowerShell codificada" if _codificado else "ponte PowerShell"
+		return "ponte PowerShell (arquivo)" if _codificado else "ponte PowerShell (comando)"
 	return "ponte de sistema"
 
 func list_ports() -> PackedStringArray:
@@ -524,7 +587,7 @@ func poll() -> void:
 	# ela, um ajudante morto -- derrubado por antivirus, por politica, ou
 	# porque o PowerShell engasgou -- deixava a ponte "de pe" e muda para
 	# sempre, e a tela ficava "PROCURANDO ARDUINO..." a noite inteira.
-	if _pid > 0 and not OS.is_process_running(_pid):
+	if _confiar_no_processo and _pid > 0 and not OS.is_process_running(_pid):
 		var estava_em := _porta if not _porta.is_empty() else _abrindo
 		_falha = "o ajudante da ponte morreu"
 		_derrubar()
@@ -542,6 +605,18 @@ func poll() -> void:
 	# dois segundos, entao silencio longo aqui nao tem explicacao inocente.
 	if _apresentou and not is_open() and _ultima_linha_ms > 0:
 		if Time.get_ticks_msec() - _ultima_linha_ms > ESPERA_ATE_DESCONFIAR_MS:
+			_falha = "o ajudante da ponte parou de responder"
+			_derrubar()
+			_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS
+			return
+	if _apresentou and is_open() and not _confiar_no_processo and _ultima_linha_ms > 0:
+		# Com a porta aberta o jogo nao manda `@LISTAR`, entao o silencio
+		# aqui pode ser so uma placa muda -- e disso quem cuida e a
+		# paciencia do lado do jogo, que fecha a porta e tenta a proxima.
+		# Mas se a verificacao de processo nao presta nesta maquina, este
+		# e o UNICO sinal que sobra para perceber um ajudante morto com a
+		# porta aberta. O prazo e generoso para nao atropelar o jogo.
+		if Time.get_ticks_msec() - _ultima_linha_ms > ESPERA_ATE_DESCONFIAR_MS * 2:
 			_falha = "o ajudante da ponte parou de responder"
 			_derrubar()
 			_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS

@@ -12,9 +12,9 @@ extends RefCounted
 ## NUMERO em um e escreva em NOTA o que mudou. Um carimbo que não sobe
 ## mente, e um carimbo que mente é pior do que carimbo nenhum.
 
-const NUMERO := 46
+const NUMERO := 47
 const DATA := "10/09/2026"
-const NOTA := "a busca pelo Arduino nao desiste mais: varre qualquer porta e troca de caminho sozinha"
+const NOTA := "diario da busca na tela e DIAGNOSTICO.bat na pasta do jogo"
 
 ## Rodapé da abertura: cabe em uma linha discreta.
 static func curta() -> String:
