@@ -50,10 +50,21 @@ if grep -q '^\[documentation\]' "$ext"; then
 fi
 echo "    nenhum."
 
-echo "--- sobrou lixo no pacote? ---"
-lixo=$(find "$raiz/addons" -name '~*' -o -name '*.tmp' | head -5)
+echo "--- sobrou lixo VERSIONADO no pacote? ---"
+# PERGUNTA AO GIT, E NAO AO DISCO.
+#
+# `~gdserial.dll` NASCE sozinho na maquina de quem desenvolve: no Windows
+# nao da para sobrescrever uma DLL carregada, entao o editor do Godot
+# copia a atual para um nome com `~` na frente. Olhar o disco reprovaria
+# toda maquina com o projeto aberto -- e, pior, sugeriria apagar um
+# arquivo que o Windows nao deixa apagar, que foi como um `git pull`
+# entrou num laco infinito de "Unlink failed. Should I try again?".
+#
+# O que nao pode e ele estar VERSIONADO. E isso que se pergunta aqui.
+lixo=$(cd "$raiz" && git ls-files 'addons/**/~*' '**/*.tmp' 2>/dev/null | head -5)
 if [ -n "$lixo" ]; then
-  echo "    LIXO: $lixo"
+  echo "    LIXO VERSIONADO: $lixo"
+  echo "    (no disco tudo bem: o Godot recria. So nao pode entrar no git.)"
   exit 1
 fi
 echo "    nao."

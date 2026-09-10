@@ -360,3 +360,32 @@ Num PC recém-formatado, sem Python e sem nada:
 | Foto pela ponte | Só com Python + OpenCV |
 
 Sem foto, o ranking mostra a silhueta desenhada e o jogo segue inteiro.
+
+---
+
+## Se o `git pull` entrar num laço "Unlink failed"
+
+```
+Unlink of file 'addons/gdserial/bin/windows-x86_64/~gdserial.dll' failed.
+Should I try again? (y/n)
+```
+
+Responder `y` não resolve nunca — o arquivo está **travado**, e vai
+continuar travado enquanto quem o travou estiver no ar.
+
+**Saída:**
+
+1. digite `n` e Enter (ou `Ctrl+C`) para abortar;
+2. **feche o editor do Godot** e qualquer `PunchChallenge.exe` rodando;
+3. `git pull` de novo.
+
+**Por que acontece.** No Windows não dá para sobrescrever uma DLL que
+está carregada. Quando o editor do Godot precisa recarregar uma extensão,
+ele copia a atual para um nome com `~` na frente e usa a cópia — então
+`~gdserial.dll` **nasce sozinho** ao abrir o projeto e fica preso ao
+processo do editor. O `git` tenta apagá-lo, o Windows recusa, e o git
+pergunta em laço.
+
+O arquivo está no `.gitignore` desde a BUILD 43: ele continua nascendo na
+máquina de quem desenvolve, mas não entra mais no repositório e não
+atrapalha mais nenhum `pull`.

@@ -12,9 +12,9 @@ extends RefCounted
 ## NUMERO em um e escreva em NOTA o que mudou. Um carimbo que não sobe
 ## mente, e um carimbo que mente é pior do que carimbo nenhum.
 
-const NUMERO := 42
+const NUMERO := 43
 const DATA := "10/09/2026"
-const NOTA := "sem Python obrigatorio e a serial que grita quando falta"
+const NOTA := "o pull nao trava mais no dll que o Godot cria sozinho"
 
 ## Rodapé da abertura: cabe em uma linha discreta.
 static func curta() -> String:
