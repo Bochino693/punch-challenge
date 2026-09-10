@@ -83,6 +83,7 @@ $script:sp = $null
 $script:portaAberta = ""
 $script:sobras = ""
 $script:listaConhecida = @()
+$script:nomesCrus = @()
 $script:proximaBusca = [DateTime]::MinValue
 
 # ----------------------------------------------------------------------
@@ -125,12 +126,30 @@ function Enumerar() {
     $nomes = @()
     try { $nomes = @([System.IO.Ports.SerialPort]::GetPortNames()) } catch { }
     $nomes = @($nomes | Where-Object { $_ } | ForEach-Object { Normalizar $_ } | Sort-Object -Unique)
-    if ($nomes.Count -eq 0) { return @() }
+
+    # A LISTA CRUA E BARATA; DESCOBRIR O FABRICANTE E QUE E CARO.
+    #
+    # Ler os nomes das portas e uma consulta ao registro, coisa de
+    # milissegundos. Perguntar ao gerenciador de dispositivos QUEM e cada
+    # uma varre uns mil e quinhentos dispositivos e leva de um a tres
+    # segundos. Como a procura se repete a cada tres segundos enquanto o
+    # Arduino nao esta espetado, fazer a parte cara toda vez seria roubar
+    # do jogo o processador que ele usa para animar -- numa maquina que ja
+    # esta em 49 quadros por segundo.
+    #
+    # Entao a parte cara so roda quando a lista crua MUDA, que e quando a
+    # resposta pode ter mudado. Placa espetada no meio do expediente
+    # continua sendo encontrada na hora.
+    if ($nomes.Count -eq 0) {
+        $script:nomesCrus = @()
+        return @()
+    }
+    if (($nomes -join ",") -eq ($script:nomesCrus -join ",")) {
+        return $script:listaConhecida
+    }
+    $script:nomesCrus = $nomes
 
     $suspeitas = @{}
-    # A consulta ao gerenciador de dispositivos e a unica parte lenta
-    # daqui (~1 s). Ela so roda quando a lista de portas MUDA, e nunca
-    # dentro do laco de leitura.
     try {
         $itens = $null
         if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
