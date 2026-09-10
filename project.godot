@@ -18,9 +18,9 @@ config/name="Punch Challenge"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 boot_splash/bg_color=Color(0.098, 0.0235, 0.051, 1)
+boot_splash/stretch_mode=0
 boot_splash/image="res://assets/branding/selo_lazer.png"
 config/icon="res://assets/icon.png"
-boot_splash/stretch_mode=0
 
 [display]
 
@@ -30,20 +30,7 @@ window/size/mode=3
 window/size/window_width_override=810
 window/size/window_height_override=1440
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
 window/handheld/orientation=1
-; SINCRONIA VERTICAL LIGADA, DITA EM VOZ ALTA.
-;
-; O padrao ja e este, mas deixa-lo implicito custou tempo: sem a linha,
-; nao ha como saber, olhando o projeto, se o ritmo irregular vinha de
-; alguem ter desligado a sincronia. Agora esta escrito.
-;
-; E o `msaa_2d` saiu daqui: o renderizador GL Compatibility IGNORA
-; antisserrilhado por multiamostragem e avisa isso a cada abertura
-; ("2D MSAA is not yet supported for GLES3"). Um ajuste que nao faz nada
-; e um aviso que aparece sempre treinam quem le a ignorar os avisos que
-; importam. O antisserrilhado deste jogo e feito no desenho, em
-; `scripts/traco.gd`.
 vsync/vsync_mode=1
 
 [input]
@@ -61,16 +48,6 @@ cabinet_credit={
 
 [punch]
 
-; A CHAVE DA SIMULACAO DE BANCADA, no arquivo de projeto.
-;
-; Terceira porta para a mesma coisa, e de proposito: a chave da Central
-; serve ao tecnico no salao, PUNCH_SIMULACAO=1 serve a bancada de quem
-; desenvolve, e este ajuste serve a uma build feita so para feira ou
-; demonstracao -- em que a maquina precisa nascer com a barra de espaco
-; valendo, sem ninguem lembrar de ligar nada.
-;
-; Falso aqui, sempre. Uma build de salao com isto verdadeiro e qualquer
-; pessoa tirando 9999 sem encostar no equipamento.
 debug_simulation=false
 
 [rendering]

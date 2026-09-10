@@ -35,9 +35,14 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 func _process(delta: float) -> void:
-	tempo += delta
-	fx.atualizar(delta)
-	if randf() < delta * 2.5:
+	# O MESMO FREIO DE `main.gd`, com o mesmo teto (ver o comentário lá):
+	# só entra numa queda catastrófica de verdade (abaixo de 10 fps), não
+	# no simples peso de uma tela cheia de efeito — senão a poeira sobe
+	# em câmera lenta bem quando o cenário está mais pesado.
+	var passo := minf(delta, 0.1)
+	tempo += passo
+	fx.atualizar(passo)
+	if randf() < passo * 2.5:
 		# Poeira brilhando dentro do cone de luz, subindo devagar.
 		fx.poeira(
 			Vector2(randf_range(0.25, 0.75) * size.x, size.y * HORIZONTE),

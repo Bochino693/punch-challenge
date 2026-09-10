@@ -24,11 +24,35 @@ extends RefCounted
 
 const EXPONENT_MIN := 1.50
 const EXPONENT_MAX := 4.50
-## Parâmetros de fábrica, medidos para um saco de arcade comum.
-const DEFAULT_EXPONENT := 2.80
-const DEFAULT_DEAD_ZONE := 0.08
-const DEFAULT_MIN_SPEED := 1.20
-const DEFAULT_MAX_SPEED := 16.00
+## PARÂMETROS DE FÁBRICA -- recalibrados para o firmware V6 do sensor
+## (arduino/punch_sensor/punch_sensor.ino).
+##
+## Os padrões antigos (mínima 1,20 / máxima 16,00) foram medidos contra
+## um firmware que integrava a aceleração por até 400 ms sem checar a
+## FORMA do golpe -- um empurrão prolongado inflava a velocidade "medida"
+## bem além do que qualquer soco de verdade produz, e a escala toda foi
+## calibrada em cima desse número inflado. A partir da V4/V5/V6 o
+## firmware mede honestamente (janela curta, integração por trapézio,
+## fator de impacto, fator de queda, coerência giroscópio×acelerômetro) —
+## e um soco de verdade, medido honestamente, fica tipicamente entre
+## 0,4 m/s (toque fraco) e ~4 m/s (golpe muito forte, quase saturando o
+## acelerômetro a 16 g). Os valores abaixo foram escolhidos a partir de
+## simulação numérica desse novo firmware para que a escala 0-9999 use a
+## faixa inteira: fraco fica perto de zero, forte de verdade passa de
+## 6000, e 9999 continua existindo — só que exige um golpe excepcional
+## (perto da saturação do sensor, ajudado pela leitura do giroscópio),
+## nunca um empurrão ou uma vibração.
+##
+## ESTES SÃO UM PONTO DE PARTIDA, NÃO A PALAVRA FINAL: o ideal continua
+## sendo rodar o ASSISTENTE DE CALIBRAÇÃO da Central Técnica (5 socos
+## fracos, 5 fortes) nesta máquina especificamente — ele mede a faixa
+## real do SEU sensor, raio de braço e jeito de bater, e ajusta minima/
+## maxima sozinho a partir disso. Estes padrões são o que a máquina usa
+## enquanto isso não é feito (ou depois de "RESTAURAR PADRÕES").
+const DEFAULT_EXPONENT := 2.20
+const DEFAULT_DEAD_ZONE := 0.05
+const DEFAULT_MIN_SPEED := 0.30
+const DEFAULT_MAX_SPEED := 5.20
 ## Limites de regulagem oferecidos pela Central Técnica.
 const MIN_SPEED_MIN := 0.20
 const MIN_SPEED_MAX := 10.00
