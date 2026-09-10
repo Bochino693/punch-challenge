@@ -561,26 +561,60 @@ func _process(delta: float) -> void:
 		queue_redraw()
 		return
 	desempenho.medir(delta)
+	# UM QUADRO ENGASGADO NÃO PODE VIRAR UM PULO NO JOGO — MAS O FREIO NÃO
+	# PODE VIRAR CÂMERA LENTA.
+	#
+	# `desempenho.medir` já viu o quadro de verdade, com o tempo real que
+	# ele levou — é dele que sai a média de FPS e a decisão de cortar
+	# efeito. Este teto serve só para um caso raro: um engasgo isolado e
+	# GRANDE (a primeira vez que uma fonte nova é rasterizada, um soluço
+	# do sistema operacional) que faria o quadro seguinte herdar um delta
+	# gigante e o jogo INTEIRO pular esse tanto de uma vez — a contagem
+	# saltando números, a brasa teletransportando em vez de voar.
+	#
+	# O teto tinha ficado em 1/30 s (a máquina "não pode ficar mais lenta
+	# que 30 fps"), e isso é OUTRA COISA: numa tela mais pesada de
+	# desenhar — a abertura, com o cenário inteiro e a luva voando, ou o
+	# instante do impacto, com a explosão de partículas — a máquina PODE
+	# rodar abaixo de 30 fps por um bom tempo, não só num quadro isolado.
+	# Com o teto em 1/30 s, cada um DESSES quadros também tinha o tempo
+	# cortado, e um jogo que anda com menos tempo do que o relógio real
+	# passou fica em câmera lenta — foi exatamente essa a queixa: a
+	# contagem do impacto e o posicionamento da abertura ficaram lentos.
+	# Um freio para casos raros e extremos não pode disparar toda vez que
+	# a tela fica mais pesada por alguns segundos.
+	#
+	# O teto certo é bem mais alto: só entra numa queda catastrófica
+	# (abaixo de 10 fps, meio segundo por quadro pra cima), que nunca
+	# acontece pelo simples peso normal de uma tela cheia de efeito — só
+	# por um soluço de verdade. Abaixo disso o passo do jogo é o próprio
+	# tempo do quadro, e a máquina anda no seu próprio ritmo real, só mais
+	# aos trancos quando o PC está fraco — o que é honesto, e não lento.
+	var passo := minf(delta, 0.1)
 	# O cenário é a camada mais cara do jogo; quando a máquina aperta, ela
 	# encolhe junto com os efeitos.
 	ArcadeStage.enfeite = desempenho.qualidade
-	_socorro_da_camera(delta)
-	_laco_de_atracao(delta)
-	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(delta * 7.0, 0.0, 1.0))
+	# A MOLDURA DE LED NÃO ENCOLHIA NUNCA. Cem e tantas lâmpadas, três
+	# desenhos cada, em toda tela do jogo, do início ao fim — o único
+	# enfeite que ficava de fora do vigia de desempenho.
+	moldura.qualidade = desempenho.qualidade
+	_socorro_da_camera(passo)
+	_laco_de_atracao(passo)
+	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(passo * 7.0, 0.0, 1.0))
 	if absf(zoom_impacto - 1.0) < 0.002 and is_equal_approx(zoom_alvo, 1.0):
 		zoom_impacto = 1.0
-	animation_time += delta
-	state_time += delta
-	_poll_serial(delta)
-	fx.atualizar(delta)
-	tremor = maxf(0.0, tremor - delta * 26.0)
-	clarao = maxf(0.0, clarao - delta * 2.6)
+	animation_time += passo
+	state_time += passo
+	_poll_serial(passo)
+	fx.atualizar(passo)
+	tremor = maxf(0.0, tremor - passo * 26.0)
+	clarao = maxf(0.0, clarao - passo * 2.6)
 	if transicao >= 0.0:
-		transicao += delta
+		transicao += passo
 		if transicao > TRANSICAO_DURACAO:
 			transicao = -1.0
 	if pancada_tempo >= 0.0:
-		pancada_tempo += delta
+		pancada_tempo += passo
 		# O zoom volta ao normal assim que o estrelão passa da metade.
 		if pancada_tempo > ImpactDirector.PANCADA_DURACAO * 0.5:
 			zoom_alvo = 1.0
@@ -588,27 +622,27 @@ func _process(delta: float) -> void:
 			pancada_tempo = -1.0
 
 	if notice_left > 0.0:
-		notice_left -= delta
+		notice_left -= passo
 	else:
 		notice = ""
 	if not confirm_action.is_empty() and animation_time > confirm_until:
 		confirm_action = ""
 
 	if central_aberta:
-		_processar_calibracao(delta)
+		_processar_calibracao(passo)
 	if not central_aberta:
 		match state:
 			GameDef.State.IDLE:
-				_processar_abertura(delta)
+				_processar_abertura(passo)
 			GameDef.State.COUNTDOWN:
-				_processar_contagem(delta)
+				_processar_contagem(passo)
 			GameDef.State.ARMED:
-				_processar_armado(delta)
+				_processar_armado(passo)
 			GameDef.State.MEASURING:
 				if state_time >= GameDef.IMPACTO_DURACAO:
 					_entrar_em_resultado()
 			GameDef.State.RESULT:
-				_processar_resultado(delta)
+				_processar_resultado(passo)
 	queue_redraw()
 
 func _processar_abertura(delta: float) -> void:
@@ -3537,14 +3571,6 @@ func _fim_do_exame() -> void:
 		"" if medico.backend.is_empty() else " VIA " + medico.backend,
 	])
 
-## Quantas fotos existem na pasta do ranking. Serve para o técnico
-## perceber sobra de arquivo — foto sem dono é disco enchendo à toa.
-func _fotos_guardadas() -> int:
-	var dir := DirAccess.open(RankingStore.PHOTO_DIR)
-	if dir == null:
-		return 0
-	return dir.get_files().size()
-
 ## As cinco marcas em uma linha só: o técnico precisa VER o que vai
 ## apagar antes de apertar ZERAR RANKING.
 func _lista_do_ranking(rect: Rect2) -> void:
@@ -3840,16 +3866,66 @@ func _corpo(tamanho: int) -> int:
 		return maxi(CORPO_MINIMO, tamanho)
 	return maxi(CORPO_MINIMO, int(round(float(tamanho) * CAIXA_LEITURA)))
 
+## O CACHE DE `_tamanho_que_cabe`.
+##
+## Esta tela inteira é desenhada à mão, num `_draw()` só, chamado TODO
+## quadro — e antes disso aqui era recalculado todo quadro também, para
+## todo texto que encolhe: até a palavra "CALIBRAÇÃO", que nunca muda de
+## letra nem de largura entre um quadro e o outro, media de novo a cada
+## quadro. Cada medição é uma busca linear que pode chegar a quarenta e
+## poucas chamadas a `get_string_size`, e a primeira vez que a fonte vê um
+## tamanho novo ela ainda desenha o glifo (rasteriza), o que custa muito
+## mais que uma medição comum. Era exatamente esse custo, repetido sem
+## necessidade a cada quadro, que travava a entrada da tabela de
+## classificação e a montagem do letreiro na abertura.
+##
+## A chave inclui o texto, o teto de tamanho, a largura disponível e a
+## fonte usada: as quatro coisas de que o resultado da busca depende. Só
+## se elas mudarem — outro placar, outra frase — o cálculo roda de novo.
+## Um teto de entradas evita que a máquina, ligada o dia inteiro, acumule
+## uma entrada por número de placar diferente para sempre: numa arcada o
+## conjunto de textos é pequeno e se repete, então limpar de vez em quando
+## custa perto de nada.
+const CACHE_TAMANHO_TETO := 400
+var _cache_tamanho: Dictionary = {}
+
 ## O maior corpo, até `tamanho_max`, em que o texto ainda cabe na
 ## largura. Sem isso, "PESO-PESADO" a 96 px sai pelos dois lados da tela
 ## e "FRACO!" fica pequeno demais no mesmo lugar.
 func _tamanho_que_cabe(texto: String, tamanho_max: int, largura: float, letra: Font = null) -> int:
 	var usada: Font = letra if letra != null else fonte
+	var chave := [texto, tamanho_max, largura, usada]
+	var em_cache = _cache_tamanho.get(chave)
+	if em_cache != null:
+		return em_cache
+
+	# A MAIORIA DOS TEXTOS JÁ CABE NO TETO PEDIDO — um rótulo curto como
+	# "PONTOS" a 30 px nunca precisou encolher, e pedia a mesma busca de
+	# quem precisa. Medir uma vez no teto e só então decidir resolve o
+	# caso comum com UMA chamada, não quarenta.
 	var tamanho := tamanho_max
-	while tamanho > 10:
-		if usada.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho).x <= largura:
-			break
-		tamanho -= 2
+	var medido := usada.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho).x
+	if medido > largura and medido > 0.0:
+		# NÃO COUBE: em vez de descer de dois em dois a partir do teto, a
+		# largura medida dá uma ESTIMATIVA direta de quanto encolher — a
+		# largura do texto cresce quase linearmente com o corpo da letra.
+		# Um chute perto do alvo mais um ajuste fino substitui a busca
+		# inteira por poucas chamadas, e o efeito é o mesmo de sempre:
+		# encolhido só o necessário para caber.
+		tamanho = int(floor(float(tamanho_max) * largura / medido))
+		tamanho = clampi(tamanho, 10, tamanho_max)
+		tamanho -= tamanho % 2
+		# O chute pode errar para os dois lados (a fonte não é
+		# perfeitamente linear), então o ajuste fino cobre os dois: sobe
+		# se o chute encolheu demais, desce se ainda não coube.
+		while tamanho < tamanho_max and usada.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho + 2).x <= largura:
+			tamanho += 2
+		while tamanho > 10 and usada.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho).x > largura:
+			tamanho -= 2
+
+	if _cache_tamanho.size() >= CACHE_TAMANHO_TETO:
+		_cache_tamanho.clear()
+	_cache_tamanho[chave] = tamanho
 	return tamanho
 
 ## LETRA DE FLIPERAMA. Três passadas sobre a mesma palavra:
