@@ -21,6 +21,20 @@ var _bridge_digest := 0
 var _last_frame_ms := 0
 var _bridge_started_ms := 0
 var _next_bridge_poll_ms := 0
+## O MESMO FREIO DA PONTE, PARA A CÂMERA NATIVA.
+##
+## `_texture.get_image()` não é uma leitura de variável: é a GPU parando
+## para devolver o quadro de volta à CPU. Rodava sem freio nenhum, todo
+## quadro desenhado, pela sessão inteira -- inclusive nos 95% do jogo em
+## que a prévia nem aparece na tela (fora da contagem regressiva). Numa
+## placa e driver fortes isso passa despercebido; numa GPU mais fraca ou
+## embarcada é exatamente o tipo de engasgo espalhado, sem relação
+## nenhuma com o código do jogo, que a queixa descreve. Quinze quadros
+## por segundo bastam de sobra: nem o obturador, escolhendo o melhor
+## quadro da pose, nem o olho, vendo a própria prévia, notam a diferença
+## entre quinze e sessenta.
+const NATIVA_INTERVALO_MS := 66
+var _proxima_leitura_nativa_ms := 0
 ## O CONTADOR DE QUADROS QUE A PONTE PUBLICA. Parado quer dizer imagem
 ## velha; a data de modificação do arquivo não serve para isso, porque
 ## tem resolução de um segundo em vários sistemas de arquivos.
@@ -118,7 +132,8 @@ func _ready() -> void:
 	if not CameraServer.camera_feed_removed.is_connected(_on_camera_feeds_updated):
 		CameraServer.camera_feed_removed.connect(_on_camera_feeds_updated)
 	set_process(true)
-	pedir_abertura()
+	# O PRIMEIRO PEDIDO ESPERA A ENTRADA ESQUENTAR -- ver `ATRASO_PRIMEIRO_PEDIDO_MS`.
+	_ready_ms = Time.get_ticks_msec()
 
 ## ---------------------------------------------------------------------
 ## O FLUXO ÚNICO DA CÂMERA
@@ -186,8 +201,32 @@ func estado_curto() -> String:
 func _process(delta: float) -> void:
 	_supervisionar(delta)
 
+## O PRIMEIRO PEDIDO DE CÂMERA ESPERA A ENTRADA ESQUENTAR.
+##
+## `_levantar()` (chamada de dentro de `_atender_pedido()`, logo abaixo)
+## pergunta ao sistema operacional quais câmeras existem
+## (`CameraServer.feeds()`, depois de acordar o servidor). Essa pergunta
+## é uma chamada de verdade ao driver de vídeo do sistema — no Windows,
+## a primeira vez que qualquer processo enumera câmeras, o Media
+## Foundation ainda está de pé, e a chamada pode travar por uma fração
+## de segundo real. Não tem como tirar isso da linha principal (o
+## CameraServer só existe nela), mas tem como escolher A HORA: pedindo
+## a abertura só depois de a entrada já estar tocando — no instante do
+## SOCO (`T_SOCO` em `arcade_stage.gd`: clarão, tremor, faíscas), em vez
+## de no primeiro quadro depois de a máquina ligar — a mesma pausa cai
+## dentro do momento mais barulhento e cheio de movimento que o jogo
+## tem, e não como o primeiro quadro visível travando sozinho.
+const ATRASO_PRIMEIRO_PEDIDO_MS := 1900
+var _ready_ms := 0
+var _pedido_inicial_feito := false
+
 ## A ÚNICA função que sobe ou derruba a câmera.
 func _supervisionar(_delta: float) -> void:
+	if not _pedido_inicial_feito:
+		if Time.get_ticks_msec() - _ready_ms < ATRASO_PRIMEIRO_PEDIDO_MS:
+			return
+		_pedido_inicial_feito = true
+		pedir_abertura()
 	_atender_pedido()
 	# Durante o exame ninguém mexe na webcam: ela é do diagnóstico.
 	if estado == Estado.EXAME or estado == Estado.DESLIGADA or estado == Estado.PARADA:
@@ -461,11 +500,17 @@ func _esperar_leitura() -> void:
 func _vigiar_nativa() -> void:
 	if _native_ok:
 		# Já provada: daqui em diante o trabalho é só alimentar o
-		# obturador, para a foto da pose ter de onde escolher.
+		# obturador, para a foto da pose ter de onde escolher -- e isso
+		# não precisa de uma leitura por quadro (ver `NATIVA_INTERVALO_MS`
+		# acima).
+		var agora := Time.get_ticks_msec()
+		if agora < _proxima_leitura_nativa_ms:
+			return
+		_proxima_leitura_nativa_ms = agora + NATIVA_INTERVALO_MS
 		var atual := _texture.get_image() if _texture != null else null
 		if atual != null and not atual.is_empty():
 			_last_image = atual
-			_last_frame_ms = Time.get_ticks_msec()
+			_last_frame_ms = agora
 			_oferecer_ao_obturador(atual)
 		return
 	var imagem := _texture.get_image() if _texture != null else null
@@ -701,16 +746,6 @@ func capture_photo() -> String:
 		# ao menos a silhueta desenhada diz "não deu".
 		status = "IMAGEM SEM CONTRASTE — TAMPA DA LENTE OU SALA ESCURA"
 		return ""
-	var side := mini(image.get_width(), image.get_height())
-	if side <= 0:
-		return ""
-	var origin := Vector2i((image.get_width() - side) / 2, (image.get_height() - side) / 2)
-	image = image.get_region(Rect2i(origin, Vector2i(side, side)))
-	if mirrored:
-		image.flip_x()
-	image.resize(THUMB_SIZE, THUMB_SIZE, Image.INTERPOLATE_LANCZOS)
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PHOTO_DIR))
-	var path := "%s/player_%d.jpg" % [PHOTO_DIR, Time.get_ticks_usec()]
 	# A FOTO FICA NA MÃO, e não só no disco.
 	#
 	# Aqui estava o "ela desliga por um instante para tirar a foto". No
@@ -722,10 +757,21 @@ func capture_photo() -> String:
 	# Guardando a imagem que JÁ ESTÁ na memória, a troca é instantânea e o
 	# disco vira só o arquivo do ranking.
 	ultima_foto = image
-	var error := image.save_jpg(path, 0.86)
-	if error != OK:
-		status = "ERRO AO SALVAR FOTO"
-		return ""
+	var path := "%s/player_%d.jpg" % [PHOTO_DIR, Time.get_ticks_usec()]
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(PHOTO_DIR))
+	# O RECORTE, O ESPELHAMENTO, O REDIMENSIONAMENTO LANCZOS E A GRAVAÇÃO
+	# EM JPEG SAÍRAM DA LINHA DO JOGO.
+	#
+	# Isto rodava tudo aqui, na hora exata em que a contagem chega a
+	# zero — o instante em que a tela mais precisa ser instantânea, é
+	# quando o placar, o impacto e a foto disputam o mesmo quadro. Um
+	# redimensionamento Lanczos (o de melhor qualidade, e o mais caro) e
+	# a codificação de um JPEG no disco custam de sobra para se sentir
+	# como o "trava na contagem" relatado. A imagem inteira (`ultima_foto`,
+	# acima) já está na mão para a tela mostrar na hora; o que sobra para
+	# o arquivo do ranking pode esperar alguns milissegundos, no pool de
+	# linhas, sem que ninguém perceba.
+	WorkerThreadPool.add_task(_gravar_thumb_em_segundo_plano.bind(image.duplicate(), path, mirrored))
 	# A FOTO SAIU, MAS DE QUANDO? Guardar a foto é melhor do que não
 	# guardar nenhuma — quem joga quer a cara dele no ranking, mesmo com
 	# um terço de segundo de atraso. O que não pode é a máquina esconder
@@ -733,6 +779,19 @@ func capture_photo() -> String:
 	var idade := idade_do_quadro()
 	status = "FOTO OK" if idade < 400 else "FOTO COM IMAGEM DE %d ms ATRÁS" % idade
 	return path
+
+## Roda FORA da linha do jogo. Trabalha numa CÓPIA da imagem — a original
+## (`ultima_foto`) continua na mão da linha do jogo, sem disputa.
+func _gravar_thumb_em_segundo_plano(imagem: Image, path: String, espelhar: bool) -> void:
+	var side := mini(imagem.get_width(), imagem.get_height())
+	if side <= 0:
+		return
+	var origin := Vector2i((imagem.get_width() - side) / 2, (imagem.get_height() - side) / 2)
+	var recorte := imagem.get_region(Rect2i(origin, Vector2i(side, side)))
+	if espelhar:
+		recorte.flip_x()
+	recorte.resize(THUMB_SIZE, THUMB_SIZE, Image.INTERPOLATE_LANCZOS)
+	recorte.save_jpg(path, 0.86)
 
 func _exit_tree() -> void:
 	_stop_feed()

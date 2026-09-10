@@ -19,10 +19,9 @@ extends Control
 ##
 ##   ABERTURA → (START) → 3, 2, 1 → SENSOR ARMADO → IMPACTO → RESULTADO
 ##
-## Dois jeitos de socar: o MPU-6050 do alvo manda HIT pela serial
-## (protocolo V2, ver docs/PROTOCOLO_SERIAL.md), ou a simulação —
-## SEGURAR a barra de espaço carrega o golpe e SOLTAR desfere. Quanto
-## mais tempo segura, mais forte o soco (ScoreCurve.points_from_charge).
+## O soco só existe de um jeito: o MPU-6050 do alvo manda HIT pela
+## serial (protocolo V2, ver docs/PROTOCOLO_SERIAL.md). Não há tecla
+## nem simulação de bancada — só o sensor de verdade marca ponto.
 
 const TELA := Vector2(1080.0, 1920.0)
 const ArcadeStage = preload("res://scripts/presentation/arcade_stage.gd")
@@ -106,7 +105,6 @@ const BOTOES_SIMPLES := {
 	"modo_ficha": Rect2(570, 406, 400, 68),
 	"mapear_start": Rect2(110, 620, 400, 68),
 	"mapear_credito": Rect2(570, 620, 400, 68),
-	"simulacao": Rect2(110, 1010, 400, 68),
 	# --- página GOLPE
 	"eixo": Rect2(620, 1010, 280, LADO_BOTAO),
 	"enviar_config": Rect2(110, 1300, 400, 60),
@@ -138,7 +136,7 @@ const BOTOES_SIMPLES := {
 ## um botão invisível que responde é a pior espécie de defeito.
 const PAGINA_DO_CONTROLE := {
 	"fechar": -1, "padroes": -1, "salvar": -1,
-	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0, "simulacao": 0,
+	"modo_livre": 0, "modo_ficha": 0, "mapear_start": 0, "mapear_credito": 0,
 	"vmin": 1, "vmax": 1, "curva": 1, "zona": 1,
 	"porta": 1, "eixo": 1, "raio": 1, "amin": 1, "enviar_config": 1, "testar": 1,
 	"calibrar": 1,
@@ -189,26 +187,6 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
-## SIMULAÇÃO DE BANCADA. LIGADA ENQUANTO NÃO HOUVER SENSOR.
-##
-## Ligada, a barra de espaço vira um soco falso. É indispensável para
-## montar e regular a máquina sem bater no saco cem vezes, e é fraude num
-## salão: com ela ligada, qualquer pessoa tira 9999 sem encostar no
-## equipamento.
-##
-## Por isso ela não fica ligada por decisão de ninguém — ela DESLIGA
-## SOZINHA na primeira vez que o MPU-6050 se apresenta pela serial. Uma
-## máquina sem sensor é uma máquina em montagem, e precisa da barra; uma
-## máquina com sensor é uma máquina de salão, e a barra ali é roubo. O
-## operador continua podendo forçar os dois estados na Central, e a
-## escolha dele manda a partir de então.
-var simulacao_bancada := true
-## Se o operador mexeu na chave à mão. Enquanto for falso, o sensor
-## decide; a partir do primeiro clique, quem decide é a pessoa.
-var simulacao_escolhida := false
-## Uma segunda porta, para a bancada de quem desenvolve: `PUNCH_SIMULACAO=1`
-## no ambiente libera a barra sem mexer na configuração da máquina.
-var simulacao_por_ambiente := false
 ## O GOLPE DA RODADA JÁ FOI. Um soco por rodada: o saco balança depois do
 ## impacto e o MPU-6050 vê esse balanço como um segundo evento.
 var golpe_registrado := false
@@ -308,14 +286,6 @@ var notice_left := 0.0
 var confirm_action := ""
 var confirm_until := 0.0
 
-## Carga da simulação: >= 0 enquanto a barra de espaço está pressionada.
-var carga_tempo := -1.0
-## Quanto a carga VALE agora, em pontos. É o mesmo número que
-## `ScoreCurve.points_from_charge` vai devolver se a barra for solta neste
-## instante — o visor não mostra "quanto tempo você segurou", mostra o
-## placar que você leva.
-var carga_pontos := 0
-
 ## Serial.
 var link: SerialLink
 var serial_status := "INICIANDO"
@@ -399,6 +369,12 @@ var pose_finished := false
 const ESPERA_MAXIMA_DA_CAMERA := 6.0
 var aguardando_camera := false
 var espera_da_camera := 0.0
+## A FOTO É DA POSE FINAL, NÃO DE QUALQUER MOMENTO DA CONTAGEM.
+##
+## Ver o comentário grande em `_processar_contagem`. O obturador só abre
+## dentro desta janela final, em segundos antes de a contagem zerar.
+const JANELA_TARDIA_OBTURADOR_SEGUNDOS := 0.5
+var _obturador_tardio_aberto := false
 var photo_retained := false
 var ranking_announced := false
 var intro_active := true
@@ -414,6 +390,21 @@ var abertura_chegada := 1.0
 ## Quanto tempo a tela de espera está no ar sem repetir a apresentação.
 var atracao_relogio := 0.0
 var _photo_cache: Dictionary = {}
+## O CACHE DE FOTOS NÃO PODE SER DECODIFICADO NA LINHA DO JOGO.
+##
+## `_photo_texture` lê o arquivo e decodifica o JPEG na hora — barato UMA
+## vez, mas o Top 20 mostra até cinco fotos por quadro durante a entrada
+## animada da tabela, e toda foto ainda não vista custa isso de novo. É
+## esse o travamento "ao apresentar o ranking": não é um travamento só,
+## é um por foto nova que aparece rolando.
+##
+## A decodificação agora roda no pool de linhas do Godot — o mesmo
+## esquema já usado para o quadro da câmera em `camera_service.gd` — e
+## a linha do jogo só cria a textura (rápido) quando a imagem já está
+## pronta. Chamado assim que o placar entra no ranking, isso dá vários
+## segundos de folga antes de a tabela precisar de fato mostrar a foto.
+var _mutex_fotos := Mutex.new()
+var _fotos_decodificadas: Dictionary = {}
 
 var fx := PunchFX.new()
 ## O VIGIA DO RITMO. Mede o quadro e, quando a máquina não dá conta,
@@ -460,10 +451,42 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/fonts/SairaCondensed-ExtraBold.ttf"):
 		fonte_texto = load("res://assets/fonts/SairaCondensed-ExtraBold.ttf")
 	letreiro_do_nome.fonte = fonte
+	# AQUECE O SOMBREADOR DO NOME ANTES DE A ABERTURA PRECISAR DELE.
+	#
+	# `Letreiro` é o ÚNICO nó do jogo com material próprio (o brilho que
+	# corre dentro das letras, em `shaders/brilho_letras.gdshader`) — e
+	# ele só desenha pela primeira vez quando a entrada acaba e a tela de
+	# espera aparece (`_nome_do_jogo`, chamada só fora da entrada). Um
+	# programa de sombreador NUNCA usado antes é compilado pelo driver no
+	# primeiro desenho que o usa — não antes —, e num driver fraco ou
+	# embarcado (a mesma categoria de placa por trás do ajuste de
+	# `driver/threads/thread_model` em project.godot) isso é uma pausa
+	# real, sentida bem naquele quadro. É exatamente onde o travamento
+	# "o jogo vai se posicionar e o nome" acontecia: não é o
+	# posicionamento, é a primeira vez que o brilho do nome é desenhado.
+	#
+	# Mostrando o nome uma vez aqui, com alfa zero, o desenho acontece de
+	# verdade — e o sombreador compila — nos primeiros quadros do jogo,
+	# antes mesmo de a entrada começar a tocar, quando ninguém está
+	# olhando para o lugar certo ainda. `_nome_do_jogo` assume o nó de
+	# volta (mostra e esconde) assim que a entrada termina, sem saber
+	# que ele já foi usado uma vez.
+	letreiro_do_nome.mostrar(
+		[
+			{"texto": "PUNCH", "x": 540.0, "y": 910.0, "tamanho": 144, "cor": Color(Color.WHITE, 0.0)},
+			{"texto": "CHALLENGE", "x": 540.0, "y": 1010.0, "tamanho": 80, "cor": Color(Paleta.AMBAR, 0.0)},
+		],
+		190.0, 700.0
+	)
 	fx.vigia = desempenho
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
 	_carregar()
+	# AQUECE O CACHE DE FOTOS ANTES DE PRECISAR DELE. A primeira vez que
+	# o Top 20 aparece depois de a máquina ligar era exatamente a pior
+	# hora para decodificar vinte JPEGs na linha do jogo -- é quando
+	# menos se espera um travamento, logo na primeira rodada do dia.
+	_prewarm_fotos_do_ranking()
 	camera_service = CameraService.new()
 	camera_service.enabled = camera_enabled
 	camera_service.selected_index = camera_index
@@ -479,15 +502,6 @@ func _ready() -> void:
 	medico = CameraDoctor.new()
 	medico.terminou.connect(_fim_do_exame)
 	add_child(medico)
-	# TRÊS PORTAS PARA A MESMA CHAVE, e de propósito: a da Central serve
-	# ao técnico no salão, a variável de ambiente serve à bancada de quem
-	# desenvolve, e o ajuste de projeto serve a uma build feita só para
-	# feira ou demonstração — em que a máquina precisa nascer com a barra
-	# de espaço valendo, sem ninguém lembrar de ligar nada.
-	simulacao_por_ambiente = (
-		OS.get_environment("PUNCH_SIMULACAO") == "1"
-		or bool(ProjectSettings.get_setting("punch/debug_simulation", false))
-	)
 	sons.set_volumes(volume_musica, volume_efeitos)
 	_aplicar_faixas()
 	if _converteu_esquema:
@@ -560,6 +574,7 @@ func _process(delta: float) -> void:
 		hitstop_left = maxf(0.0, hitstop_left - delta)
 		queue_redraw()
 		return
+	_colher_fotos_decodificadas()
 	desempenho.medir(delta)
 	# UM QUADRO ENGASGADO NÃO PODE VIRAR UM PULO NO JOGO — MAS O FREIO NÃO
 	# PODE VIRAR CÂMERA LENTA.
@@ -690,18 +705,51 @@ func _processar_contagem(delta: float) -> void:
 	if aguardando_camera:
 		espera_da_camera += delta
 		var pronta := camera_service != null and camera_service.pronta()
-		if not pronta and espera_da_camera < ESPERA_MAXIMA_DA_CAMERA:
+		# UMA CÂMERA QUE JÁ DESISTIU NÃO MERECE SER ESPERADA DE NOVO.
+		#
+		# Sem isto, uma máquina sem webcam nenhuma — ou com a ponte sem
+		# Python, já desistida — pagava os SEIS SEGUNDOS inteiros de
+		# `ESPERA_MAXIMA_DA_CAMERA` EM TODA RODADA, para sempre: a
+		# contagem "FAÇA SUA POSE" ficava parada esperando uma imagem
+		# que já se sabia, desde o fim da última tentativa, que não ia
+		# chegar. Isso é exatamente "a câmera trava" e "se ela não for
+		# detectada nem deve passar" — uma câmera desligada ou que já
+		# esgotou as tentativas de religar (`Estado.PARADA`) não tem
+		# mais nada a esperar; a rodada segue na hora.
+		var desistiu := camera_service == null or camera_service.estado in [
+			CameraService.Estado.PARADA, CameraService.Estado.DESLIGADA,
+		]
+		if not pronta and not desistiu and espera_da_camera < ESPERA_MAXIMA_DA_CAMERA:
 			# A contagem NÃO anda: o relógio da pose só começa quando há
 			# imagem para fotografar.
 			return
 		aguardando_camera = false
-		if camera_service != null:
-			camera_service.abrir_obturador()
 		if not pronta:
 			_show_notice(
 				camera_service.estado_curto() if camera_service != null else "SEM CÂMERA"
 			)
 	countdown_left -= delta
+	# O OBTURADOR ABRE NA RETA FINAL, NÃO NA CONTAGEM INTEIRA.
+	#
+	# Antes `abrir_obturador()` era chamado lá no INÍCIO da contagem (nos
+	# três segundos inteiros de "3-2-1"), com uma janela de 3,2 s — e o
+	# obturador guarda o quadro de MAIOR CONTRASTE visto na janela toda,
+	# não o mais recente. Isso significa que uma foto tirada no instante
+	# em que a pessoa ainda está se ajeitando na frente da câmera — mal
+	# chegou, luz de fundo mudando — podia vencer a pose final só por ter
+	# mais contraste, mesmo a pessoa tendo se aprumado direito no segundo
+	# seguinte. É exatamente "não capta se mudou depois do segundo 2".
+	#
+	# A pose que importa é a de QUANDO A CONTAGEM ACABA, e só ela. Abrindo
+	# o obturador só na JANELA_TARDIA_OBTURADOR_SEGUNDOS final — meio
+	# segundo antes de zerar —, o "melhor quadro" só pode vir de dentro
+	# desse meio segundo: o suficiente para não perder a foto por um
+	# único quadro escuro bem na hora, pouco o bastante para nunca mais
+	# escolher uma pose de segundos atrás.
+	if not pose_finished and not _obturador_tardio_aberto and camera_service != null \
+			and countdown_left <= JANELA_TARDIA_OBTURADOR_SEGUNDOS:
+		_obturador_tardio_aberto = true
+		camera_service.abrir_obturador(int(JANELA_TARDIA_OBTURADOR_SEGUNDOS * 1000.0) + 250)
 	if not pose_finished and countdown_left <= 0.0:
 		pose_finished = true
 		result_photo_path = camera_service.capture_photo() if camera_service != null else ""
@@ -725,7 +773,6 @@ func _processar_contagem(delta: float) -> void:
 		_iniciar_transicao()
 		state_time = 0.0
 		espera_left = GameDef.ESPERA_DO_SOCO
-		carga_tempo = -1.0
 		# A rodada nova começa sem golpe e sem saturação pendente.
 		golpe_registrado = false
 		saturacao_recente = ""
@@ -736,15 +783,6 @@ func _processar_contagem(delta: float) -> void:
 
 func _processar_armado(delta: float) -> void:
 	espera_left -= delta
-	if carga_tempo >= 0.0:
-		# Simulação carregando. O VISOR MOSTRA O VALOR EXATO, e não a
-		# fração do tempo: a conversão tempo → pontos é uma curva, então
-		# uma barra proporcional ao tempo mostraria 60 % quando o golpe
-		# valeria 640. Quem carrega vê o número que vai tirar.
-		carga_tempo = minf(carga_tempo + delta, ScoreCurve.CHARGE_MAX_SECONDS)
-		carga_pontos = ScoreCurve.points_from_charge(
-			carga_tempo, hit_min_speed, hit_max_speed, score_exponent, score_dead_zone
-		)
 	if espera_left <= 0.0:
 		# A ESPERA ACABOU SEM SOCO — E A FICHA VOLTA.
 		#
@@ -753,7 +791,6 @@ func _processar_armado(delta: float) -> void:
 		# fazia o saldo evaporar sozinho. O limite continua existindo,
 		# senão a máquina passa a tarde armada se a pessoa foi embora,
 		# mas agora ele devolve em vez de cobrar.
-		_cancelar_carga()
 		sons.play("error", -4.0)
 		_devolver_credito()
 		_entrar_em_abertura()
@@ -857,7 +894,6 @@ func _input(event: InputEvent) -> void:
 			if central_aberta:
 				_fechar_central()
 			elif state != GameDef.State.IDLE:
-				_cancelar_carga()
 				_entrar_em_abertura()
 				_show_notice("RODADA CANCELADA")
 			get_viewport().set_input_as_handled()
@@ -894,17 +930,6 @@ func _input(event: InputEvent) -> void:
 				_pressionou_start()
 			get_viewport().set_input_as_handled()
 			return
-		if event.keycode == KEY_SPACE:
-			_apertou_espaco()
-			get_viewport().set_input_as_handled()
-			return
-
-	# Soltar a barra de espaço desfere o golpe carregado.
-	if event is InputEventKey and not event.pressed and event.keycode == KEY_SPACE:
-		if carga_tempo >= 0.0:
-			_soltou_espaco()
-			get_viewport().set_input_as_handled()
-		return
 
 	if event is InputEventJoypadButton:
 		_botao_do_gabinete(event as InputEventJoypadButton)
@@ -925,15 +950,15 @@ func _input(event: InputEvent) -> void:
 		else:
 			_click_central(event.position)
 
-## A BARRA DE ESPAÇO É BANCADA, NUNCA SALÃO.
+## OS ATALHOS DE TECLADO (5/C PARA CRÉDITO, 1/ENTER PARA START) SÃO
+## FERRAMENTA DE TÉCNICO, NUNCA DE SALÃO.
 ##
-## O golpe de verdade vem do MPU-6050 e de mais nada. A barra existe para
-## montar e regular a máquina sem bater no saco cem vezes — e, ligada num
-## salão, é uma pessoa tirando 9999 sem encostar no equipamento. Ela só
-## responde com a chave da Central ligada, com a Central aberta na frente
-## do técnico, ou com `PUNCH_SIMULACAO=1` na bancada de quem desenvolve.
+## Só respondem com a Central aberta na frente de quem mexe na máquina.
+## Fora dela, START e CRÉDITO só chegam pelos botões do gabinete ou pela
+## serial — um teclado esquecido no armário não pode virar crédito de
+## graça, e o soco em si só existe vindo do MPU-6050.
 func _simulador_liberado() -> bool:
-	return simulacao_bancada or central_aberta or simulacao_por_ambiente
+	return central_aberta
 
 ## UM APERTO NA PLACA ZERO DELAY.
 ##
@@ -1010,33 +1035,6 @@ func _mapa_de_botao(bruto: Variant, indice_padrao: int) -> Dictionary:
 		"nome": str(d.get("nome", "")),
 	}
 
-func _apertou_espaco() -> void:
-	## Na janela do soco, a barra de espaço CARREGA; fora dela, é START.
-	if state == GameDef.State.ARMED:
-		if not _simulador_liberado():
-			return
-		carga_tempo = 0.0
-		sons.play("charge")
-	else:
-		_pressionou_start()
-
-func _soltou_espaco() -> void:
-	if state != GameDef.State.ARMED or not _simulador_liberado():
-		_cancelar_carga()
-		return
-	var tempo_carga := carga_tempo
-	_cancelar_carga()
-	# A MESMA conta que o visor vinha mostrando. Um segundo caminho aqui
-	# faria o número prometido e o número pago divergirem.
-	var velocidade := ScoreCurve.speed_from_charge(tempo_carga, hit_min_speed, hit_max_speed)
-	_processar_golpe(velocidade, true)
-
-func _cancelar_carga() -> void:
-	if carga_tempo >= 0.0:
-		sons.stop("charge")
-	carga_tempo = -1.0
-	carga_pontos = 0
-
 func _pressionou_start() -> void:
 	## START faz uma coisa só em cada tela, e é sempre "seguir em frente".
 	match state:
@@ -1072,7 +1070,9 @@ func _iniciar_rodada() -> void:
 	result_score = 0
 	result_photo_path = ""
 	pose_finished = false
-	# A CONTAGEM ESPERA A CÂMERA, e o obturador abre junto com ela.
+	# A CONTAGEM ESPERA A CÂMERA (mas o OBTURADOR NÃO ABRE AQUI MAIS —
+	# ver o comentário grande em `_processar_contagem`, logo abaixo de
+	# onde a contagem entra na reta final).
 	#
 	# Contar 3-2-1 enquanto a webcam ainda está subindo é gastar a pose
 	# inteira esperando: quando a contagem zera, a ponte às vezes acabou
@@ -1080,8 +1080,7 @@ func _iniciar_rodada() -> void:
 	# espera é o conserto óbvio, e é o que o operador pediu.
 	espera_da_camera = 0.0
 	aguardando_camera = camera_enabled and camera_service != null and not camera_service.pronta()
-	if camera_service != null and not aguardando_camera:
-		camera_service.abrir_obturador()
+	_obturador_tardio_aberto = false
 	photo_retained = false
 	ranking_announced = false
 	_ato_assentou = false
@@ -1127,7 +1126,16 @@ func _entrar_em_abertura() -> void:
 	result_time = 0.0
 	posicao_no_ranking = 0
 	result_photo_path = ""
-	_photo_cache.clear()
+	# NÃO SE APAGA MAIS O CACHE INTEIRO AQUI.
+	#
+	# Isto rodava a cada volta para a abertura -- ou seja, depois de
+	# CADA rodada jogada -- e jogava fora as fotos de TODO o Top 20,
+	# não só a da rodada que terminou. O resultado: a tabela travava ao
+	# aparecer não uma vez por dia, mas uma vez por partida, porque
+	# tinha de decodificar de novo do zero as vinte fotos toda vez.
+	# `_discard_round_photo()`, chamada uma linha acima, já cuida da
+	# única foto que de fato precisa sumir -- a da própria rodada, e só
+	# quando ela não entrou no ranking.
 	fx.limpar()
 	moldura.set_estado(LedFrame.PARADA)
 	fundo.matiz = Color(0, 0, 0, 0)
@@ -1135,6 +1143,13 @@ func _entrar_em_abertura() -> void:
 func _discard_round_photo() -> void:
 	if not photo_retained and not result_photo_path.is_empty():
 		RankingStore.delete_photo(result_photo_path)
+		# O ARQUIVO SOME DO DISCO: a textura em cache para ele vira lixo
+		# que nunca mais vai ser pedido de novo (o caminho tem o
+		# microssegundo da captura, nunca se repete). Tirando-a do
+		# cache aqui, e só ela -- não a tabela inteira -- a memória não
+		# cresce sem limite e o resto do Top 20 continua pronto na
+		# tela seguinte.
+		_photo_cache.erase(result_photo_path)
 	result_photo_path = ""
 	photo_retained = false
 
@@ -1185,6 +1200,11 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	var origem := "SIMULAÇÃO" if simulado else "MPU-6050"
 	posicao_no_ranking = _entrar_no_ranking(result_score, result_photo_path, origem)
 	photo_retained = posicao_no_ranking > 0
+	# A TABELA SÓ APARECE 2,5 s (NO MÍNIMO) DEPOIS DAQUI. Tempo de sobra
+	# para o pool de linhas decodificar qualquer foto do Top 20 que
+	# ainda não estava em cache, antes de a tela precisar dela de
+	# verdade.
+	_prewarm_fotos_do_ranking()
 	statistics = StatisticsStore.record(
 		statistics, result_score,
 		GameDef.faixa_de(result_score),
@@ -1466,7 +1486,24 @@ func _sensor_ligado() -> bool:
 ## Agora a lista é uma fila: abre, espera o tempo de a placa se
 ## apresentar, e se ela não se apresentar, passa para a próxima. A porta
 ## que responder fica.
-const PORTA_PACIENCIA := 3.0
+##
+## TRÊS SEGUNDOS VIROU CINCO. O comentário antigo dizia "o Nano leva
+## menos de dois para reiniciar quando a porta abre" — verdade numa
+## placa com bootloader rápido (Optiboot) e um driver que reseta na
+## hora. Mas abrir a porta RESETA o Arduino (é o DTR fazendo isso, não
+## o jogo), e nem todo par placa/driver reseta e reinicia tão rápido: um
+## bootloader clássico soma até dois segundos de espera própria antes
+## de sequer começar o `setup()`, e um driver CH340 genérico, instalado
+## de outro jeito noutra máquina, pode demorar mais para o Windows
+## terminar de enumerar a porta. Três segundos de paciência bem no
+## limite dessa soma cria um LAÇO: a porta reseta, o Arduino ainda está
+## de pé quando o jogo desiste e fecha, o fechar-reabrir reseta de novo,
+## e a placa NUNCA tem os dois segundos inteiros para chegar ao
+## `Serial.println(F("READY..."))`. É o retrato exato de "funciona no
+## meu PC, não funciona no outro, com a mesma porta": a diferença não
+## está na porta, está em quanto tempo aquele par específico de placa e
+## driver leva para reiniciar.
+const PORTA_PACIENCIA := 5.0
 var _porta_da_vez := 0
 
 func _tentar_conectar() -> void:
@@ -1518,12 +1555,8 @@ func _poll_serial(_delta: float) -> void:
 			_tentar_conectar()
 		return
 	if ultimo_sinal_ms < 0 and animation_time - _porta_aberta_em > PORTA_PACIENCIA:
-		# CALADA POR TRÊS SEGUNDOS: NÃO É A PLACA.
-		#
-		# Três segundos é folgado — o firmware manda `READY` no fim do
-		# `setup()`, e o Nano leva menos de dois para reiniciar quando a
-		# porta abre. Passado isso, insistir é perder a noite: fecha e
-		# tenta a próxima da fila.
+		# CALADA POR CINCO SEGUNDOS: NÃO É A PLACA. Ver o comentário de
+		# `PORTA_PACIENCIA`, acima, para o motivo do número.
 		var muda := porta_configurada.is_empty() and portas_visiveis.size() > 1
 		serial_status = "SEM RESPOSTA EM %s%s" % [
 			porta_atual, " — TENTANDO A PRÓXIMA" if muda else ""
@@ -1539,7 +1572,25 @@ func _poll_serial(_delta: float) -> void:
 		link.send_line("PING")
 		proximo_ping = animation_time + 5.0
 	if ultimo_sinal_ms >= 0 and Time.get_ticks_msec() - ultimo_sinal_ms > 9000:
-		serial_status = "SEM RESPOSTA — %s" % porta_atual
+		# NOVE SEGUNDOS CALADA NÃO PODIA SER SÓ UM AVISO NA TELA.
+		#
+		# Antes disto, "SEM RESPOSTA" era só texto: a porta continuava
+		# aberta, o PING continuava saindo a cada cinco segundos, e se o
+		# Arduino tivesse de fato travado ou o cabo USB tivesse dado uma
+		# soluçada, NADA nunca mais chegava — o jogo ficava com aquele
+		# aviso na tela e o soco morto até alguém reiniciar a máquina. É
+		# exatamente o "se demorar um pouco, ele não lê mais": não é o
+		# firmware que esquece de responder, é o jogo que nunca tenta de
+		# novo depois de perceber o silêncio.
+		#
+		# Agora o silêncio fecha a porta e entra na MESMA fila de conexão
+		# do início — reabre a mesma porta (ou a próxima, se houver mais
+		# de uma), do zero, com toda a lógica de PORTA_PACIENCIA de novo.
+		# Uma reconexão sozinha custa menos de um segundo e não se nota;
+		# não reconectar nunca é que perde a máquina a noite inteira.
+		serial_status = "SEM RESPOSTA — %s — RECONECTANDO" % porta_atual
+		link.close_port()
+		return
 
 func _on_serial_opened(porta: String) -> void:
 	porta_atual = porta
@@ -1627,12 +1678,12 @@ func _on_serial_line(line: String) -> void:
 				_sensor_apareceu()
 		"ERROR":
 			if str(msg["code"]) == "NO_MPU":
-				# SEM SENSOR A MÁQUINA CONTINUA DE PÉ: botões, crédito e
-				# serial funcionam, e a barra de espaço é o que sobra para
-				# testar. Dizer isso é melhor do que dizer "erro".
+				# SEM SENSOR A MÁQUINA CONTINUA DE PÉ: botões e crédito
+				# seguem funcionando pela serial; só o soco depende do
+				# MPU-6050. Dizer isso é melhor do que dizer "erro".
 				sensor_presente = false
 				serial_status = "PLACA OK, SEM SENSOR — CONFIRA SDA/SCL"
-				_show_notice("SENSOR NÃO ENCONTRADO — BOTÕES FUNCIONAM, USE A BARRA")
+				_show_notice("SENSOR NÃO ENCONTRADO — CONFIRA O FIO SDA/SCL")
 			else:
 				_show_notice("ERRO DO FIRMWARE: %s" % str(msg["code"]))
 			sons.play("error", -8.0)
@@ -1654,10 +1705,6 @@ func _sensor_apareceu() -> void:
 		return
 	sensor_presente = true
 	serial_status = "CONECTADO %s" % porta_atual
-	if simulacao_bancada and not simulacao_escolhida:
-		simulacao_bancada = false
-		_show_notice("SENSOR DETECTADO — SIMULAÇÃO DE BANCADA DESLIGADA")
-		_salvar()
 
 func _receber_hit(msg: Dictionary) -> void:
 	# Golpe medido é a prova definitiva de que o sensor está lá, mesmo que
@@ -1694,7 +1741,6 @@ func _receber_hit(msg: Dictionary) -> void:
 		return
 	golpe_registrado = true
 	ultimo_golpe_ms = Time.get_ticks_msec()
-	_cancelar_carga()
 	_processar_golpe(speed, false)
 
 ## Sensor e teclado passam obrigatoriamente por esta única porta. Assim a
@@ -1761,7 +1807,6 @@ func _toggle_central() -> void:
 	if central_aberta:
 		_fechar_central()
 	else:
-		_cancelar_carga()
 		if state != GameDef.State.IDLE and state != GameDef.State.RESULT:
 			_entrar_em_abertura()
 		central_aberta = true
@@ -1895,13 +1940,6 @@ func _click_central(p: Vector2) -> void:
 	elif _tocou("mapear_credito", p):
 		mapeando = "" if mapeando == "credito" else "credito"
 		return
-	elif _tocou("simulacao", p):
-		simulacao_bancada = not simulacao_bancada
-		simulacao_escolhida = true
-		_show_notice(
-			"SIMULAÇÃO DE BANCADA LIGADA — DESLIGUE ANTES DE ABRIR"
-			if simulacao_bancada else "SIMULAÇÃO DE BANCADA DESLIGADA"
-		)
 	elif _tocou("modo_livre", p):
 		game_mode = "free"
 	elif _tocou("modo_ficha", p):
@@ -2128,16 +2166,6 @@ func _carregar() -> void:
 	sensor_raio = float(data.get("sensor_raio", sensor_raio))
 	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
 	sensor_amin = float(data.get("sensor_amin", sensor_amin))
-	simulacao_bancada = bool(data.get("simulacao_bancada", true))
-	simulacao_escolhida = bool(data.get("simulacao_escolhida", false))
-	# ENQUANTO O OPERADOR NÃO ESCOLHER, QUEM DECIDE É O SENSOR — e sem
-	# sensor a máquina é bancada. Ler o valor gravado e parar por aí não
-	# bastava: uma instalação que rodou uma versão anterior tem
-	# `simulacao_bancada: false` no disco, e ficava com a barra morta
-	# para sempre, esperando um MPU-6050 que ainda não existe. O `READY`
-	# do firmware desliga isto no segundo em que a placa se apresentar.
-	if not simulacao_escolhida:
-		simulacao_bancada = true
 	volume_musica = float(data.get("volume_musica", volume_musica))
 	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
@@ -2174,8 +2202,6 @@ func _salvar() -> void:
 		"sensor_raio": sensor_raio,
 		"sensor_vmin": sensor_vmin,
 		"sensor_amin": sensor_amin,
-		"simulacao_bancada": simulacao_bancada,
-		"simulacao_escolhida": simulacao_escolhida,
 		"volume_musica": volume_musica,
 		"volume_efeitos": volume_efeitos,
 		"botao_start": botao_start,
@@ -2235,8 +2261,14 @@ func _draw() -> void:
 	_draw_alertas_graves()
 	_draw_transicao()
 
-	if notice != "" and not central_aberta:
-		_draw_notice()
+	# A FAIXA DE AVISO SAIU DA TELA DO JOGO. Pedido explícito: um cartão
+	# de "CÂMERA CONECTADA" ou "CRÉDITO ADICIONADO" surgindo por cima da
+	# partida é informação de bancada, não de vitrine — quem joga não
+	# precisa ler isso, e numa máquina de salão de verdade não deveria
+	# ver texto de diagnóstico nenhum. `_show_notice` continua existindo
+	# (a Central Técnica e o rodapé de alertas graves, logo acima, ainda
+	# falam quando algo realmente importante precisa ser dito), só o
+	# cartão avulso no meio da tela é que não aparece mais.
 
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	if central_aberta:
@@ -2492,14 +2524,6 @@ func _draw_espera_do_soco() -> void:
 	_texto_arcade("SOQUE AGORA!", 1420.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
 	_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1488.0, Color.WHITE)
 	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1556.0, Paleta.AMBAR)
-
-	# O SIMULADOR DE BANCADA aparece só quando está liberado. Em salão
-	# não existe barra de espaço, e anunciá-la seria ensinar um atalho
-	# que, se existisse, seria fraude.
-	if _simulador_liberado():
-		_apoio("BANCADA: SEGURE E SOLTE ESPAÇO", 1620.0, Paleta.ROXO)
-		if carga_tempo >= 0.0:
-			_texto_arcade("%04d" % carga_pontos, 1706.0, 66, Paleta.ROXO, LARGURA_UTIL)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
@@ -3123,31 +3147,6 @@ func _central_operacao() -> void:
 	_ficha_do_botao(botao_start, "START", Rect2(110, 706, 400, 150), contador_start)
 	_ficha_do_botao(botao_credito, "CRÉDITO", Rect2(570, 706, 400, 150), contador_credito)
 
-	# ---- a chave que libera a barra de espaço
-	_secao(Rect2(80, 920, 920, 230), "SIMULAÇÃO DE BANCADA", Paleta.ROXO)
-	_botao(
-		BOTOES_SIMPLES["simulacao"],
-		"LIGADA" if simulacao_bancada else "DESLIGADA",
-		simulacao_bancada, Paleta.VERMELHO if simulacao_bancada else Paleta.ROXO, 20
-	)
-	_texto(
-		"Ligada, a barra de espaço vale como soco. Serve para montar e regular",
-		1000.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
-	)
-	_texto(
-		"a máquina sem bater no saco cem vezes.",
-		1024.0, 15, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
-	)
-	_texto(
-		"Ela DESLIGA SOZINHA quando o MPU-6050 se apresentar." if not simulacao_escolhida
-		else "Você escolheu à mão: o sensor não mexe mais nela.",
-		1056.0, 15, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 570.0, 400.0
-	)
-	if simulacao_bancada:
-		# Abaixo do botão, não em cima dele: a linha de base 1090 encostava
-		# na borda de baixo da chave (que acaba em 1078).
-		_texto("ATENÇÃO: DESLIGUE ANTES DE ABRIR O SALÃO", 1112.0, 16, Paleta.VERMELHO)
-
 	_secao(Rect2(80, 1170, 920, 130), "SALDO", Paleta.AMBAR)
 	_texto(
 		"Créditos %02d  •  partidas contadas %d  •  modo %s" % [
@@ -3670,12 +3669,65 @@ func _photo_texture(path: String) -> Texture2D:
 		return _photo_cache[path] as Texture2D
 	if not FileAccess.file_exists(path):
 		return null
-	var image := Image.new()
-	if image.load(ProjectSettings.globalize_path(path)) != OK or image.is_empty():
-		return null
-	var texture := ImageTexture.create_from_image(image)
-	_photo_cache[path] = texture
-	return texture
+	# NÃO DECODIFICADA AINDA: melhor um quadro sem foto (o contorno de
+	# `_draw_avatar`) do que travar o quadro atual para decodificar na
+	# hora. `_agendar_decodificacao` já deve ter posto isto a caminho;
+	# se ainda não pôs (foto criada agora mesmo, fora do prewarm), põe.
+	_agendar_decodificacao(path)
+	return null
+
+## Roda FORA da linha do jogo -- ver o comentário de `_fotos_decodificadas`.
+##
+## PODE CHEGAR CEDO DEMAIS: a foto do ranking agora é gravada em segundo
+## plano por `camera_service.gd` (ver o comentário lá), e o prewarm daqui
+## pode rodar antes de o arquivo existir. Por isso o "não encontrei"
+## também é reportado -- com `false` em vez de uma imagem -- para
+## `_colher_fotos_decodificadas` liberar uma NOVA tentativa, em vez de
+## marcar este caminho como "em andamento" para sempre e nunca mais
+## tentar de novo.
+func _decodificar_foto(path: String) -> void:
+	var imagem: Variant = false
+	if FileAccess.file_exists(path):
+		var candidata := Image.new()
+		if candidata.load(ProjectSettings.globalize_path(path)) == OK and not candidata.is_empty():
+			imagem = candidata
+	_mutex_fotos.lock()
+	_fotos_decodificadas[path] = imagem
+	_mutex_fotos.unlock()
+
+## Põe uma foto na fila de decodificação, uma vez só por caminho.
+var _fotos_em_andamento: Dictionary = {}
+func _agendar_decodificacao(path: String) -> void:
+	if path.is_empty() or _photo_cache.has(path) or _fotos_em_andamento.has(path):
+		return
+	_fotos_em_andamento[path] = true
+	WorkerThreadPool.add_task(_decodificar_foto.bind(path))
+
+## Chamada assim que uma pontuação entra no ranking: põe as fotos que
+## ainda faltam no cache a caminho, com vários segundos de folga antes
+## de a tabela do Top 20 precisar mostrá-las de verdade.
+func _prewarm_fotos_do_ranking() -> void:
+	for entry in ranking:
+		_agendar_decodificacao(str(entry.get("photo_path", "")))
+
+## Chamada todo quadro (barata: só olha se algo terminou). Cria a
+## textura -- isso sim precisa ser na linha do jogo -- a partir da
+## imagem que o pool de linhas já deixou pronta. Um `false` (arquivo
+## ainda não gravado, ou corrompido) só libera o caminho para uma nova
+## tentativa depois -- `_photo_texture` reagenda sozinho quando alguém
+## pedir essa foto de novo.
+func _colher_fotos_decodificadas() -> void:
+	if _fotos_decodificadas.is_empty():
+		return
+	_mutex_fotos.lock()
+	var prontas := _fotos_decodificadas.duplicate()
+	_fotos_decodificadas.clear()
+	_mutex_fotos.unlock()
+	for path in prontas:
+		_fotos_em_andamento.erase(path)
+		var imagem = prontas[path]
+		if imagem is Image:
+			_photo_cache[path] = ImageTexture.create_from_image(imagem)
 
 func _draw_texture_cover(texture: Texture2D, rect: Rect2, alpha: float, mirror := false) -> void:
 	if texture == null:
@@ -3778,11 +3830,6 @@ func _draw_alertas_graves() -> void:
 			recados[i], caixa.position.y + 26.0 + float(i) * 34.0, 17, Color.WHITE,
 			HORIZONTAL_ALIGNMENT_CENTER, caixa.position.x, caixa.size.x
 		)
-
-func _draw_notice() -> void:
-	var caixa := Rect2(MARGEM + 60.0, 1798.0, LARGURA_UTIL - 120.0, 66.0)
-	_cartao(caixa, Paleta.CARTAO, Paleta.CIANO, 1.0, 3.0)
-	_texto_cabendo(notice, caixa.position.y + 42.0, 20, Paleta.TINTA, caixa.size.x - 40.0, caixa.position.x + 20.0)
 
 ## A peça padrão da tela: retângulo branco com sombra e borda. Todo painel
 ## do jogo passa por aqui, então a "altura" das peças é a mesma em toda
