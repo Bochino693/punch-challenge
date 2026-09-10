@@ -23,6 +23,9 @@ func _init() -> void:
 func available() -> bool:
 	return _mgr != null
 
+func descricao() -> String:
+	return "extensão nativa"
+
 ## OS FABRICANTES DE CONVERSOR USB-SERIAL QUE VIRAM ARDUINO.
 ##
 ## Um PC de gabinete quase nunca tem só uma porta COM: o Windows inventa

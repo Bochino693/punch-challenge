@@ -505,6 +505,11 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if link != null:
 		link.close_port()
+		# A ponte por processo tem um ajudante do lado de fora: fechar a
+		# porta nao basta, o processo precisa ir junto. Sem isto o jogo
+		# fecha e deixa um PowerShell segurando a COM -- e a proxima
+		# partida nao consegue abrir a porta da propria maquina.
+		link.encerrar()
 	_photo_cache.clear()
 
 ## Um lugar só onde os parâmetros da curva são saneados.
@@ -1396,7 +1401,16 @@ func _iniciar_serial() -> void:
 	link.opened.connect(_on_serial_opened)
 	link.closed.connect(_on_serial_closed)
 	if not link.available():
-		serial_status = "SIMULAÇÃO — SEM EXTENSÃO SERIAL"
+		# NEM A EXTENSÃO NATIVA, NEM A PONTE POR PROCESSO.
+		#
+		# Antes desta mensagem o jogo dizia apenas "SEM EXTENSÃO SERIAL" e
+		# calava — e quem estava na frente da máquina não tinha como saber
+		# se faltava um arquivo, se o Windows recusou o PowerShell ou se o
+		# cabo estava solto. Agora a frase diz o que a tentativa devolveu.
+		var motivo := link.motivo_da_falta()
+		serial_status = "SIMULAÇÃO — SEM CAMINHO ATÉ O ARDUINO"
+		if not motivo.is_empty():
+			serial_status += " (%s)" % motivo
 		return
 	_tentar_conectar()
 
@@ -1435,7 +1449,7 @@ func _tentar_conectar() -> void:
 	# É também o defeito que aparece SÓ NO COMPUTADOR NOVO, porque no PC
 	# de quem desenvolve a extensão está sempre lá.
 	if link == null or not link.available():
-		serial_status = "EXTENSÃO SERIAL NÃO CARREGOU — VEJA docs/PROTOCOLO_SERIAL.md"
+		serial_status = "SEM CAMINHO ATÉ O ARDUINO — VEJA docs/PROTOCOLO_SERIAL.md"
 		proxima_tentativa = animation_time + 5.0
 		return
 	portas_visiveis = link.list_ports()
@@ -3346,14 +3360,19 @@ func _central_dados() -> void:
 	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
 	# travar sem sensor — e é justamente essa separação que diz ao técnico
 	# se ele deve olhar o cabo USB ou os fios do I2C.
-	# A EXTENSÃO NATIVA DA SERIAL. Sem ela nada do Arduino existe, e é a
-	# primeira coisa a conferir num computador em que "não funciona nada".
+	# POR ONDE O JOGO ESTÁ FALANDO COM A PLACA.
+	#
+	# Deixou de ser uma pergunta de sim ou não quando a ponte por processo
+	# entrou: hoje há dois caminhos, e saber QUAL está em uso é o que
+	# separa "o .dll não veio" de "o PowerShell recusou". A linha diz o
+	# nome do caminho quando existe um, e o motivo quando não existe
+	# nenhum.
 	var tem_serial := link != null and link.available()
+	var recado_serial := link.descricao() if tem_serial else "NENHUM"
+	if not tem_serial and link != null and not link.motivo_da_falta().is_empty():
+		recado_serial += " — %s" % link.motivo_da_falta()
 	_texto(
-		"extensão serial: %s" % (
-			"carregada" if tem_serial
-			else "NÃO CARREGOU — o .dll da gdserial não veio junto do executável"
-		),
+		"caminho até a placa: %s" % recado_serial,
 		888.0, 17, Paleta.VERDE if tem_serial else Paleta.VERMELHO,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
@@ -3721,7 +3740,7 @@ func _draw_alertas_graves() -> void:
 	if not Versao.acentos_inteiros():
 		recados.append(Versao.recado_do_estrago())
 	if link != null and not link.available():
-		recados.append("EXTENSÃO SERIAL NÃO CARREGOU — SEM ARDUINO: START, CRÉDITO E SENSOR MORTOS")
+		recados.append("SEM CAMINHO ATÉ O ARDUINO — START, CRÉDITO E SENSOR MORTOS")
 	if recados.is_empty():
 		return
 	var altura := 34.0 * float(recados.size()) + 16.0

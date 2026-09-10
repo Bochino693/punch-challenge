@@ -1,7 +1,16 @@
 class_name NullSerialLink
 extends SerialLink
 
-## Backend vazio: usado quando a extensão serial não está disponível
-## (binário ausente, plataforma sem suporte). O jogo continua
-## funcionando em modo simulação; trocar a extensão não exige mexer
-## em mais nada além de criar outro backend com a API de SerialLink.
+## Backend vazio: só entra quando NENHUM caminho até a placa deu certo —
+## nem a extensão nativa, nem a ponte por processo. O jogo continua
+## abrindo e jogável no teclado, mas a máquina de verdade está morta, e
+## quem está na frente dela precisa saber disso e por quê. É só para isso
+## que este backend guarda uma frase.
+
+var _motivo := ""
+
+func explicar(motivo: String) -> void:
+	_motivo = motivo
+
+func motivo_da_falta() -> String:
+	return _motivo

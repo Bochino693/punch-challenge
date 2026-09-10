@@ -16,9 +16,10 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
   b) Botao "Importar" -> escolha o arquivo `project.godot` desta pasta.
   c) Aperte F5 (ou o botao de play, no canto superior direito).
 
-  Rodando pelo editor, a extensao da serial SEMPRE carrega. Se o Arduino
-  funcionar assim e nao funcionar no .exe, o problema e a exportacao --
-  e ai a gente sabe onde procurar.
+  O Arduino NAO DEPENDE MAIS da extensao nativa. Se ela carregar, o jogo
+  usa; se nao carregar, ele sobe sozinho uma ponte feita com o PowerShell
+  que ja vem no Windows, e a placa funciona do mesmo jeito -- botao,
+  credito, sensor e fitas. Nao ha nada para instalar.
 
 
 ------------------------------------------------------------------------
@@ -26,7 +27,7 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
 ------------------------------------------------------------------------
 
   No rodape da tela de abertura tem o carimbo da build.
-  Tem de dizer BUILD 44 ou maior.
+  Tem de dizer BUILD 45 ou maior.
 
   Se disser um numero menor, o Godot abriu outra pasta. Volte ao passo 1.
 
@@ -37,10 +38,14 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
 
   Aperte F9 -> aba DADOS. Leia de cima para baixo, NESTA ORDEM:
 
-  extensao serial: carregada
-      Se disser NAO CARREGOU, pare aqui. Sem ela nao ha Arduino
-      nenhum -- nem botao, nem credito, nem sensor. Nada adianta
-      antes de resolver isso.
+  caminho ate a placa: extensao nativa
+      ou   caminho ate a placa: ponte PowerShell
+      As duas servem, e o jogo escolhe sozinho. A segunda e a que
+      funciona em PC sem nada instalado -- e e a esperada aqui.
+
+      So ha problema se disser NENHUM. Nesse caso a propria linha diz
+      o motivo, e ai sim pare aqui: sem caminho nao ha Arduino nenhum
+      -- nem botao, nem credito, nem sensor.
 
   portas vistas: COM3, COM5...
       Se disser "nenhuma", falta o driver CH340 no Windows. Clones de

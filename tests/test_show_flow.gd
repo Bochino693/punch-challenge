@@ -51,6 +51,7 @@ func run() -> void:
 	_test_teto_de_efeitos()
 	_test_porta_fixa()
 	_test_botoes_do_arduino_ponta_a_ponta()
+	await _test_ponte_por_processo()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -694,7 +695,7 @@ func _test_botoes_do_arduino_ponta_a_ponta() -> void:
 	var guardado = jogo.link
 	jogo.link = null
 	jogo._tentar_conectar()
-	assert("EXTENS" in jogo.serial_status.to_upper())
+	assert("SEM CAMINHO" in jogo.serial_status.to_upper())
 	jogo.link = guardado
 
 	# A placa se apresenta.
@@ -744,3 +745,82 @@ func _test_botoes_do_arduino_ponta_a_ponta() -> void:
 
 	jogo.game_mode = "credit"
 	jogo._entrar_em_abertura()
+
+
+## A PONTE POR PROCESSO, DO COMEÇO AO FIM.
+##
+## Este é o caminho que a máquina do operador vai usar: a extensão nativa
+## não carregou lá, e sem um segundo caminho START, CRÉDITO, sensor e
+## fitas ficam mortos. O teste sobe um ajudante de mentira que fala o
+## mesmo protocolo dos ajudantes de verdade e cobra o percurso inteiro —
+## processo filho, thread de leitura, cano nos dois sentidos, protocolo —
+## porque o único pedaço que não dá para exercitar aqui é o fio de cobre.
+##
+## Vale reparar no que ele prova de mais importante: que uma porta que
+## RECUSA não trava a procura. Foi assim que o jogo passou noites inteiras
+## parado numa porta de Bluetooth enquanto o Arduino estava na porta de
+## trás.
+func _test_ponte_por_processo() -> void:
+	PonteProcessoLink.receita_de_teste = [
+		[ProjectSettings.globalize_path("res://tests/ponte_falsa.sh")], ["/bin/sh"]
+	]
+	var ponte := PonteProcessoLink.new()
+	assert(ponte.available())
+
+	var recebidas: Array[String] = []
+	ponte.line_received.connect(func(l: String) -> void: recebidas.append(l))
+	var abertas: Array[String] = []
+	ponte.opened.connect(func(p: String) -> void: abertas.append(p))
+	var fechadas: Array[String] = []
+	ponte.closed.connect(func(p: String) -> void: fechadas.append(p))
+
+	# A apresentação chega e a lista de portas vem atrás dela.
+	assert(await _ponte_ate(ponte, func() -> bool: return ponte.list_ports().size() == 2))
+	assert(ponte.list_ports()[0] == "COMBOA")
+
+	# A PORTA QUE RECUSA NÃO PODE PRENDER A FILA.
+	assert(ponte.open_port("COMRUIM", 115200))
+	assert(await _ponte_ate(ponte, func() -> bool: return not ponte.is_open()))
+	assert(fechadas.has("COMRUIM"))
+	assert(recebidas.is_empty())
+
+	# A porta boa abre, e a placa se apresenta por ela.
+	assert(await _ponte_ate(ponte, func() -> bool: return ponte.open_port("COMBOA", 115200)))
+	assert(await _ponte_ate(ponte, func() -> bool: return abertas.has("COMBOA")))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("READY,PUNCH_MPU6050,V3")))
+
+	# O CANO ANDA NOS DOIS SENTIDOS. Sem isto não há CONFIG, não há LEDS e
+	# não há PING — ou seja, não há calibração nem fitas acompanhando o
+	# soco.
+	recebidas.clear()
+	assert(ponte.send_line("PING"))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("PONG")))
+	recebidas.clear()
+	assert(ponte.send_line("LEDS,640"))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("ECO,LEDS,640")))
+
+	# Uma linha de protocolo que atravessou a ponte tem de ser entendida
+	# do outro lado exatamente como a da extensão nativa.
+	recebidas.clear()
+	assert(ponte.send_line("TEST"))
+	assert(await _ponte_ate(ponte, func() -> bool: return recebidas.has("BUTTON,START")))
+	assert(ArduinoProtocol.parse(recebidas[0])["type"] == "BUTTON")
+
+	ponte.close_port()
+	assert(not ponte.is_open())
+	ponte.encerrar()
+	assert(not ponte.available())
+	PonteProcessoLink.receita_de_teste = []
+
+## Espera uma condição da ponte por até dois segundos, chamando `poll()`
+## como o jogo chama. Tempo de verdade, porque do outro lado há um
+## processo de verdade: um teste que só conta quadros passaria antes de o
+## sistema operacional ter chegado a rodar o ajudante.
+func _ponte_ate(ponte: PonteProcessoLink, condicao: Callable) -> bool:
+	for _i in range(200):
+		ponte.poll()
+		if bool(condicao.call()):
+			return true
+		OS.delay_msec(10)
+		await process_frame
+	return false

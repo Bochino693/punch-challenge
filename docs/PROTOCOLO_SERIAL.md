@@ -318,18 +318,15 @@ jogar nela.
 Este sintoma quase nunca é o fio. São três causas, em ordem de
 frequência, e a aba **DADOS** da Central separa as três:
 
-**1. A extensão nativa da serial não veio junto.** A conversa com o
-Arduino depende da `gdserial` — um `.dll` que viaja ao lado do
-executável. No computador de quem desenvolve ele está sempre lá, então o
-defeito nunca aparece ali: aparece no PC novo, e o sintoma é "não
-funciona nada", com START e CRÉDITO mortos e o sensor mudo.
-
-A Central agora diz isso em vermelho: `extensão serial: NÃO CARREGOU`.
-Antes ela falhava calada, e quem estava do outro lado procurava fio solto
-durante horas por causa de um arquivo.
+**1. A extensão nativa da serial não carregou** — e isso **deixou de
+derrubar a máquina**. Veja a seção seguinte: hoje existe um segundo
+caminho até a placa, e ele não depende de arquivo nenhum que possa
+faltar. A Central diz qual dos dois está em uso na linha
+`caminho até a placa:`.
 
 Antes de exportar, `sh tools/conferir_exportacao.sh` confere que todos os
-binários declarados existem.
+binários declarados existem — a extensão continua sendo o caminho
+preferido quando está inteira.
 
 **2. O driver da placa não está instalado.** Clones de Nano usam o
 conversor **CH340**, que o Windows não traz de fábrica. Sem o driver a
@@ -340,6 +337,92 @@ desconexão). Isto é elétrico, não é software: ou o botão está fechando
 **5 V no GND** em vez de **D2 no GND**, ou o 5 V do Nano está ligado ao
 5 V da fonte das fitas e as duas fontes brigam. Num PC de mesa a USB
 aguenta e o defeito não aparece; num notebook, não aguenta.
+
+---
+
+## Os dois caminhos até a placa
+
+O Godot não abre uma porta COM sozinho. Durante muito tempo quem fazia
+isso era **só** a extensão nativa `gdserial` (um `.dll` ao lado do
+executável) — e num gabinete real ela não carregou. O resultado foi a
+máquina inteira morta: START morto, CRÉDITO morto, sensor mudo, fitas
+apagadas, e na tela apenas "SIMULAÇÃO".
+
+Depender de um único caminho era o defeito. Hoje há dois, e o jogo desce
+a escada sozinho, sem perguntar nada:
+
+| Ordem | Caminho | Precisa de quê |
+| --- | --- | --- |
+| 1º | **extensão nativa** (`gdserial`) | o `.dll`/`.so` da extensão |
+| 2º | **ponte do sistema** | nada — só o que o SO já tem |
+| 3º | nenhum | (o jogo explica na tela o porquê) |
+
+### Como a ponte funciona
+
+O jogo sobe um processo ajudante e conversa com ele por linhas de texto
+pelos canos padrão (`OS.execute_with_pipe`):
+
+- **Windows** — `tools/ponte_serial.ps1`, rodando no **PowerShell que já
+  vem no Windows**, usando `System.IO.Ports.SerialPort`. Não há Python
+  para instalar, não há binário para o antivírus apagar, não há
+  arquitetura errada.
+- **Linux / macOS** — `tools/ponte_serial.sh`, usando `stty` e `cat`.
+
+O protocolo entre o jogo e o ajudante é o mesmo nos dois:
+
+| Sentido | Linha | O que quer dizer |
+| --- | --- | --- |
+| jogo → ponte | `@LISTAR` | reenumera as portas |
+| jogo → ponte | `@ABRIR,COM5,115200` | abre |
+| jogo → ponte | `@FECHAR` / `@SAIR` | fecha / encerra |
+| jogo → ponte | qualquer outra | vai **crua** para o Arduino |
+| ponte → jogo | `#PONTE,V1` | apresentação |
+| ponte → jogo | `#PORTAS,COM3,COM5` | lista, já em ordem de suspeita |
+| ponte → jogo | `#ABERTA,` / `#FECHADA,` / `#FALHA,` / `#ERRO,` | estado |
+| ponte → jogo | qualquer outra | veio **crua** do Arduino |
+
+Ou seja: `PING`, `CONFIG,…`, `LEDS,…`, `HIT,…`, `BUTTON,START` — todo o
+protocolo V2 desta página atravessa a ponte sem mudar uma vírgula. Quem
+está acima não sabe por qual caminho a linha veio.
+
+### As três regras que fazem a ponte não estragar o jogo
+
+1. **Nada bloqueia.** Ler de um cano trava até a linha chegar; feito no
+   laço do jogo, isso é a máquina congelada esperando um Arduino que
+   talvez nem esteja ligado. A leitura mora numa *thread* própria, e o
+   laço do jogo só recolhe o que já chegou.
+2. **Nada acumula.** Do lado Unix o repasse é `cat`, e não `tr`: `tr`
+   escreve por *stdio*, que guarda 4 KB antes de soltar — a placa falaria
+   e o jogo ficaria surdo por minutos. `cat` copia com `read`/`write`
+   direto.
+3. **Nada insiste sem pausa.** Porta que recusa espera 0,7 s antes da
+   próxima tentativa, e ajudante que morre só é ressuscitado a cada 4 s.
+   Sem isso, uma porta ocupada viraria sessenta tentativas por segundo.
+
+### Forçar um caminho
+
+`PUNCH_SERIAL=ponte` na variável de ambiente pula a extensão nativa mesmo
+que ela tenha carregado. Serve para comparar os dois no mesmo gabinete
+sem trocar arquivo de lugar.
+
+### Como isto é conferido
+
+`sh tools/conferir_ponte.sh` — e ele não é um teste de mentira. Ele abre
+um par de pseudo-terminais (uma porta serial de verdade, para o sistema
+operacional), põe um Arduino de mentira de um lado e cobra três coisas:
+
+1. o `ponte_serial.sh` conversando com a porta;
+2. o **jogo inteiro** — backend, thread, cano, ajudante de verdade —
+   chegando até essa porta;
+3. o `ponte_serial.ps1` **de verdade**, rodando no PowerShell, contra a
+   mesma porta.
+
+A terceira etapa existe porque o arquivo que roda no gabinete era também
+o único que nunca tinha rodado em lugar nenhum antes de chegar lá. Ela
+prova que a apresentação vem sem lixo antes dela (o BOM do console do
+Windows entrando dentro do `#PONTE,V1` bastaria para o jogo concluir que
+não há ponte), que uma rajada de 30 linhas chega inteira e em ordem, e
+que o caminho de volta entrega `LEDS,640` na porta.
 
 ---
 
@@ -354,7 +437,7 @@ Num PC recém-formatado, sem Python e sem nada:
 
 | O que | Funciona? |
 | --- | --- |
-| START, CRÉDITO, sensor de soco, fitas de LED | **Sim**, sempre |
+| START, CRÉDITO, sensor de soco, fitas de LED | **Sim**, sempre — pela extensão nativa ou pela ponte do sistema |
 | Ranking, pontuação, som, todas as telas | **Sim**, sempre |
 | Foto pela câmera nativa | Sim, se o Windows entregar imagem |
 | Foto pela ponte | Só com Python + OpenCV |
