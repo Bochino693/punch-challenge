@@ -25,3 +25,7 @@ __pycache__/
 ~*.dll
 ~*.so
 ~*.dylib
+*.exe
+*.pck
+*.zip
+final_project/
