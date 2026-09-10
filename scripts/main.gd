@@ -365,19 +365,25 @@ var camera_mirrored := true
 ## Pula o CameraServer e vai direto à ponte Python. Guardado em disco:
 ## numa máquina em que o caminho nativo nunca funciona, ligar isso uma
 ## vez tem de valer para sempre.
-## NO WINDOWS, A PONTE É O CAMINHO — não a reserva.
+## O CAMINHO NATIVO VEM PRIMEIRO — PORQUE ELE NÃO PRECISA DE PYTHON.
 ##
-## O caminho nativo no Windows enumera a câmera, aceita ativar o feed e
-## entrega um buffer preto. O vigia derruba isso em dois segundos e meio,
-## mas esses dois segundos e meio caem justamente na abertura do jogo, e
-## a primeira pose da noite pega a câmera ainda trocando de caminho.
-## Começar pela ponte tira o problema do caminho crítico.
+## Esta chave já esteve nas duas posições, e a razão de voltar atrás é a
+## que mais importa numa máquina de salão: A PONTE EXIGE PYTHON E OPENCV
+## INSTALADOS. Num PC recém-formatado, ou no notebook que se leva para uma
+## festa, isso não existe — e uma máquina que só fotografa em computador
+## preparado não serve para um negócio que roda em computador qualquer.
 ##
-## `camera_ponte_escolhida` existe pela mesma razão que a chave da
-## bancada tem uma: sem ela, um arquivo de ajustes antigo com `false`
-## gravado devolveria o comportamento velho e o conserto não chegaria em
-## nenhuma máquina que já rodou o jogo uma vez.
-var camera_forcar_ponte := OS.get_name() == "Windows"
+## Antes eu tinha posto a ponte na frente no Windows porque o caminho
+## nativo enumerava a câmera e entregava quadro PRETO. Só que a essa
+## altura o preto passava despercebido: hoje existe a checagem de
+## contraste, e um feed que não entrega imagem de verdade é reprovado em
+## dois segundos e meio e cai para a ponte sozinho.
+##
+## Então a ordem certa é: tenta o nativo, que não precisa de nada
+## instalado; se ele não provar que funciona, a ponte entra como reserva.
+## O pior caso são dois segundos e meio na abertura; o melhor caso é uma
+## máquina que fotografa num PC sem nada.
+var camera_forcar_ponte := false
 var camera_ponte_escolhida := false
 ## Quem roda os comandos de diagnóstico e publica a resposta na tela.
 var medico: CameraDoctor
@@ -1416,7 +1422,21 @@ const PORTA_PACIENCIA := 3.0
 var _porta_da_vez := 0
 
 func _tentar_conectar() -> void:
+	# FALHA SILENCIOSA ERA O PIOR JEITO DE FALHAR.
+	#
+	# A conversa com o Arduino depende de uma extensão nativa (a
+	# `gdserial`, um .dll ao lado do executável). Se ela não carregar —
+	# arquivo faltando na exportação, arquitetura errada, antivírus que
+	# apagou o .dll —, `available()` volta falso e ESTA FUNÇÃO SAÍA CALADA.
+	# O resultado é uma máquina em que START e CRÉDITO simplesmente não
+	# existem, sem uma palavra na tela dizendo por quê: quem está do outro
+	# lado procura fio solto durante horas por causa de um arquivo.
+	#
+	# É também o defeito que aparece SÓ NO COMPUTADOR NOVO, porque no PC
+	# de quem desenvolve a extensão está sempre lá.
 	if link == null or not link.available():
+		serial_status = "EXTENSÃO SERIAL NÃO CARREGOU — VEJA docs/PROTOCOLO_SERIAL.md"
+		proxima_tentativa = animation_time + 5.0
 		return
 	portas_visiveis = link.list_ports()
 	var porta := porta_configurada
@@ -3240,15 +3260,15 @@ func _central_camera() -> void:
 		_carregando(Vector2(540.0, 1010.0), 26.0, Paleta.CIANO)
 	if medico == null or medico.linhas.is_empty():
 		_texto(
-			"DIAGNOSTICAR só olha: Python, OpenCV, o que o Windows vê e quais índices respondem.",
-			1006.0, 15, Paleta.TINTA_FRACA
+			"O jogo NÃO precisa de Python: ele tenta a câmera pelo caminho nativo primeiro.",
+			1006.0, 15, Paleta.CIANO
 		)
 		_texto(
-			"RESOLVER TUDO faz o mesmo e ainda conserta: instala o OpenCV e libera a câmera na",
+			"Só se esse caminho falhar é que a ponte entra — e é ela que pede Python e OpenCV.",
 			1030.0, 15, Paleta.TINTA_FRACA
 		)
 		_texto(
-			"privacidade do Windows. Leva 1 a 2 minutos. A resposta aparece aqui embaixo.",
+			"DIAGNOSTICAR só olha. RESOLVER TUDO instala o que faltar e libera a privacidade.",
 			1054.0, 15, Paleta.TINTA_FRACA
 		)
 	else:
@@ -3325,6 +3345,17 @@ func _central_dados() -> void:
 	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
 	# travar sem sensor — e é justamente essa separação que diz ao técnico
 	# se ele deve olhar o cabo USB ou os fios do I2C.
+	# A EXTENSÃO NATIVA DA SERIAL. Sem ela nada do Arduino existe, e é a
+	# primeira coisa a conferir num computador em que "não funciona nada".
+	var tem_serial := link != null and link.available()
+	_texto(
+		"extensão serial: %s" % (
+			"carregada" if tem_serial
+			else "NÃO CARREGOU — o .dll da gdserial não veio junto do executável"
+		),
+		888.0, 17, Paleta.VERDE if tem_serial else Paleta.VERMELHO,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
 	_texto(
 		"sensor MPU-6050: %s" % ("presente" if sensor_presente else "NÃO ENCONTRADO — confira SDA=A4, SCL=A5, VCC e GND"),
 		860.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,

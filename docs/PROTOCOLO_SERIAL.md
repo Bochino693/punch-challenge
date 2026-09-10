@@ -310,3 +310,53 @@ separadas. Quem desliga a simulação de bancada é o **`OK,MPU`** ou o
 primeiro golpe medido — nunca o `READY`. Se fosse o `READY`, uma máquina
 sem sensor perderia a barra de espaço e não sobraria jeito nenhum de
 jogar nela.
+
+---
+
+## "Funciona no meu PC e não no outro"
+
+Este sintoma quase nunca é o fio. São três causas, em ordem de
+frequência, e a aba **DADOS** da Central separa as três:
+
+**1. A extensão nativa da serial não veio junto.** A conversa com o
+Arduino depende da `gdserial` — um `.dll` que viaja ao lado do
+executável. No computador de quem desenvolve ele está sempre lá, então o
+defeito nunca aparece ali: aparece no PC novo, e o sintoma é "não
+funciona nada", com START e CRÉDITO mortos e o sensor mudo.
+
+A Central agora diz isso em vermelho: `extensão serial: NÃO CARREGOU`.
+Antes ela falhava calada, e quem estava do outro lado procurava fio solto
+durante horas por causa de um arquivo.
+
+Antes de exportar, `sh tools/conferir_exportacao.sh` confere que todos os
+binários declarados existem.
+
+**2. O driver da placa não está instalado.** Clones de Nano usam o
+conversor **CH340**, que o Windows não traz de fábrica. Sem o driver a
+porta COM nem aparece — e a Central mostra `portas vistas: nenhuma`.
+
+**3. O Nano reinicia ao apertar o botão** (o Windows toca o som de
+desconexão). Isto é elétrico, não é software: ou o botão está fechando
+**5 V no GND** em vez de **D2 no GND**, ou o 5 V do Nano está ligado ao
+5 V da fonte das fitas e as duas fontes brigam. Num PC de mesa a USB
+aguenta e o defeito não aparece; num notebook, não aguenta.
+
+---
+
+## O jogo NÃO precisa de Python
+
+Só a **ponte de câmera** precisa, e ela é a segunda opção. O jogo tenta
+primeiro o caminho **nativo**, que não exige nada instalado; a ponte só
+entra se esse caminho não provar que entrega imagem de verdade (há uma
+checagem de contraste: feed preto é reprovado em dois segundos e meio).
+
+Num PC recém-formatado, sem Python e sem nada:
+
+| O que | Funciona? |
+| --- | --- |
+| START, CRÉDITO, sensor de soco, fitas de LED | **Sim**, sempre |
+| Ranking, pontuação, som, todas as telas | **Sim**, sempre |
+| Foto pela câmera nativa | Sim, se o Windows entregar imagem |
+| Foto pela ponte | Só com Python + OpenCV |
+
+Sem foto, o ranking mostra a silhueta desenhada e o jogo segue inteiro.

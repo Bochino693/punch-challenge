@@ -50,6 +50,7 @@ func run() -> void:
 	_test_laco_de_atracao()
 	_test_teto_de_efeitos()
 	_test_porta_fixa()
+	_test_botoes_do_arduino_ponta_a_ponta()
 	_test_rolagem_da_central()
 	_test_obturador_da_pose()
 
@@ -667,3 +668,79 @@ func _test_porta_fixa() -> void:
 	assert(jogo.porta_configurada.is_empty())
 
 	jogo.porta_configurada = antes
+
+# ------------------- os botoes do Arduino, da linha serial ao credito
+## AS LINHAS EXATAS QUE O FIRMWARE MANDA, ENTRANDO PELA PORTA.
+##
+## Este teste existe para separar de vez os dois lados. Ele nao simula
+## "um botao": ele entrega ao jogo o TEXTO IDENTICO que a placa escreve
+## na serial, e cobra o resultado. Passando, esta provado que do `READY`
+## ao credito na tela nao ha defeito no jogo -- e o que sobrar esta no
+## fio, no pino ou na placa.
+func _test_botoes_do_arduino_ponta_a_ponta() -> void:
+	jogo._entrar_em_abertura()
+	jogo.central_aberta = false
+	jogo.game_mode = "credit"
+	jogo.credits = 0
+	jogo.serial_start = 0
+	jogo.serial_credito = 0
+	jogo.porta_atual = "COM5"
+
+	# SEM A EXTENSAO NATIVA, O JOGO TEM DE DIZER ISSO NA TELA. Falha
+	# silenciosa aqui manda o tecnico procurar fio solto durante horas por
+	# causa de um arquivo que nao veio na exportacao -- e e o defeito que
+	# aparece so no computador novo, porque no PC de quem desenvolve a
+	# extensao esta sempre la.
+	var guardado = jogo.link
+	jogo.link = null
+	jogo._tentar_conectar()
+	assert("EXTENS" in jogo.serial_status.to_upper())
+	jogo.link = guardado
+
+	# A placa se apresenta.
+	jogo._on_serial_line("READY,PUNCH_MPU6050,V3")
+	assert("COM5" in jogo.serial_status)
+
+	# CREDITO: a linha entra, o saldo sobe.
+	jogo._on_serial_line("BUTTON,CREDIT")
+	assert(jogo.credits == 1)
+	assert(jogo.serial_credito == 1)
+
+	# START com credito: a rodada comeca.
+	assert(jogo.state == GameDef.State.IDLE)
+	jogo._on_serial_line("BUTTON,START")
+	assert(jogo.serial_start == 1)
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+	assert(jogo.credits == 0)
+
+	# O ESTADO CRU DOS PINOS CHEGA E FICA A VISTA.
+	jogo._on_serial_line("PINS,1,0")
+	assert(jogo.pino_start)
+	assert(not jogo.pino_credito)
+	jogo._on_serial_line("PINS,0,1")
+	assert(not jogo.pino_start)
+	assert(jogo.pino_credito)
+
+	# COM A CENTRAL ABERTA o aperto nao vira credito -- mas o contador
+	# sobe assim mesmo, que e o que prova o fio ao tecnico enquanto ele
+	# esta justamente olhando a tela de diagnostico.
+	jogo._entrar_em_abertura()
+	jogo.central_aberta = true
+	jogo.credits = 0
+	jogo._on_serial_line("BUTTON,CREDIT")
+	assert(jogo.credits == 0)
+	assert(jogo.serial_credito == 2)
+	jogo.central_aberta = false
+
+	# START SEM CREDITO no modo ficha nao comeca rodada nenhuma.
+	jogo.credits = 0
+	jogo._on_serial_line("BUTTON,START")
+	assert(jogo.state == GameDef.State.IDLE)
+
+	# E no modo livre comeca sem ficha.
+	jogo.game_mode = "free"
+	jogo._on_serial_line("BUTTON,START")
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+
+	jogo.game_mode = "credit"
+	jogo._entrar_em_abertura()
