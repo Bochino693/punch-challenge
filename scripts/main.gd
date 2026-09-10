@@ -2184,6 +2184,7 @@ func _draw() -> void:
 	fx.desenhar(self)
 	_draw_pancada()
 	_draw_clarao()
+	_draw_alertas_graves()
 	_draw_transicao()
 
 	if notice != "" and not central_aberta:
@@ -3702,6 +3703,37 @@ func _draw_player_photo(rect: Rect2, path: String, alpha: float) -> void:
 
 ## O aviso de operação ocupa o rodapé, e não o topo: no topo ele cairia
 ## em cima do cabeçalho, e no meio disputaria com o número.
+## OS DOIS AVISOS QUE PRECISAM APARECER NA TELA DO JOGO, e não só na
+## Central: sem eles a máquina não faz o que foi comprada para fazer, e
+## quem está na frente dela não tem como saber por quê.
+##
+##   * a extensão da serial não carregou — sem ela NÃO HÁ Arduino: nem
+##     botão, nem crédito, nem sensor. É o defeito que aparece só no
+##     computador novo, porque no PC de quem desenvolve o .dll está
+##     sempre lá;
+##   * os acentos vieram duplicados — o arquivo foi corrompido na cópia,
+##     e quem vê a tela procura o defeito na fonte durante horas.
+##
+## No rodapé, discretos, e só quando há o que dizer. Uma máquina em
+## operação normal nunca os vê.
+func _draw_alertas_graves() -> void:
+	var recados: Array[String] = []
+	if not Versao.acentos_inteiros():
+		recados.append(Versao.recado_do_estrago())
+	if link != null and not link.available():
+		recados.append("EXTENSÃO SERIAL NÃO CARREGOU — SEM ARDUINO: START, CRÉDITO E SENSOR MORTOS")
+	if recados.is_empty():
+		return
+	var altura := 34.0 * float(recados.size()) + 16.0
+	var caixa := Rect2(40.0, 1920.0 - altura - 8.0, 1000.0, altura)
+	draw_rect(caixa, Color(Paleta.VERMELHO, 0.92))
+	draw_rect(caixa, Paleta.AMBAR, false, 2.0)
+	for i in range(recados.size()):
+		_texto(
+			recados[i], caixa.position.y + 26.0 + float(i) * 34.0, 17, Color.WHITE,
+			HORIZONTAL_ALIGNMENT_CENTER, caixa.position.x, caixa.size.x
+		)
+
 func _draw_notice() -> void:
 	var caixa := Rect2(MARGEM + 60.0, 1798.0, LARGURA_UTIL - 120.0, 66.0)
 	_cartao(caixa, Paleta.CARTAO, Paleta.CIANO, 1.0, 3.0)

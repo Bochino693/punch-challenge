@@ -42,6 +42,14 @@ func _initialize() -> void:
 	assert(not bool(pinos["credit"]))
 	assert(str(ArduinoProtocol.parse("PINS,1")["type"]) == "")
 
+	# ------------------------------------ o arquivo chegou inteiro?
+	# Se o .gd foi lido como Latin-1 e gravado como UTF-8 em algum
+	# momento -- um PowerShell com Get-Content/Set-Content sem
+	# -Encoding UTF8 faz isso --, o "c-cedilha" vira dois caracteres e
+	# esta palavra passa de tres para cinco. Um length() responde.
+	assert(Versao.PROVA.length() == 3)
+	assert(Versao.acentos_inteiros())
+
 	print("CORE_TESTS_OK")
 	quit(0)
 
