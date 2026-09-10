@@ -120,11 +120,11 @@ const BOTOES_SIMPLES := {
 	"instalar_camera": Rect2(570, 920, 400, 56),
 	"testar_som": Rect2(300, 1498, 480, 60),
 	# --- página DADOS
-	"zerar": Rect2(110, 1064, 207, 60),
-	"zerar_stats": Rect2(327, 1064, 207, 60),
-	"zerar_ranking": Rect2(544, 1064, 207, 60),
-	"reconectar": Rect2(761, 1064, 209, 60),
-	"teto_efeitos": Rect2(680, 940, 290, 56),
+	"zerar": Rect2(110, 1358, 207, 60),
+	"zerar_stats": Rect2(327, 1358, 207, 60),
+	"zerar_ranking": Rect2(544, 1358, 207, 60),
+	"reconectar": Rect2(761, 1358, 209, 60),
+	"teto_efeitos": Rect2(680, 1234, 290, 56),
 	# --- sempre visíveis
 	"padroes": Rect2(110, 1782, 400, 68),
 	"salvar": Rect2(570, 1782, 400, 68),
@@ -309,8 +309,49 @@ var pino_credito := false
 var sensor_presente := false
 var serial_start := 0
 var serial_credito := 0
-## Quando a porta atual foi aberta. Serve para desistir dela.
+## Quando a porta atual foi CONFIRMADA aberta. Serve para desistir dela.
 var _porta_aberta_em := 0.0
+## Quando a abertura foi PEDIDA. Não é a mesma coisa, e a diferença é o
+## defeito: pela ponte por processo o pedido atravessa um cano, um
+## PowerShell e um driver antes de a porta abrir de verdade. Contar a
+## paciência a partir do pedido é descontar dela o tempo do encanamento —
+## e num PC lento o encanamento come a paciência inteira antes de a placa
+## ter chance de falar. Ver `ESPERA_DA_CONFIRMACAO`.
+var _porta_pedida_em := 0.0
+var _porta_confirmada := false
+## A fila de portas desta volta, e onde a volta está.
+var _fila_de_portas: PackedStringArray = []
+## Quantas voltas completas já foram dadas na fila. Vai para a tela: uma
+## busca que mostra o número da volta é uma busca que se vê acontecendo,
+## e não uma que "nunca termina".
+var _varreduras := 0
+## Quantas vezes a porta FIXADA na Central falhou seguidas.
+var _falhas_da_porta_fixa := 0
+## Quando o caminho atual até a placa entrou em uso, e quantas vezes o
+## jogo já trocou de caminho nesta sessão.
+var _caminho_desde := 0.0
+var _trocas_de_caminho := 0
+var _proxima_escolha_de_caminho := 0.0
+## A VARREDURA CEGA, UMA VEZ LIBERADA, NÃO VOLTA A SER TRANCADA.
+##
+## Ela entra depois da primeira volta sem sucesso — e a partir daí vale
+## para o resto da sessão, inclusive depois de uma troca de caminho.
+## Amarrá-la a `_varreduras`, que zera a cada troca de caminho, faria a
+## troca de caminho DESLIGAR a varredura cega justamente na máquina onde
+## as duas são necessárias.
+var _cega_liberada := false
+## ESTE CAMINHO JÁ ENTREGOU UMA LINHA DE VERDADE NESTA MÁQUINA?
+##
+## Se já, ele está provado e não se troca mais — nem depois de um silêncio
+## longo. Um caminho que funcionou uma vez volta a funcionar quando o
+## cabo voltar; trocá-lo por causa de uma queda seria jogar fora a única
+## coisa que se sabe sobre esta máquina.
+var _caminho_provado := false
+## A PLACA JÁ FALOU NESTA PORTA? Substitui a pergunta antiga, que era
+## `"CONECTADO" in serial_status` — e além de frágil ela estava errada:
+## "DESCONECTADO" contém "CONECTADO", então a frase que diz que a placa
+## caiu respondia que a placa estava lá.
+var placa_respondeu := false
 
 ## Câmera e dados locais do proprietário. Nenhum deles depende da rede.
 var camera_service: CameraService
@@ -1449,11 +1490,28 @@ func _resultado_da_calibracao() -> void:
 # ======================================================================
 # SERIAL (MPU-6050 via GdSerial — protocolo V2)
 # ======================================================================
-func _iniciar_serial() -> void:
-	link = SerialLink.create_best()
+func _iniciar_serial(evitar := "") -> void:
+	_soltar_link()
+	link = SerialLink.create_best(evitar)
 	link.line_received.connect(_on_serial_line)
 	link.opened.connect(_on_serial_opened)
 	link.closed.connect(_on_serial_closed)
+	# Cada caminho novo começa com a ficha limpa: fila do zero, porta
+	# fixada com crédito de novo, e o relógio da vigilância zerado.
+	porta_atual = ""
+	ultimo_sinal_ms = -1
+	placa_respondeu = false
+	_porta_da_vez = 0
+	_varreduras = 0
+	_falhas_da_porta_fixa = 0
+	_porta_confirmada = false
+	_caminho_provado = false
+	# `_cega_liberada` NÃO é zerada aqui de propósito: ver o comentário
+	# dela. O que a máquina descobriu sobre si mesma não se esquece na
+	# troca de caminho.
+	_fila_de_portas = PackedStringArray()
+	_caminho_desde = animation_time
+	_proxima_escolha_de_caminho = animation_time + SEGUNDOS_ATE_TROCAR_DE_CAMINHO
 	if not link.available():
 		# NEM A EXTENSÃO NATIVA, NEM A PONTE POR PROCESSO.
 		#
@@ -1461,17 +1519,39 @@ func _iniciar_serial() -> void:
 		# calava — e quem estava na frente da máquina não tinha como saber
 		# se faltava um arquivo, se o Windows recusou o PowerShell ou se o
 		# cabo estava solto. Agora a frase diz o que a tentativa devolveu.
+		#
+		# E não é mais o fim da linha: `_poll_serial` continua batendo, e
+		# passado o prazo o jogo REFAZ a escolha do caminho. Uma máquina
+		# em que o PowerShell demorou a subir, ou em que o cabo USB chegou
+		# depois, se conserta sozinha em vez de esperar por alguém.
 		var motivo := link.motivo_da_falta()
-		serial_status = "SIMULAÇÃO — SEM CAMINHO ATÉ O ARDUINO"
+		serial_status = "SEM CAMINHO ATÉ O ARDUINO — PROCURANDO OUTRO…"
 		if not motivo.is_empty():
 			serial_status += " (%s)" % motivo
+		proxima_tentativa = animation_time + 1.0
 		return
 	_tentar_conectar()
+
+## Desliga o backend anterior antes de escolher outro. Sem isto os sinais
+## do backend velho continuariam chegando no jogo depois da troca, e duas
+## camadas seriais falariam ao mesmo tempo sobre portas diferentes.
+func _soltar_link() -> void:
+	if link == null:
+		return
+	if link.line_received.is_connected(_on_serial_line):
+		link.line_received.disconnect(_on_serial_line)
+	if link.opened.is_connected(_on_serial_opened):
+		link.opened.disconnect(_on_serial_opened)
+	if link.closed.is_connected(_on_serial_closed):
+		link.closed.disconnect(_on_serial_closed)
+	link.close_port()
+	link.encerrar()
+	link = null
 
 ## O sensor está falando com a máquina? Decide o que o cliente vê: com o
 ## Arduino ligado, a tela não mostra tecla nenhuma; na bancada, mostra.
 func _sensor_ligado() -> bool:
-	return link != null and link.is_open() and "CONECTADO" in serial_status
+	return link != null and link.is_open() and placa_respondeu
 
 ## A PORTA CERTA SE DESCOBRE TENTANDO — não abrindo a primeira da lista.
 ##
@@ -1487,24 +1567,118 @@ func _sensor_ligado() -> bool:
 ## apresentar, e se ela não se apresentar, passa para a próxima. A porta
 ## que responder fica.
 ##
-## TRÊS SEGUNDOS VIROU CINCO. O comentário antigo dizia "o Nano leva
-## menos de dois para reiniciar quando a porta abre" — verdade numa
-## placa com bootloader rápido (Optiboot) e um driver que reseta na
-## hora. Mas abrir a porta RESETA o Arduino (é o DTR fazendo isso, não
-## o jogo), e nem todo par placa/driver reseta e reinicia tão rápido: um
-## bootloader clássico soma até dois segundos de espera própria antes
-## de sequer começar o `setup()`, e um driver CH340 genérico, instalado
-## de outro jeito noutra máquina, pode demorar mais para o Windows
-## terminar de enumerar a porta. Três segundos de paciência bem no
-## limite dessa soma cria um LAÇO: a porta reseta, o Arduino ainda está
-## de pé quando o jogo desiste e fecha, o fechar-reabrir reseta de novo,
-## e a placa NUNCA tem os dois segundos inteiros para chegar ao
-## `Serial.println(F("READY..."))`. É o retrato exato de "funciona no
-## meu PC, não funciona no outro, com a mesma porta": a diferença não
-## está na porta, está em quanto tempo aquele par específico de placa e
-## driver leva para reiniciar.
-const PORTA_PACIENCIA := 5.0
+## TRÊS SEGUNDOS VIROU CINCO, E CINCO VIROU OITO — E O RELÓGIO MUDOU DE
+## LUGAR, que é a parte que importa.
+##
+## Abrir a porta RESETA o Arduino (é o DTR fazendo isso, não o jogo), e
+## nem todo par placa/driver reseta e reinicia depressa: um bootloader
+## clássico soma até dois segundos de espera própria antes de sequer
+## começar o `setup()`, e um driver CH340 genérico pode demorar mais para
+## o Windows terminar de enumerar a porta. Uma paciência curta cria um
+## LAÇO: a porta reseta, o Arduino ainda está de pé quando o jogo desiste
+## e fecha, o fechar-reabrir reseta de novo, e a placa NUNCA tem os dois
+## segundos inteiros para chegar ao `Serial.println(F("READY..."))`.
+##
+## Mas o relógio estava contando a coisa errada. Ele começava quando o
+## jogo PEDIA a abertura — e pela ponte por processo, entre o pedido e a
+## porta aberta há um cano, um PowerShell e um driver. Num PC lento, ou
+## com antivírus no meio, isso sozinho passa de cinco segundos: a
+## paciência acabava ANTES de a porta existir, e a máquina varria a lista
+## inteira sem nunca dar a nenhuma placa a chance de responder. É o
+## retrato exato de "funciona no meu PC, não funciona no outro, com a
+## mesma porta": a diferença não está na porta, está em quanto tempo
+## aquela máquina leva para abrir uma.
+##
+## Agora são dois relógios. `ESPERA_DA_CONFIRMACAO` cobra o ENCANAMENTO:
+## do pedido até a porta confirmar que abriu. `PORTA_PACIENCIA` cobra a
+## PLACA: da porta aberta até a primeira linha válida. Nenhum dos dois
+## desconta do outro.
+const PORTA_PACIENCIA := 8.0
+const ESPERA_DA_CONFIRMACAO := 6.0
+## Depois de tantas falhas seguidas, a porta fixada na Central deixa de
+## ser exclusiva e a varredura volta a incluir todas. Ver
+## `_fila_de_tentativas`.
+const FALHAS_ATE_SOLTAR_A_PORTA_FIXA := 2
+## Tanto tempo sem uma única linha válida e o jogo TROCA DE CAMINHO até a
+## placa. É o que faz a máquina funcionar num PC onde o caminho preferido
+## não presta, sem ninguém para mexer em arquivo. Ver
+## `SerialLink.create_best`.
+const SEGUNDOS_ATE_TROCAR_DE_CAMINHO := 40.0
 var _porta_da_vez := 0
+
+## A PORTA FIXADA É PREFERÊNCIA, NÃO CADEADO — e este foi o "gato" que
+## deixou a máquina presa numa porta que não existia.
+##
+## Fixar a porta na Central gravava o nome no disco, e a partir dali o
+## jogo tentava SÓ AQUELA PORTA, para sempre, em qualquer máquina. Num PC
+## onde o Nano aparece como COM3, um "COM5" gravado noutro dia é uma
+## máquina morta com a placa espetada e funcionando do lado: a fila tinha
+## um item só, e esse item estava errado. Pior: o arquivo de ajustes
+## sobrevive à atualização do jogo, então o defeito atravessava versões.
+##
+## Agora a porta fixada vai na FRENTE da fila e ganha duas tentativas
+## exclusivas — o bastante para ela vencer o sorteio quando está certa. Se
+## não responder nessas duas, a varredura volta a incluir todas as portas
+## e a máquina acha a placa onde ela estiver. A preferência continua
+## valendo (ela é sempre a primeira tentada), mas deixou de ser um
+## cadeado.
+func _fila_de_tentativas() -> PackedStringArray:
+	var fila := PackedStringArray()
+	if not porta_configurada.is_empty():
+		fila.append(porta_configurada)
+		if _falhas_da_porta_fixa < FALHAS_ATE_SOLTAR_A_PORTA_FIXA:
+			return fila
+	for porta in portas_visiveis:
+		if not fila.has(porta):
+			fila.append(porta)
+	# A VARREDURA CEGA, o último recurso — e o que responde de vez a
+	# "funcione em qualquer porta, em qualquer PC".
+	#
+	# Toda a fila acima depende de UMA coisa dar certo: o sistema
+	# ENUMERAR as portas. E é exatamente essa a peça que falha de máquina
+	# para máquina, sempre de um jeito diferente — que é por que o
+	# diagnóstico não bate entre dois PCs com a mesma placa. O
+	# `GetPortNames()` do Windows lê o registro e devolve vazio quando o
+	# driver CH340 registrou a porta noutro lugar; a extensão nativa
+	# devolve o dicionário num formato que a versão dela mudou; o
+	# gerenciador de dispositivos está ocupado e a consulta volta seca.
+	# Em todos esses casos a porta EXISTE, a placa está falando nela — e o
+	# jogo nunca a tenta, porque ninguém lhe contou que ela está ali. Isso
+	# é, ao pé da letra, a busca que nunca termina.
+	#
+	# A saída é não perguntar. Passada a primeira volta sem sucesso, o
+	# jogo tenta os nomes de porta que EXISTEM NESTE SISTEMA POR
+	# CONVENÇÃO, um por um, enumeração ou não. Porta que não existe recusa
+	# na hora e sai da frente em fração de segundo, então a varredura
+	# inteira custa poucos segundos — e ao fim dela não sobrou porta
+	# nenhuma onde a placa pudesse estar escondida.
+	if _cega_liberada:
+		for porta in _portas_cegas():
+			if not fila.has(porta):
+				fila.append(porta)
+	return fila
+
+## OS NOMES QUE O SISTEMA USA, mesmo quando ele não os anuncia.
+##
+## No Windows são COM1 a COM32: acima de COM9 o nome de verdade precisa
+## do prefixo `\\.\`, e é o próprio SerialPort do .NET que o põe, então
+## aqui vai o nome simples. No Linux são os dois nomes que um Arduino
+## recebe (ttyACM para os que têm USB nativo, ttyUSB para os clones com
+## CH340/FTDI). No macOS o nome carrega um sufixo do fabricante que não
+## se adivinha — lá a enumeração por glob do ajudante é a única saída, e
+## ela funciona.
+func _portas_cegas() -> PackedStringArray:
+	var cegas := PackedStringArray()
+	match OS.get_name():
+		"Windows":
+			for i in range(1, 33):
+				cegas.append("COM%d" % i)
+		"Linux", "FreeBSD", "NetBSD", "OpenBSD", "BSD":
+			for i in range(0, 8):
+				cegas.append("/dev/ttyACM%d" % i)
+			for i in range(0, 8):
+				cegas.append("/dev/ttyUSB%d" % i)
+	return cegas
 
 func _tentar_conectar() -> void:
 	# FALHA SILENCIOSA ERA O PIOR JEITO DE FALHAR.
@@ -1512,57 +1686,129 @@ func _tentar_conectar() -> void:
 	# A conversa com o Arduino depende de uma extensão nativa (a
 	# `gdserial`, um .dll ao lado do executável). Se ela não carregar —
 	# arquivo faltando na exportação, arquitetura errada, antivírus que
-	# apagou o .dll —, `available()` volta falso e ESTA FUNÇÃO SAÍA CALADA.
-	# O resultado é uma máquina em que START e CRÉDITO simplesmente não
-	# existem, sem uma palavra na tela dizendo por quê: quem está do outro
-	# lado procura fio solto durante horas por causa de um arquivo.
+	# apagou o .dll, ou o runtime do Visual C++ que ela precisa e que não
+	# vem no Windows limpo —, `available()` volta falso e ESTA FUNÇÃO SAÍA
+	# CALADA. O resultado é uma máquina em que START e CRÉDITO simplesmente
+	# não existem, sem uma palavra na tela dizendo por quê: quem está do
+	# outro lado procura fio solto durante horas por causa de um arquivo.
 	#
 	# É também o defeito que aparece SÓ NO COMPUTADOR NOVO, porque no PC
 	# de quem desenvolve a extensão está sempre lá.
 	if link == null or not link.available():
 		serial_status = "SEM CAMINHO ATÉ O ARDUINO — VEJA docs/PROTOCOLO_SERIAL.md"
-		proxima_tentativa = animation_time + 5.0
+		proxima_tentativa = animation_time + 1.0
 		return
 	portas_visiveis = link.list_ports()
-	var porta := porta_configurada
-	if porta.is_empty():
-		if portas_visiveis.is_empty():
-			serial_status = "PROCURANDO ARDUINO…"
-			proxima_tentativa = animation_time + 4.0
-			_porta_da_vez = 0
-			return
-		# Dá a volta na lista: a placa pode ter sido espetada depois de a
-		# máquina ligar, e a porta dela entra no fim.
-		_porta_da_vez = _porta_da_vez % portas_visiveis.size()
-		porta = portas_visiveis[_porta_da_vez]
-		_porta_da_vez += 1
-	serial_status = "CONECTANDO %s" % porta
+	_fila_de_portas = _fila_de_tentativas()
+	if _fila_de_portas.is_empty():
+		# PROCURAR TEM DE PARECER PROCURAR. A frase era só
+		# "PROCURANDO ARDUINO…", parada, igual a si mesma minuto após
+		# minuto — e para quem está na frente da máquina uma frase que não
+		# muda é uma busca que travou. Com o caminho em uso e o número da
+		# varredura à mostra, dá para ver a máquina trabalhando, e dá para
+		# dizer ao telefone o que está escrito.
+		_varreduras += 1
+		# Sem porta nenhuma à vista já na primeira busca, a enumeração
+		# desta máquina não está servindo: solta a varredura cega agora.
+		_cega_liberada = true
+		serial_status = "PROCURANDO ARDUINO… (%s, busca %d, nenhuma porta à vista)" % [
+			link.descricao(), _varreduras
+		]
+		proxima_tentativa = animation_time + 1.5
+		_porta_da_vez = 0
+		return
+	# Dá a volta na lista: a placa pode ter sido espetada depois de a
+	# máquina ligar, e a porta dela entra no fim.
+	if _porta_da_vez >= _fila_de_portas.size():
+		_porta_da_vez = 0
+		_varreduras += 1
+		# Uma volta inteira sem achar: da próxima vez a fila leva também
+		# as portas que ninguém anunciou. Ver `_portas_cegas`.
+		_cega_liberada = true
+		_fila_de_portas = _fila_de_tentativas()
+	var porta := _fila_de_portas[_porta_da_vez]
+	_porta_da_vez += 1
+	serial_status = "CONECTANDO %s (%d de %d, busca %d)" % [
+		porta, _porta_da_vez, _fila_de_portas.size(), _varreduras + 1
+	]
+	_porta_confirmada = false
+	_porta_pedida_em = animation_time
+	_porta_aberta_em = animation_time
 	if link.open_port(porta, GameDef.SERIAL_BAUD):
 		porta_atual = porta
 		ultimo_sinal_ms = -1
 		proximo_ping = animation_time + 1.0
-		_porta_aberta_em = animation_time
 	else:
 		serial_status = "FALHA AO ABRIR %s" % porta
-		proxima_tentativa = animation_time + 1.0
+		proxima_tentativa = animation_time + 0.8
+
+## DESISTIR DESTA PORTA E PASSAR PARA A PRÓXIMA, num lugar só.
+##
+## Eram dois trechos parecidos e um deles esquecia de contar a falha da
+## porta fixada. Um lugar só é o que garante que desistir signifique
+## sempre a mesma coisa, venha a desistência do encanamento ou da placa.
+func _desistir_da_porta(motivo: String) -> void:
+	if not porta_configurada.is_empty() and porta_atual == porta_configurada:
+		_falhas_da_porta_fixa += 1
+		if _falhas_da_porta_fixa == FALHAS_ATE_SOLTAR_A_PORTA_FIXA:
+			_show_notice(
+				"%s NÃO RESPONDE — VARRENDO TODAS AS PORTAS" % porta_configurada
+			)
+	var tem_outras := _fila_de_tentativas().size() > 1
+	var recado := "%s EM %s%s" % [
+		motivo, porta_atual, " — TENTANDO A PRÓXIMA" if tem_outras else ""
+	]
+	if link != null:
+		# `close_port` emite `closed`, e `_on_serial_closed` escreve
+		# "DESCONECTADO" por cima. A frase que explica é a que fica.
+		link.close_port()
+	serial_status = recado
+	proxima_tentativa = animation_time + (0.3 if tem_outras else 2.0)
 
 func _poll_serial(_delta: float) -> void:
-	if link == null or not link.available():
+	if link == null:
 		return
+	# O BATIMENTO VEM ANTES DE QUALQUER PERGUNTA, E É INCONDICIONAL.
+	#
+	# AQUI ESTAVA O DEFEITO QUE MATAVA A MÁQUINA PARA SEMPRE. Estava
+	# assim:
+	#
+	#     if link == null or not link.available():
+	#         return
+	#     link.poll()
+	#
+	# `poll()` é o único batimento do backend — é DENTRO dele que a ponte
+	# por processo ressuscita o ajudante que morreu. E `available()` da
+	# ponte responde falso exatamente no intervalo em que ela está caída.
+	# Ou seja: no instante em que o batimento passava a ser necessário,
+	# ele parava. Um ajudante que caísse uma única vez (o PowerShell
+	# morrendo, o cabo USB dando uma soluçada, a troca de receita) nunca
+	# mais voltava, e a tela ficava congelada em "PROCURANDO ARDUINO…" até
+	# alguém reiniciar o jogo. O código de ressurreição existia, estava
+	# certo, e era inalcançável.
 	link.poll()
+	if not link.available():
+		_sem_caminho_ate_a_placa()
+		return
+	if _vigiar_o_caminho():
+		# Trocou de caminho: o `link` daqui para baixo já é outro, e ele
+		# acabou de começar a própria busca. Continuar interrogando o
+		# recém-nascido no mesmo quadro só produziria uma desistência
+		# imediata em cima de uma porta que ninguém chegou a abrir.
+		return
 	if not link.is_open():
 		if animation_time >= proxima_tentativa:
 			_tentar_conectar()
 		return
-	if ultimo_sinal_ms < 0 and animation_time - _porta_aberta_em > PORTA_PACIENCIA:
-		# CALADA POR CINCO SEGUNDOS: NÃO É A PLACA. Ver o comentário de
+	if not _porta_confirmada and animation_time - _porta_pedida_em > ESPERA_DA_CONFIRMACAO:
+		# O PEDIDO DE ABERTURA SUMIU NO ENCANAMENTO. Não é a placa: é o
+		# ajudante, o cano ou o driver. Ver `ESPERA_DA_CONFIRMACAO`.
+		_desistir_da_porta("NÃO ABRIU")
+		return
+	if _porta_confirmada and ultimo_sinal_ms < 0 and animation_time - _porta_aberta_em > PORTA_PACIENCIA:
+		# CALADA DESDE QUE ABRIU: NÃO É O ENCANAMENTO. Ver o comentário de
 		# `PORTA_PACIENCIA`, acima, para o motivo do número.
-		var muda := porta_configurada.is_empty() and portas_visiveis.size() > 1
-		serial_status = "SEM RESPOSTA EM %s%s" % [
-			porta_atual, " — TENTANDO A PRÓXIMA" if muda else ""
-		]
-		link.close_port()
-		proxima_tentativa = animation_time + (0.2 if muda else 4.0)
+		_desistir_da_porta("SEM RESPOSTA")
 		return
 	if ultimo_sinal_ms < 0 and animation_time >= proximo_ping:
 		# Ainda não vimos o READY: cutuca a placa.
@@ -1589,25 +1835,127 @@ func _poll_serial(_delta: float) -> void:
 		# Uma reconexão sozinha custa menos de um segundo e não se nota;
 		# não reconectar nunca é que perde a máquina a noite inteira.
 		serial_status = "SEM RESPOSTA — %s — RECONECTANDO" % porta_atual
+		var recado := serial_status
 		link.close_port()
+		serial_status = recado
 		return
+
+## SEM CAMINHO AGORA NÃO É SEM CAMINHO PARA SEMPRE.
+##
+## A ponte por processo responde `available() == false` enquanto está
+## ressuscitando o ajudante, e isso é normal e passa em segundos. O que
+## não passa sozinho é o caso em que o caminho escolhido no arranque não
+## serve nesta máquina. Passado o prazo, o jogo REFAZ a escolha — e sem o
+## caminho que acabou de falhar.
+func _sem_caminho_ate_a_placa() -> void:
+	porta_atual = ""
+	_porta_confirmada = false
+	var motivo := link.motivo_da_falta()
+	serial_status = "SEM CAMINHO ATÉ O ARDUINO — PROCURANDO OUTRO…"
+	if not motivo.is_empty():
+		serial_status += " (%s)" % motivo
+	if animation_time < _proxima_escolha_de_caminho:
+		return
+	_trocar_de_caminho("nenhum caminho respondeu")
+
+## O CAMINHO QUE NÃO ACHA NADA TAMBÉM TEM DE SER TROCADO — e é isto que
+## faz o jogo funcionar em PC que não é o de quem o escreveu.
+##
+## A extensão nativa pode CARREGAR e não servir. No Windows ela depende do
+## runtime do Visual C++ (VCRUNTIME140.dll), que não vem numa instalação
+## limpa: onde ele falta, o .dll nem entra e a ponte assume — esse caso
+## conserta-se sozinho. O caso ruim é o do meio: a extensão entra, diz que
+## está viva, e nunca enumera porta nenhuma. Aí o jogo antigo ficava
+## eternamente em "PROCURANDO ARDUINO…" com o outro caminho ali, do lado,
+## funcionando, e ninguém para chamá-lo — porque a escolha do caminho era
+## feita uma vez, no arranque, e era definitiva.
+##
+## Agora não é. Tanto tempo sem uma única linha válida e o jogo pede o
+## OUTRO caminho. Se o outro também não der, ele volta para este. A
+## máquina acaba caindo no que presta nela, sozinha.
+func _vigiar_o_caminho() -> bool:
+	if _caminho_provado:
+		# Já entregou linha nesta máquina: é o caminho certo, ponto final.
+		return false
+	if sensor_presente or ultimo_sinal_ms >= 0:
+		# Está trabalhando: o relógio da desconfiança não corre.
+		_caminho_desde = animation_time
+		return false
+	if animation_time - _caminho_desde < SEGUNDOS_ATE_TROCAR_DE_CAMINHO:
+		return false
+	# TROCAR DE CAMINHO NO MEIO DA VARREDURA SERIA DESISTIR SEM PROCURAR.
+	#
+	# A troca zera a fila e recomeça do princípio. Feita antes de a
+	# varredura fechar uma volta — e uma volta com a lista cega tem trinta
+	# e tantas portas —, ela cortaria a busca sempre no mesmo ponto, e as
+	# portas do fim da fila nunca seriam tentadas por caminho nenhum. O
+	# caminho só é condenado depois de ter tido a chance inteira.
+	if _varreduras < 1:
+		return false
+	_trocar_de_caminho("%s não achou a placa em %d s" % [
+		link.descricao(), int(SEGUNDOS_ATE_TROCAR_DE_CAMINHO)
+	])
+	return true
+
+func _trocar_de_caminho(motivo: String) -> void:
+	var anterior := link.nome_do_caminho() if link != null else ""
+	_trocas_de_caminho += 1
+	_iniciar_serial(anterior)
+	var agora := link.descricao() if link != null else "nenhum"
+	serial_status = "TROCANDO DE CAMINHO — %s → %s" % [motivo, agora]
 
 func _on_serial_opened(porta: String) -> void:
 	porta_atual = porta
+	# A PORTA CONFIRMOU. É daqui que a paciência com a PLACA começa a
+	# contar, e não de quando o jogo pediu. Ver `PORTA_PACIENCIA`.
+	_porta_confirmada = true
+	_porta_aberta_em = animation_time
 	serial_status = "AGUARDANDO READY — %s" % porta
 
 func _on_serial_closed(_porta: String) -> void:
+	# PORTA QUE NUNCA FALOU NÃO MERECE ESPERA. A fila só anda quando esta
+	# pausa termina: três segundos por porta (o valor antigo) numa máquina
+	# com seis portas COM é meio minuto de máquina morta em cada volta, e
+	# com a varredura cega seria minutos. Uma porta que recusou ou que
+	# nunca disse nada sai da frente em um terço de segundo; só a que
+	# ESTAVA falando e caiu ganha o segundo inteiro, porque nesse caso a
+	# pausa é para o driver soltar a porta antes de reabri-la.
+	var estava_falando := ultimo_sinal_ms >= 0
 	serial_status = "DESCONECTADO"
 	porta_atual = ""
 	ultimo_sinal_ms = -1
-	proxima_tentativa = animation_time + 3.0
-	sons.play("error", -8.0)
+	_porta_confirmada = false
+	placa_respondeu = false
+	proxima_tentativa = animation_time + (1.0 if estava_falando else 0.35)
+	if estava_falando:
+		sons.play("error", -8.0)
 
 func _on_serial_line(line: String) -> void:
 	var msg := ArduinoProtocol.parse(line)
 	if msg.is_empty() or str(msg.get("type", "")) == "":
 		return
 	ultimo_sinal_ms = Time.get_ticks_msec()
+	# UMA LINHA VÁLIDA É A PROVA DE QUE ESTE CAMINHO PRESTA. Zera o
+	# relógio da desconfiança: `_vigiar_o_caminho` não pode trocar o
+	# caminho de uma máquina que está funcionando.
+	_caminho_desde = animation_time
+	_caminho_provado = true
+	# QUALQUER LINHA VÁLIDA JÁ PROVA A PORTA — não só o `READY`.
+	#
+	# O jogo esperava o `READY` para dizer "CONECTADO", e o `READY` sai
+	# UMA vez, no arranque da placa. Quando o jogo reinicia e o Arduino
+	# não — a máquina ligada, o operador fechando e abrindo o jogo, ou o
+	# driver que não reseta a placa ao abrir a porta — esse `READY` já
+	# passou há muito. A porta certa ficava então em "AGUARDANDO READY"
+	# para sempre, mesmo com a placa despejando TELEMETRY e PINS quatro
+	# vezes por segundo naquela mesma porta: a máquina estava vendo os
+	# dados e dizendo que não havia ninguém.
+	#
+	# Uma linha que o protocolo entendeu só pode ter vindo do firmware.
+	# Isso é a prova, e é o bastante.
+	if not placa_respondeu:
+		placa_respondeu = true
+		serial_status = "CONECTADO %s" % porta_atual
 	match str(msg["type"]):
 		"READY":
 			serial_status = "CONECTADO %s" % porta_atual
@@ -1628,7 +1976,7 @@ func _on_serial_line(line: String) -> void:
 			pino_start = bool(msg["start"])
 			pino_credito = bool(msg["credit"])
 		"PONG":
-			if not porta_atual.is_empty() and "CONECTADO" not in serial_status:
+			if not porta_atual.is_empty() and not serial_status.begins_with("CONECTADO"):
 				serial_status = "CONECTADO %s" % porta_atual
 		"CALIBRATING":
 			serial_status = "CALIBRANDO %d%%" % int(msg["percent"])
@@ -2024,10 +2372,16 @@ func _click_central(p: Vector2) -> void:
 		teto_efeitos = desempenho.teto
 		_show_notice("TETO DE EFEITOS: %s" % desempenho.teto)
 	elif _tocou("reconectar", p):
-		if link != null:
-			link.close_port()
-		_tentar_conectar()
-		_show_notice("RECONEXÃO SOLICITADA")
+		# RECONECTAR REFAZ A ESCOLHA INTEIRA, e não só reabre a porta.
+		#
+		# Era só um `close_port` seguido de `_tentar_conectar`: reabria a
+		# MESMA porta pelo MESMO caminho, que é justamente o par que
+		# acabou de não funcionar. Para o técnico que apertou o botão, o
+		# pedido é "esquece tudo e procura de novo" — e agora é isso que
+		# acontece: caminho escolhido do zero (extensão nativa ou ponte),
+		# porta fixada com crédito de novo, fila inteira revarrida.
+		_iniciar_serial()
+		_show_notice("PROCURANDO O ARDUINO DE NOVO, DO ZERO")
 	elif _tocou("padroes", p):
 		game_mode = "credit"
 		porta_configurada = ""
@@ -3352,7 +3706,17 @@ func _central_dados() -> void:
 	)
 	_texto("Recorde da casa: %04d" % _melhor(), 532.0, 18, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
 
-	_secao(Rect2(80, 600, 920, 180), "DIAGNÓSTICO", Paleta.CIANO)
+	# A SEÇÃO CRESCEU PORQUE AS LINHAS NÃO CABIAM — e não caber não era
+	# um detalhe de estética: as três últimas linhas do diagnóstico
+	# ("portas vistas", "sensor" e "caminho até a placa") eram desenhadas
+	# em 832, 860 e 888, dentro de uma caixa que terminava em 780. Elas
+	# caíam POR CIMA das linhas da seção seguinte, que começa em 796 e
+	# escreve em 858 e 888. Duas frases no mesmo pixel, e qual das duas
+	# fica por cima depende da fonte e da escala da tela — que é
+	# exatamente por que o diagnóstico saía DIFERENTE em cada PC, com a
+	# mesma placa e o mesmo jogo. Quem lê a tela para contar ao telefone
+	# o que está escrito estava lendo duas frases embaralhadas.
+	_secao(Rect2(80, 600, 920, 470), "DIAGNÓSTICO DA PLACA", Paleta.CIANO)
 	_texto(serial_status, 664.0, 16, Paleta.TINTA_FRACA, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0)
 	_texto(
 		telemetria if telemetria != "" else "sem telemetria ainda",
@@ -3389,30 +3753,99 @@ func _central_dados() -> void:
 		"portas vistas: %s" % (", ".join(portas_visiveis) if not portas_visiveis.is_empty() else "nenhuma"),
 		832.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
-	# AS DUAS PERGUNTAS, SEPARADAS. "A placa respondeu" e "o sensor
-	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
-	# travar sem sensor — e é justamente essa separação que diz ao técnico
-	# se ele deve olhar o cabo USB ou os fios do I2C.
 	# POR ONDE O JOGO ESTÁ FALANDO COM A PLACA.
 	#
 	# Deixou de ser uma pergunta de sim ou não quando a ponte por processo
 	# entrou: hoje há dois caminhos, e saber QUAL está em uso é o que
-	# separa "o .dll não veio" de "o PowerShell recusou". A linha diz o
-	# nome do caminho quando existe um, e o motivo quando não existe
-	# nenhum.
+	# separa "o .dll não veio" de "o PowerShell recusou".
 	var tem_serial := link != null and link.available()
 	var recado_serial := link.descricao() if tem_serial else "NENHUM"
-	if not tem_serial and link != null and not link.motivo_da_falta().is_empty():
+	if link != null and not link.motivo_da_falta().is_empty():
 		recado_serial += " — %s" % link.motivo_da_falta()
 	_texto(
 		"caminho até a placa: %s" % recado_serial,
-		888.0, 17, Paleta.VERDE if tem_serial else Paleta.VERMELHO,
+		860.0, 17, Paleta.VERDE if tem_serial else Paleta.VERMELHO,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# AS DUAS PERGUNTAS, SEPARADAS. "A placa respondeu" e "o sensor
+	# respondeu" deixaram de ser a mesma coisa quando o firmware parou de
+	# travar sem sensor — e é justamente essa separação que diz ao técnico
+	# se ele deve olhar o cabo USB ou os fios do I2C.
+	_texto(
+		"sensor MPU-6050: %s" % ("presente" if sensor_presente else "NÃO ENCONTRADO — confira SDA=A4, SCL=A5, VCC e GND"),
+		888.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# A EXTENSÃO NATIVA CARREGOU? A PERGUNTA QUE FALTAVA, e a que explica
+	# o "funciona no meu PC" inteiro.
+	#
+	# A `gdserial` é um .dll que viaja AO LADO do executável, não dentro
+	# dele — copiar só o .exe para outra máquina deixa a extensão para
+	# trás. E, mesmo indo junto, ela precisa do runtime do Visual C++
+	# 2015-2022 (o VCRUNTIME140.dll), que NÃO vem numa instalação limpa do
+	# Windows: no PC de quem desenvolve ele está sempre lá, no PC do
+	# cliente quase nunca. Nos dois casos o Windows recusa o .dll em
+	# silêncio, sem erro nenhum na tela.
+	#
+	# Isso não derruba mais a máquina — a ponte assume e o jogo trabalha
+	# igual. Mas o técnico precisa poder LER isso, porque é a diferença
+	# entre "esta máquina está usando o plano B" e "esta máquina está
+	# quebrada".
+	var nativa_ok := ClassDB.class_exists(&"GdSerialManager")
+	_texto(
+		"extensão nativa: %s" % (
+			"carregada" if nativa_ok
+			else "não carregou — leve gdserial.dll junto do .exe e instale o runtime do Visual C++ 2015-2022"
+		),
+		916.0, 15, Paleta.VERDE if nativa_ok else Paleta.AMBAR,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# O ANDAMENTO DA BUSCA, EM NÚMEROS.
+	#
+	# "PROCURANDO ARDUINO…" parado na tela não diz se a máquina está
+	# procurando ou travada — e essa dúvida sozinha já custou noites de
+	# gabinete. O número da volta subindo é a prova de que a busca está
+	# viva, e é o que se lê ao telefone.
+	_texto(
+		"busca: volta %d  •  porta %d de %d  •  varredura cega %s" % [
+			_varreduras + 1, _porta_da_vez, _fila_de_portas.size(),
+			"LIGADA" if _cega_liberada else "desligada",
+		],
+		944.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# O QUE JÁ DEU ERRADO NESTA SESSÃO. Ponte religando sem parar é cabo
+	# ruim, antivírus ou PowerShell bloqueado; caminho trocando sem parar
+	# é uma máquina em que nenhum dos dois presta.
+	var religadas_da_ponte := 0
+	if link is PonteProcessoLink:
+		religadas_da_ponte = (link as PonteProcessoLink).religadas()
+	_texto(
+		"ponte religada %d ×  •  caminho trocado %d ×" % [
+			religadas_da_ponte, _trocas_de_caminho
+		],
+		972.0, 15,
+		Paleta.TINTA_LEVE if (religadas_da_ponte + _trocas_de_caminho) < 4 else Paleta.AMBAR,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# A PORTA FIXADA, E QUANTO CRÉDITO AINDA RESTA A ELA. Fixar uma porta
+	# errada era o jeito mais fácil de matar a máquina, e não havia como
+	# ver isso em lugar nenhum.
+	_texto(
+		"porta escolhida: %s" % (
+			"automática (varre todas)" if porta_configurada.is_empty()
+			else "%s — %d falha(s); %s" % [
+				porta_configurada, _falhas_da_porta_fixa,
+				"ainda exclusiva" if _falhas_da_porta_fixa < FALHAS_ATE_SOLTAR_A_PORTA_FIXA
+				else "liberada, varrendo todas"
+			]
+		),
+		1000.0, 15,
+		Paleta.TINTA_LEVE if porta_configurada.is_empty() else Paleta.CIANO,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
-		"sensor MPU-6050: %s" % ("presente" if sensor_presente else "NÃO ENCONTRADO — confira SDA=A4, SCL=A5, VCC e GND"),
-		860.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,
-		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		"sistema: %s  •  velocidade %d bauds" % [OS.get_name(), GameDef.SERIAL_BAUD],
+		1028.0, 15, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 
 	# ---- O QUE A MÁQUINA ESTÁ ENTREGANDO DE VERDADE
@@ -3422,21 +3855,21 @@ func _central_dados() -> void:
 	# outro vídeo, outra TV, outra resolução. Sem número, o conserto vira
 	# palpite. Estas quatro linhas são o número — e é o que se manda para
 	# quem for consertar, em vez de "está travado".
-	_secao(Rect2(80, 796, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
+	_secao(Rect2(80, 1090, 920, 190), "RITMO DA MÁQUINA", Paleta.VERDE)
 	var fps := desempenho.fps()
 	var cor_fps := Paleta.VERDE if fps >= 55.0 else (Paleta.AMBAR if fps >= 40.0 else Paleta.VERMELHO)
 	_texto(
 		"%.0f quadros por segundo  •  pior quadro %.1f ms  •  efeitos em %d%%" % [
 			fps, desempenho.pior_ms(), int(round(desempenho.qualidade * 100.0))
 		],
-		858.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1152.0, 20, cor_fps, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
 		"%d chamadas de desenho  •  %d primitivas por quadro" % [
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 			int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
 		],
-		888.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1182.0, 17, Paleta.TINTA_LEVE, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	# A ESCALA DENUNCIA A TELA DEITADA.
 	#
@@ -3450,12 +3883,12 @@ func _central_dados() -> void:
 		"janela %dx%d  •  escala %.2f%s" % [
 			DisplayServer.window_get_size().x, DisplayServer.window_get_size().y, escala.y, aviso
 		],
-		918.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
+		1212.0, 17, Paleta.TINTA_LEVE if aviso.is_empty() else Paleta.AMBAR,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	_texto(
 		"câmera: %s" % (camera_service.status if camera_service != null else "—"),
-		948.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		1242.0, 17, Paleta.CIANO, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	# O TETO À MÃO, para quando o automático errar. Ele acerta na maioria
 	# das máquinas e erra em duas: num PC que oscila, ficando subindo e
@@ -3466,7 +3899,7 @@ func _central_dados() -> void:
 		desempenho.teto != "AUTO", Paleta.ROXO, 17
 	)
 
-	_secao(Rect2(80, 1010, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
+	_secao(Rect2(80, 1304, 920, 160), "APAGAR (PEDE CONFIRMAÇÃO)", Paleta.VERMELHO)
 	_botao(BOTOES_SIMPLES["zerar"], "CONTADORES", false, Paleta.VERMELHO, 14)
 	_botao(BOTOES_SIMPLES["zerar_stats"], "ESTATÍSTICAS", false, Paleta.ROXO, 14)
 	_botao(BOTOES_SIMPLES["zerar_ranking"], "RANKING + FOTOS", false, Paleta.VERMELHO, 13)

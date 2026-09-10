@@ -20,6 +20,9 @@ func _init() -> void:
 	_mgr.connect("data_received", _on_data)
 	_mgr.connect("port_disconnected", _on_disconnected)
 
+func nome_do_caminho() -> String:
+	return SerialLink.CAMINHO_NATIVO
+
 func available() -> bool:
 	return _mgr != null
 
@@ -45,17 +48,37 @@ func list_ports() -> PackedStringArray:
 	if _mgr == null:
 		return found
 	var prioritarias := PackedStringArray()
-	var ports: Dictionary = _mgr.list_ports()
-	for key in ports:
-		var info: Variant = ports[key]
-		if not (info is Dictionary) or not info.has("port_name"):
+	## UMA PORTA DESCARTADA PELO FILTRO NUNCA MAIS É TENTADA, então o
+	## filtro tem de ser o último a falar. As descartadas ficam guardadas
+	## aqui: se o filtro esvaziar a lista inteira, elas voltam. Uma porta
+	## suspeita que talvez não exista ainda é melhor do que a certeza de
+	## não ter porta nenhuma para tentar.
+	var descartadas := PackedStringArray()
+	var ports: Variant = _mgr.list_ports()
+	if not (ports is Dictionary):
+		return found
+	for key in (ports as Dictionary):
+		var info: Variant = (ports as Dictionary)[key]
+		# O NOME DA PORTA PODE VIR NA CHAVE, E NÃO NO VALOR. Versões
+		# diferentes da extensão respondem em formatos diferentes; exigir
+		# um formato só é como o jogo ficava com a lista vazia — e lista
+		# vazia é o "PROCURANDO ARDUINO…" que nunca termina.
+		var port_name := ""
+		if info is Dictionary and (info as Dictionary).has("port_name"):
+			port_name = str((info as Dictionary)["port_name"])
+		elif info is String and not str(info).is_empty():
+			port_name = str(info)
+		else:
+			port_name = str(key)
+		port_name = port_name.strip_edges()
+		if port_name.is_empty():
 			continue
-		var port_name := str(info["port_name"])
 		# Algumas imagens Linux anunciam ttyS0 mesmo sem o dispositivo.
 		# No Windows as portas COM não usam caminho e passam normalmente.
 		if port_name.begins_with("/dev/") and not FileAccess.file_exists(port_name):
+			descartadas.append(port_name)
 			continue
-		if _cheira_a_arduino(info as Dictionary):
+		if info is Dictionary and _cheira_a_arduino(info as Dictionary):
 			prioritarias.append(port_name)
 		else:
 			found.append(port_name)
@@ -67,19 +90,36 @@ func list_ports() -> PackedStringArray:
 	var fila := PackedStringArray()
 	fila.append_array(prioritarias)
 	fila.append_array(found)
+	if fila.is_empty() and not descartadas.is_empty():
+		_ordenar(descartadas)
+		return descartadas
 	return fila
 
+## AQUI A FILA DE PRIORIDADE NÃO FUNCIONAVA — E NINGUÉM PODIA SABER.
+##
+## A lista de chaves era um chute: `vid`, `manufacturer`, `product`,
+## `description`, `type`. A extensão não usa NENHUMA delas. Ela responde
+## `port_name`, `port_type` e `device_name` — e `Dictionary.has("type")`
+## é exato, então `port_type` nunca batia com `type`. O texto examinado
+## saía SEMPRE vazio, a função respondia SEMPRE falso, e a fila de
+## prioridade — a parte que faz a placa ser tentada antes do Bluetooth —
+## nunca existiu de verdade. Num PC com seis portas COM isso é a
+## diferença entre achar a placa na primeira tentativa e achar na sexta,
+## com nove segundos de espera em cada uma que não é.
+##
+## A correção é não chutar nome de chave nenhum: varre o dicionário
+## inteiro, chaves e valores, que é o que sobrevive à próxima versão da
+## extensão.
 func _cheira_a_arduino(info: Dictionary) -> bool:
 	var texto := ""
-	for chave in ["vid", "VID", "vendor_id", "manufacturer", "product", "description", "type"]:
-		if info.has(chave):
-			texto += str(info[chave]).to_upper() + " "
-	if texto.is_empty():
+	for chave in info:
+		texto += str(chave).to_upper() + " " + str(info[chave]).to_upper() + " "
+	if texto.strip_edges().is_empty():
 		return false
 	for marca in FABRICANTES_ARDUINO:
 		if marca in texto:
 			return true
-	return "ARDUINO" in texto or "CH340" in texto or "USB" in texto
+	return "ARDUINO" in texto or "CH340" in texto or "CH341" in texto or "USB" in texto
 
 ## Ordem NATURAL, e não alfabética: `sort()` põe COM10 antes de COM3,
 ## porque compara texto. Numa máquina com muitas portas isso muda qual

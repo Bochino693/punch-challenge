@@ -74,6 +74,20 @@ function Dizer([string]$texto) {
     try { $saida.WriteLine($texto) } catch { }
 }
 
+# A APRESENTACAO E A PRIMEIRA COISA QUE SAI, ANTES DE QUALQUER TRABALHO.
+#
+# Ela ficava depois do `Add-Type` e das definicoes -- e o `Add-Type` de
+# `System.IO.Ports` carrega um assembly, o que num PC lento ou com
+# antivirus vigiando o PowerShell leva segundos. O jogo conta o tempo da
+# apresentacao para decidir se a politica do Windows recusou o script, e
+# um `Add-Type` demorado estourava esse prazo: o jogo derrubava um
+# ajudante que estava perfeitamente vivo e recomecava, para trocar de
+# receita e derrubar o proximo. A ponte nunca chegava a dizer nada.
+#
+# Falar primeiro e trabalhar depois nao custa nada e tira o prazo do
+# caminho.
+Dizer "#PONTE,V1,windows"
+
 # Em Windows PowerShell (5.1) a classe SerialPort ja vem carregada; em
 # PowerShell 7 ela mora num pacote a parte. Tentar carregar e nao
 # conseguir nao pode derrubar a ponte -- por isso o try vazio.
@@ -122,34 +136,84 @@ function NumeroDaPorta([string]$nome) {
     return [int]$digitos
 }
 
-function Enumerar() {
-    $nomes = @()
-    try { $nomes = @([System.IO.Ports.SerialPort]::GetPortNames()) } catch { }
-    $nomes = @($nomes | Where-Object { $_ } | ForEach-Object { Normalizar $_ } | Sort-Object -Unique)
+# TRES FONTES, E NAO UMA -- E ESTE E O CONSERTO DO "FUNCIONA NO MEU PC".
+#
+# A lista de portas vinha SO do `[SerialPort]::GetPortNames()`. Ele le uma
+# chave do registro, e quando essa chave nao tem a porta -- driver CH340
+# instalado por cima de outro, porta que o Windows enumerou de um jeito
+# antigo, perfil de usuario sem permissao de leitura ali -- ele devolve
+# VAZIO. Vazio sem erro: nenhuma excecao, nenhuma pista. O jogo recebia
+# "#PORTAS," sem nada, concluia que nao havia porta e ficava
+# "PROCURANDO ARDUINO..." para sempre, com a placa espetada e falando.
+#
+# E POR ISSO O DIAGNOSTICO NAO BATE ENTRE DOIS PCs: nao e a placa que
+# muda, e QUEM SABE DA PORTA que muda. Num PC as tres fontes concordam;
+# noutro, duas estao cegas e a terceira sabe.
+#
+# Agora sao tres, e a lista e a UNIAO delas:
+#   1. GetPortNames()               -- o caminho normal, quando funciona
+#   2. HKLM\HARDWARE\DEVICEMAP\SERIALCOMM -- o registro cru, direto
+#   3. Win32_SerialPort / Win32_PnPEntity   -- o gerenciador de dispositivos
+# Uma fonte cega nao apaga o que as outras acharam. Para uma porta ser
+# ignorada agora, as tres precisam nao a conhecer -- e mesmo aí sobra a
+# varredura cega do lado do jogo.
+# TRES FONTES, E NAO UMA -- E ESTE E O CONSERTO DO "FUNCIONA NO MEU PC".
+#
+# A lista de portas vinha SO do `[SerialPort]::GetPortNames()`. Ele le uma
+# chave do registro, e quando essa chave nao tem a porta -- driver CH340
+# instalado por cima de outro, porta enumerada de um jeito antigo, perfil
+# de usuario sem permissao de leitura ali -- ele devolve VAZIO. Vazio sem
+# erro: nenhuma excecao, nenhuma pista. O jogo recebia "#PORTAS," sem
+# nada, concluia que nao havia porta e ficava "PROCURANDO ARDUINO..."
+# para sempre, com a placa espetada e falando.
+#
+# E POR ISSO O DIAGNOSTICO NAO BATE ENTRE DOIS PCs: nao e a placa que
+# muda, e QUEM SABE DA PORTA. Num PC as tres fontes concordam; noutro,
+# duas estao cegas e a terceira sabe. A lista e a UNIAO das tres, e uma
+# fonte cega nao apaga o que as outras acharam:
+#   1. GetPortNames()                        -- o caminho normal
+#   2. HKLM\HARDWARE\DEVICEMAP\SERIALCOMM   -- o registro cru
+#   3. Win32_PnPEntity                       -- o gerenciador de dispositivos
+# Para uma porta ser ignorada agora, as tres precisam nao a conhecer -- e
+# mesmo ai sobra a varredura cega do lado do jogo.
 
-    # A LISTA CRUA E BARATA; DESCOBRIR O FABRICANTE E QUE E CARO.
-    #
-    # Ler os nomes das portas e uma consulta ao registro, coisa de
-    # milissegundos. Perguntar ao gerenciador de dispositivos QUEM e cada
-    # uma varre uns mil e quinhentos dispositivos e leva de um a tres
-    # segundos. Como a procura se repete a cada tres segundos enquanto o
-    # Arduino nao esta espetado, fazer a parte cara toda vez seria roubar
-    # do jogo o processador que ele usa para animar -- numa maquina que ja
-    # esta em 49 quadros por segundo.
-    #
-    # Entao a parte cara so roda quando a lista crua MUDA, que e quando a
-    # resposta pode ter mudado. Placa espetada no meio do expediente
-    # continua sendo encontrada na hora.
-    if ($nomes.Count -eq 0) {
-        $script:nomesCrus = @()
-        return @()
-    }
-    if (($nomes -join ",") -eq ($script:nomesCrus -join ",")) {
-        return $script:listaConhecida
-    }
-    $script:nomesCrus = $nomes
+# AS DUAS FONTES BARATAS: milissegundos, podem rodar sempre.
+function NomesBaratos() {
+    $achados = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($n in @([System.IO.Ports.SerialPort]::GetPortNames())) {
+            if ($n) { $achados.Add((Normalizar $n)) }
+        }
+    } catch { }
+    # O registro cru: a mesma informacao que o GetPortNames le, mas sem a
+    # camada do .NET no meio -- e ha maquina em que uma funciona e a outra
+    # nao.
+    try {
+        $chave = Get-ItemProperty -Path "HKLM:\HARDWARE\DEVICEMAP\SERIALCOMM" -ErrorAction Stop
+        foreach ($prop in $chave.PSObject.Properties) {
+            if ($prop.Name -like "PS*") { continue }
+            $valor = ([string]$prop.Value) -replace '^\\\\\.\\', ''
+            if ($valor -match '^(?i)com\d+$') { $achados.Add($valor.ToUpper()) }
+        }
+    } catch { }
+    return @($achados | Where-Object { $_ } | Sort-Object -Unique)
+}
 
-    $suspeitas = @{}
+# A FONTE CARA: o gerenciador de dispositivos. Varre uns mil e quinhentos
+# dispositivos e leva de um a tres segundos num PC bom, mais num PC de
+# gabinete -- e o laco desta ponte e o mesmo que le a placa, entao cada
+# consulta e um tempo em que a placa fala e ninguem ouve. Por isso ela e
+# racionada: roda quando a lista barata MUDA (a resposta pode ter mudado)
+# e, quando a lista barata esta vazia, de seis em seis segundos, porque ai
+# ela e a unica que ainda pode saber da porta.
+#
+# Ela serve duas coisas de uma vez: descobre portas que as baratas nao
+# viram, e diz QUEM e cada porta, que e o que monta a fila de prioridade.
+$script:mapaPnp = @{}
+$script:pnpEm = [DateTime]::MinValue
+
+function ConsultarPnp() {
+    $mapa = @{}
     try {
         $itens = $null
         if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) {
@@ -163,15 +227,39 @@ function Enumerar() {
             $rotulo = [string]$it.Name
             if ($rotulo -notmatch "\((COM\d+)\)") { continue }
             $qual = $matches[1].ToUpper()
-            $texto = ($rotulo + " " + [string]$it.PNPDeviceID).ToUpper()
-            foreach ($m in $MARCAS) {
-                if ($texto.Contains($m)) { $suspeitas[$qual] = $true; break }
-            }
+            $mapa[$qual] = ($rotulo + " " + [string]$it.PNPDeviceID).ToUpper()
         }
     } catch { }
+    $script:mapaPnp = $mapa
+    $script:pnpEm = Get-Date
+}
 
-    $frente = @($nomes | Where-Object { $suspeitas.ContainsKey($_) } | Sort-Object { NumeroDaPorta $_ })
-    $fundo  = @($nomes | Where-Object { -not $suspeitas.ContainsKey($_) } | Sort-Object { NumeroDaPorta $_ })
+function ChiaAArduino([string]$texto) {
+    if (-not $texto) { return $false }
+    foreach ($m in $MARCAS) {
+        if ($texto.Contains($m)) { return $true }
+    }
+    return $false
+}
+
+function Enumerar() {
+    $baratos = @(NomesBaratos)
+    $mudou = (($baratos -join ",") -ne ($script:nomesCrus -join ","))
+    $script:nomesCrus = $baratos
+    # Racionamento da consulta cara -- ver o comentario de `ConsultarPnp`.
+    $vencido = ((Get-Date) - $script:pnpEm).TotalSeconds -ge 6
+    if ($mudou -or ($baratos.Count -eq 0 -and $vencido) -or $script:pnpEm -eq [DateTime]::MinValue) {
+        ConsultarPnp
+    }
+
+    $todos = New-Object System.Collections.Generic.List[string]
+    foreach ($n in $baratos) { $todos.Add($n) }
+    foreach ($n in $script:mapaPnp.Keys) { $todos.Add([string]$n) }
+    $nomes = @($todos | Where-Object { $_ } | Sort-Object -Unique)
+    if ($nomes.Count -eq 0) { return @() }
+
+    $frente = @($nomes | Where-Object { ChiaAArduino ([string]$script:mapaPnp[$_]) } | Sort-Object { NumeroDaPorta $_ })
+    $fundo  = @($nomes | Where-Object { -not (ChiaAArduino ([string]$script:mapaPnp[$_])) } | Sort-Object { NumeroDaPorta $_ })
     return @($frente + $fundo)
 }
 
@@ -182,6 +270,24 @@ function AnunciarPortas([bool]$sempre) {
     $script:listaConhecida = $lista
     if ($mudou -or $sempre) {
         Dizer ("#PORTAS," + ($lista -join ","))
+    }
+}
+
+# A PRIMEIRA LISTA NAO PODE ESPERAR PELA PARTE CARA.
+#
+# `Enumerar` faz a classificacao por fabricante, e essa consulta ao
+# gerenciador de dispositivos varre uns mil e quinhentos dispositivos: de
+# um a tres segundos num PC bom, mais de dez num PC de gabinete. Durante
+# esse tempo o jogo nao tinha lista NENHUMA e mostrava
+# "PROCURANDO ARDUINO..." -- que e exatamente a queixa. Entao a lista
+# barata sai na frente, na hora, e a classificada sai depois por cima. O
+# jogo ja pode estar tentando a porta certa enquanto o Windows ainda
+# responde quem ela e.
+function AnunciarDepressa() {
+    $cru = @()
+    try { $cru = @([System.IO.Ports.SerialPort]::GetPortNames() | Where-Object { $_ } | ForEach-Object { Normalizar $_ } | Sort-Object -Unique) } catch { }
+    if ($cru.Count -gt 0) {
+        Dizer ("#PORTAS," + ($cru -join ","))
     }
 }
 
@@ -220,7 +326,24 @@ function Abrir([string]$nome, [int]$velocidade) {
         # ANTES do Open(), o erro derruba a abertura inteira e a porta
         # boa e descartada como se nao existisse; feito depois e dentro do
         # try, a porta abre e segue funcionando sem o reset.
+        # E O RESET PRECISA DE UMA BORDA, nao de um estado.
+        #
+        # Punha DTR e RTS em `$true` e pronto. Funciona quando o driver
+        # abriu a porta com eles em baixo -- que e o padrao do .NET e o
+        # caso do PC de quem escreveu isto. Mas ha driver (CH340 generico,
+        # e as portas que passam por concentrador USB) que ja entrega a
+        # porta com DTR EM ALTA: pôr em alta o que ja esta em alta nao
+        # move linha nenhuma, a placa nao reinicia, o `READY` nunca sai, e
+        # o jogo descarta a porta CERTA como muda. Mesma placa, mesmo
+        # cabo, mesmo firmware -- e um PC funciona e o outro nao.
+        #
+        # Baixar e subir garante o degrau que reinicia o Arduino em
+        # qualquer driver. Os 60 ms sao o tempo de o capacitor de 100 nF
+        # do circuito de reset da placa ver o pulso.
         try {
+            $p.DtrEnable = $false
+            $p.RtsEnable = $false
+            Start-Sleep -Milliseconds 60
             $p.DtrEnable = $true
             $p.RtsEnable = $true
         } catch { }
@@ -252,6 +375,7 @@ function Executar([string]$linha) {
     $campos = $linha.Substring(1).Split(",")
     switch ($campos[0].ToUpper()) {
         "LISTAR" { AnunciarPortas $true }
+        "PORTAS" { AnunciarPortas $true }
         "ABRIR"  {
             $nome = ""
             if ($campos.Count -gt 1) { $nome = Normalizar $campos[1] }
@@ -268,14 +392,17 @@ function Executar([string]$linha) {
 # ----------------------------------------------------------------------
 #  LACO PRINCIPAL
 # ----------------------------------------------------------------------
-Dizer "#PONTE,V1,windows"
-
 $entrada = [Console]::OpenStandardInput()
 $balde = New-Object byte[] 8192
 $acumulado = ""
 $pendente = $entrada.BeginRead($balde, 0, $balde.Length, $null, $null)
 
-if ($Porta -ne "") { Abrir (Normalizar $Porta) $Baud } else { AnunciarPortas $true }
+if ($Porta -ne "") {
+    Abrir (Normalizar $Porta) $Baud
+} else {
+    AnunciarDepressa
+    AnunciarPortas $true
+}
 
 while ($true) {
 

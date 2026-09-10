@@ -276,7 +276,10 @@ estabilizada, aterramento correto e cabo de sinal blindado.
 2. Abra `project.godot` no Godot 4.4 ou mais recente (a extensão serial
    `gdserial` exige 4.4).
 3. Execute o projeto e pressione `F9`.
-4. Escolha a porta serial e pressione **RECONECTAR**.
+4. **Não escolha porta nenhuma** — deixe em `AUTO`. O jogo varre as
+   portas anunciadas pelo sistema, e depois `COM1`…`COM32` uma por uma,
+   até a placa responder. Fixar uma porta à mão só faz sentido para
+   depurar, e a porta certa num PC é a errada no outro.
 5. Balance o saco: a linha de diagnóstico deve mostrar telemetria.
 
 Sem a extensão serial, ou sem Arduino, o jogo continua funcionando em
@@ -382,6 +385,20 @@ de mexer no traçado.
 O preset já está incluído. No Godot, instale os templates de exportação e
 use **Projeto → Exportar → Windows Desktop**. O executável será criado em
 `build/PunchChallenge.exe` com o pacote incorporado.
+
+**Leve a pasta inteira para a outra máquina, não só o `.exe`.** O pacote
+do jogo vai dentro do executável, mas a extensão serial `gdserial.dll`
+não pode ir: uma biblioteca nativa não roda de dentro de um `.pck`, e o
+Godot a exporta **ao lado** do executável. Copiando só o `.exe`, a
+extensão fica para trás — o jogo continua funcionando (a ponte assume),
+mas pelo caminho lento.
+
+Pela mesma razão vale instalar, uma vez por máquina, o **Microsoft
+Visual C++ 2015-2022 Redistributable (x64)**: o `gdserial.dll` depende
+dele (`VCRUNTIME140.dll`) e o Windows limpo não o traz. Sem ele o
+Windows recusa a extensão em silêncio — é a causa número um de
+"funciona no meu PC e não no outro". Confira com `where VCRUNTIME140.dll`
+num terminal da máquina; nada listado quer dizer que falta.
 
 ## Refazer o ícone do aplicativo
 

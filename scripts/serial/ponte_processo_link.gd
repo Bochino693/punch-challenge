@@ -34,6 +34,11 @@ const CAMINHO_UNIX := "res://tools/ponte_serial.sh"
 ## que ja chegou. O jogo nunca espera.
 var _thread: Thread = null
 var _tranca := Mutex.new()
+## TRANCA SEPARADA PARA ESCREVER. Antes escrever no cano e empilhar o que
+## chegou disputavam a MESMA tranca -- e a thread leitora, que empilha em
+## rajada quando a placa fala, fazia o jogo esperar para mandar um LEDS.
+## Sao duas coisas diferentes e nao ha razao para uma segurar a outra.
+var _tranca_escrita := Mutex.new()
 var _recebidas: Array[String] = []
 var _parar := false
 
@@ -45,14 +50,61 @@ var _porta := ""
 var _abrindo := ""
 var _ultima_abertura_ms := -100000
 var _proxima_subida_ms := 0
+var _proxima_listagem_ms := 0
 var _falha := ""
 var _sistema := ""
 var _codificado := false
 var _prazo_da_apresentacao_ms := 0
+## Quando o ajudante disse alguma coisa pela ultima vez. Ver o vigia de
+## silencio em `poll()`.
+var _ultima_linha_ms := 0
+## A GERACAO DO AJUDANTE QUE ESTA DE PE.
+##
+## AQUI ESTAVA O LACO QUE MATAVA A PONTE PARA SEMPRE. Ao derrubar o
+## ajudante, a thread leitora empilha um `#MORREU` de despedida -- e a
+## fila NAO era limpa. O `#MORREU` do ajudante VELHO sobrava na fila e
+## era digerido depois, quando o ajudante NOVO ja estava de pe: o jogo
+## matava o recem-nascido, subia outro, e o `#MORREU` desse matava o
+## seguinte. A ponte nunca chegava a dizer a primeira palavra, e na tela
+## ficava "PROCURANDO ARDUINO..." a noite inteira.
+##
+## Agora cada ajudante nasce com um numero, a despedida vem assinada, e
+## despedida de ajudante velho nao mata ajudante novo.
+var _geracao := 0
+## Quantas vezes o ajudante teve de ser ressuscitado. A Central mostra:
+## muitas religadas seguidas e cabo ruim ou antivirus no caminho.
+var _religadas := 0
+## Ja funcionou alguma vez nesta sessao? Um ajudante que JA falou merece
+## paciencia infinita; um que nunca falou merece a troca de receita.
+var _ja_falou := false
 
 const ESPERA_ENTRE_ABERTURAS_MS := 700
-const ESPERA_ENTRE_SUBIDAS_MS := 4000
-const ESPERA_DA_APRESENTACAO_MS := 6000
+const ESPERA_ENTRE_SUBIDAS_MS := 2500
+## SEIS SEGUNDOS ERAM POUCOS, e o preco de errar era a maquina morta.
+##
+## O prazo existe para trocar de receita quando a politica do Windows
+## recusa arquivos .ps1 sem matar o processo. Mas ele tambem estourava em
+## maquina LENTA e em maquina com antivirus: a primeira execucao de um
+## .ps1 recem-escrito no AppData e escaneada, e o escaneamento sozinho
+## passa de seis segundos num PC modesto. O jogo trocava de receita no
+## meio de um ajudante que estava para falar, e recomecava -- de novo e de
+## novo, sempre a seis segundos de funcionar.
+const ESPERA_DA_APRESENTACAO_MS := 12000
+## De quanto em quanto a ponte pede a lista de portas de novo enquanto
+## nenhuma esta aberta.
+##
+## PORQUE A LISTA NAO SE ATUALIZAVA SOZINHA. O ajudante do Unix so
+## enumera quando alguem manda `@LISTAR`, e o jogo mandava UMA vez, na
+## apresentacao. Arduino espetado depois de o jogo abrir -- que e o caso
+## normal de quem liga a maquina antes de conferir o cabo -- nunca
+## aparecia na lista, e a busca "nunca terminava" porque nao havia mais
+## nenhuma busca acontecendo.
+const ESPERA_ENTRE_LISTAGENS_MS := 2000
+## Silencio de um ajudante VIVO que passa disto e ajudante travado. O
+## numero e folgado de proposito: enquanto nenhuma porta esta aberta o
+## jogo pede a lista a cada dois segundos, entao vinte segundos sem uma
+## palavra sao dez pedidos sem resposta.
+const ESPERA_ATE_DESCONFIAR_MS := 20000
 
 func _init() -> void:
 	_sistema = OS.get_name()
@@ -129,15 +181,33 @@ func _programa_e_argumentos() -> Array:
 		# preco de errar e a maquina inteira muda, a lista tem o caminho
 		# absoluto do Windows e ainda o PowerShell 7, que algumas maquinas
 		# tem no lugar do antigo.
-		return [bandeiras, [
-			"powershell.exe",
-			"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
-			"pwsh.exe",
-		]]
+		return [bandeiras, _candidatos_de_powershell()]
 	var script_unix := _desembrulhar(CAMINHO_UNIX, "ponte_serial.sh")
 	if script_unix.is_empty():
 		return []
 	return [[script_unix], ["/bin/sh"]]
+
+## OS LUGARES ONDE O POWERSHELL PODE ESTAR, com o SysNative na frente do
+## System32 por um motivo especifico: num jogo de 32 bits rodando em
+## Windows de 64 bits, `C:/Windows/System32` e redirecionado para o
+## SysWOW64, e o PowerShell de 32 bits que mora la nao enxerga as mesmas
+## portas COM que o de 64 enxerga em algumas imagens do Windows. O
+## caminho `Sysnative` fura o redirecionamento e chega no PowerShell
+## certo. Em processo de 64 bits ele simplesmente nao existe, e a lista
+## segue para o seguinte -- custo zero.
+static func _candidatos_de_powershell() -> Array:
+	var raiz := OS.get_environment("SystemRoot")
+	if raiz.is_empty():
+		raiz = "C:/Windows"
+	raiz = raiz.replace("\\", "/").rstrip("/")
+	return [
+		"powershell.exe",
+		"%s/Sysnative/WindowsPowerShell/v1.0/powershell.exe" % raiz,
+		"%s/System32/WindowsPowerShell/v1.0/powershell.exe" % raiz,
+		"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+		"pwsh.exe",
+		"C:/Program Files/PowerShell/7/pwsh.exe",
+	]
 
 ## QUANDO A POLITICA DA MAQUINA PROIBE ARQUIVOS .ps1.
 ##
@@ -174,7 +244,15 @@ static func comando_codificado() -> String:
 	entrada.close()
 	if texto.is_empty():
 		return ""
-	var apertado := texto.to_utf8_buffer().compress(FileAccess.COMPRESSION_GZIP)
+	# OS COMENTARIOS FICAM NO ARQUIVO, E NAO NA LINHA DE COMANDO.
+	#
+	# O script e mais comentario do que codigo -- de proposito, porque o
+	# proximo a mexer nele estara com uma maquina quebrada na frente. Mas
+	# na linha de comando do Windows cabem 32767 caracteres, e cada
+	# comentario gasta desse teto. Levar comentario para dentro do
+	# `-EncodedCommand` e gastar o unico recurso escasso deste caminho com
+	# a unica parte que ninguem vai ler ali.
+	var apertado := _sem_comentarios(texto).to_utf8_buffer().compress(FileAccess.COMPRESSION_GZIP)
 	var carga := Marshalls.raw_to_base64(apertado)
 	var envelope := "\n".join([
 		"$b=[Convert]::FromBase64String('%s')" % carga,
@@ -185,6 +263,20 @@ static func comando_codificado() -> String:
 	])
 	return Marshalls.raw_to_base64(envelope.to_utf16_buffer())
 
+## Tira as linhas que sao SO comentario e as linhas vazias. Uma linha com
+## codigo seguido de comentario fica inteira: cortar ali exigiria saber
+## onde comeca uma string do PowerShell, e errar isso quebraria o script
+## no caminho que so e usado quando o outro ja falhou -- o pior lugar do
+## mundo para um defeito.
+static func _sem_comentarios(texto: String) -> String:
+	var linhas := PackedStringArray()
+	for linha in texto.split("\n"):
+		var limpa := linha.strip_edges()
+		if limpa.is_empty() or limpa.begins_with("#"):
+			continue
+		linhas.append(linha)
+	return "\n".join(linhas)
+
 func _receita_codificada() -> Array:
 	var base := comando_codificado()
 	if base.is_empty():
@@ -192,11 +284,7 @@ func _receita_codificada() -> Array:
 	return [[
 		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
 		"-WindowStyle", "Hidden", "-EncodedCommand", base,
-	], [
-		"powershell.exe",
-		"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
-		"pwsh.exe",
-	]]
+	], _candidatos_de_powershell()]
 
 func _subir() -> void:
 	_falha = ""
@@ -209,38 +297,74 @@ func _subir() -> void:
 		argumentos.append(str(pedaco))
 	var canos := {}
 	var ultimo := ""
+	var recusados: Array[String] = []
 	for candidato in receita[1]:
 		ultimo = str(candidato)
 		canos = OS.execute_with_pipe(ultimo, argumentos)
 		if not canos.is_empty() and canos.has("stdio"):
 			break
 		canos = {}
+		recusados.append(ultimo.get_file())
 	if canos.is_empty():
-		_falha = "o sistema recusou abrir %s" % ultimo
+		_falha = "o sistema recusou abrir %s" % ", ".join(recusados)
 		return
 	_cano = canos["stdio"]
 	_pid = int(canos.get("pid", -1))
 	_prazo_da_apresentacao_ms = Time.get_ticks_msec() + ESPERA_DA_APRESENTACAO_MS
+	_ultima_linha_ms = Time.get_ticks_msec()
+	_proxima_listagem_ms = 0
 	_parar = false
+	_geracao += 1
+	var minha := _geracao
 	_thread = Thread.new()
-	_thread.start(_laco_leitor)
+	_thread.start(_laco_leitor.bind(minha))
 
-func _laco_leitor() -> void:
+## O CANO NAO AVISA QUANDO O AJUDANTE MORRE -- e este e o defeito mais
+## fundo de todos, porque ele fazia a ponte ficar de pe MENTINDO.
+##
+## O laco confiava em `eof_reached()`. Medido: depois de o processo filho
+## morrer, o cano do Godot devolve `eof_reached() == false` PARA SEMPRE, e
+## `get_line()` passa a voltar vazio NA HORA, com `get_error()` em
+## ERR_FILE_CANT_READ. Duas consequencias, as duas graves:
+##
+##  1. A condicao de parada nunca acontecia. A thread nunca terminava, o
+##     `#MORREU` nunca era empilhado, e a ponte seguia jurando estar viva
+##     -- `available()` verdadeiro, `_cano` no lugar -- com o ajudante ha
+##     muito enterrado. O jogo esperava por uma placa que nao tinha mais
+##     ninguem do outro lado para ouvir, e a tela ficava
+##     "PROCURANDO ARDUINO..." ate alguem reiniciar a maquina. Nenhuma
+##     ressurreicao acontecia porque a morte nunca era percebida.
+##
+##  2. `get_line()` voltando vazio na hora vira um laco fechado sem
+##     espera nenhuma: a thread passa a girar em vazio queimando um
+##     nucleo inteiro. Numa maquina de gabinete isso e o jogo perdendo
+##     quadros "sem motivo" pelo resto da noite.
+##
+## Agora a parada olha o ERRO, e nao so o fim-de-arquivo. E `poll()`
+## confere o processo por fora, com `OS.is_process_running`, que e a
+## unica autoridade que nao depende de o cano se comportar.
+func _laco_leitor(geracao: int) -> void:
 	while not _parar:
 		var cano := _cano
 		if cano == null:
 			break
 		var linha := cano.get_line()
-		if linha.is_empty() and cano.eof_reached():
-			break
-		linha = linha.strip_edges()
-		if linha.is_empty():
+		if not linha.is_empty():
+			linha = linha.strip_edges()
+			if not linha.is_empty():
+				_tranca.lock()
+				_recebidas.append(linha)
+				_tranca.unlock()
 			continue
-		_tranca.lock()
-		_recebidas.append(linha)
-		_tranca.unlock()
+		if cano.eof_reached() or cano.get_error() != OK:
+			break
+		# Linha em branco de um cano saudavel: raro, mas nao e morte.
+		# A espera existe so para nunca girar em vazio.
+		OS.delay_msec(5)
 	_tranca.lock()
-	_recebidas.append("#MORREU")
+	# A despedida vem ASSINADA: um `#MORREU` de ajudante velho chegando
+	# depois que o novo subiu nao pode derrubar o novo.
+	_recebidas.append("#MORREU,%d" % geracao)
 	_tranca.unlock()
 
 func _derrubar() -> void:
@@ -258,6 +382,12 @@ func _derrubar() -> void:
 	_apresentou = false
 	_porta = ""
 	_abrindo = ""
+	# A FILA MORRE COM O AJUDANTE. O que ele deixou pela metade nao vale
+	# nada para o proximo, e o `#MORREU` da despedida dele mataria o
+	# proximo antes de o proximo falar. Ver o comentario de `_geracao`.
+	_tranca.lock()
+	_recebidas.clear()
+	_tranca.unlock()
 
 ## FECHAR NA MAO, E NAO NO DESTRUIDOR.
 ##
@@ -277,8 +407,15 @@ func encerrar() -> void:
 #  A API QUE O JOGO USA
 # ----------------------------------------------------------------------
 
+func nome_do_caminho() -> String:
+	return SerialLink.CAMINHO_PONTE
+
 func available() -> bool:
 	return _cano != null
+
+## Quantas vezes o ajudante precisou ser ressuscitado nesta sessao.
+func religadas() -> int:
+	return _religadas
 
 ## Frase curta para a Central Tecnica dizer POR QUE nao ha Arduino.
 func motivo_da_falta() -> String:
@@ -286,7 +423,7 @@ func motivo_da_falta() -> String:
 
 func descricao() -> String:
 	if _sistema == "Windows":
-		return "ponte PowerShell"
+		return "ponte PowerShell codificada" if _codificado else "ponte PowerShell"
 	return "ponte de sistema"
 
 func list_ports() -> PackedStringArray:
@@ -309,8 +446,8 @@ func open_port(port: String, baud: int = GameDef.SERIAL_BAUD) -> bool:
 	_porta = ""
 	_escrever("@ABRIR,%s,%d" % [port, baud])
 	# Diz que sim ANTES da confirmacao: quem espera a placa se apresentar
-	# e o jogo, que ja tem tres segundos de paciencia para isso. Se a
-	# abertura falhar de verdade, `#FALHA` chega e derruba.
+	# e o jogo, que ja tem paciencia contada para isso. Se a abertura
+	# falhar de verdade, `#FALHA` chega e derruba.
 	return true
 
 func close_port() -> void:
@@ -332,12 +469,13 @@ func send_line(line: String) -> bool:
 	return _escrever(line)
 
 func _escrever(linha: String) -> bool:
-	if _cano == null:
+	var cano := _cano
+	if cano == null:
 		return false
-	_tranca.lock()
-	_cano.store_line(linha)
-	_cano.flush()
-	_tranca.unlock()
+	_tranca_escrita.lock()
+	cano.store_line(linha)
+	cano.flush()
+	_tranca_escrita.unlock()
 	return true
 
 func poll() -> void:
@@ -345,33 +483,108 @@ func poll() -> void:
 		# O ajudante caiu. Sobe de novo, com pausa, para o caso de o
 		# defeito ser permanente (PowerShell bloqueado por politica, por
 		# exemplo): insistir sem pausa vira um processo novo por quadro.
+		#
+		# ESTA E A LINHA QUE O JOGO ANTIGO NUNCA ALCANCAVA, porque so
+		# chamava `poll()` enquanto `available()` fosse verdadeiro -- e
+		# `available()` e falso exatamente aqui. Ver o comentario de
+		# `SerialLink.poll`.
 		var agora := Time.get_ticks_msec()
 		if agora >= _proxima_subida_ms:
 			_proxima_subida_ms = agora + ESPERA_ENTRE_SUBIDAS_MS
+			_religadas += 1
 			_subir()
 		return
+
+	# O QUE O AJUDANTE JA DISSE SE OUVE ANTES DE ELE SER DADO POR MORTO.
+	#
+	# A ordem aqui e uma regra, e nao um detalhe. Um ajudante que fala e
+	# morre no mesmo instante -- que e o caso do PowerShell derrubado por
+	# antivirus logo depois de se apresentar -- deixa palavras na fila. Se
+	# a constatacao da morte viesse primeiro, ela limparia a fila e essas
+	# palavras se perderiam: a lista de portas que ele alcancou a mandar,
+	# a linha da placa que estava a caminho. Digerir primeiro nao atrasa
+	# nada (a morte e constatada no mesmo quadro, logo abaixo) e nao
+	# perde nada.
+	_tranca.lock()
+	var lote := _recebidas.duplicate()
+	_recebidas.clear()
+	_tranca.unlock()
+	if not lote.is_empty():
+		_ultima_linha_ms = Time.get_ticks_msec()
+	for linha in lote:
+		_digerir(linha)
+	if _cano == null:
+		# A propria fila trazia a despedida: `_digerir` ja derrubou.
+		return
+
+	# O AJUDANTE ESTA VIVO? A PERGUNTA E FEITA AO SISTEMA, NAO AO CANO.
+	#
+	# Ver o comentario de `_laco_leitor`: o cano nao avisa a morte. Quem
+	# avisa e o sistema operacional, e a pergunta custa quase nada. Sem
+	# ela, um ajudante morto -- derrubado por antivirus, por politica, ou
+	# porque o PowerShell engasgou -- deixava a ponte "de pe" e muda para
+	# sempre, e a tela ficava "PROCURANDO ARDUINO..." a noite inteira.
+	if _pid > 0 and not OS.is_process_running(_pid):
+		var estava_em := _porta if not _porta.is_empty() else _abrindo
+		_falha = "o ajudante da ponte morreu"
+		_derrubar()
+		_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS
+		if not estava_em.is_empty():
+			closed.emit(estava_em)
+		return
+
+	# UM AJUDANTE VIVO E MUDO TAMBEM PRECISA SER TROCADO.
+	#
+	# Vivo, o processo passa na pergunta acima -- e pode estar travado do
+	# mesmo jeito: um PowerShell preso numa consulta ao gerenciador de
+	# dispositivos que nao volta, uma porta que prendeu a thread do .NET.
+	# Enquanto nenhuma porta esta aberta o jogo pede a lista de dois em
+	# dois segundos, entao silencio longo aqui nao tem explicacao inocente.
+	if _apresentou and not is_open() and _ultima_linha_ms > 0:
+		if Time.get_ticks_msec() - _ultima_linha_ms > ESPERA_ATE_DESCONFIAR_MS:
+			_falha = "o ajudante da ponte parou de responder"
+			_derrubar()
+			_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS
+			return
+
 	# UM AJUDANTE QUE SOBE E NAO FALA E PIOR DO QUE UM QUE NAO SOBE.
 	#
 	# O processo existe, o cano existe, `available()` diz que sim -- e a
 	# maquina fica muda para sempre, porque a politica da rede recusou o
 	# arquivo .ps1 sem matar o processo. Passado o prazo sem uma palavra,
 	# o jogo troca para o caminho codificado, que a politica nao alcanca.
+	#
+	# E DEPOIS VOLTA. A troca era de mao unica: uma vez no codificado,
+	# nunca mais no arquivo. Se o problema fosse do codificado (linha de
+	# comando gigante recusada por politica de auditoria, por exemplo), a
+	# ponte ficava presa no caminho ruim. Agora as duas receitas se
+	# alternam, e a maquina acaba caindo na que funciona nela.
 	if not _apresentou and Time.get_ticks_msec() > _prazo_da_apresentacao_ms:
-		if _sistema == "Windows" and not _codificado:
-			_codificado = true
-			_derrubar()
-			_subir()
-		else:
-			_falha = "a ponte subiu mas nao respondeu"
-			_derrubar()
-			_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS
+		_falha = "a ponte subiu mas nao respondeu em %d s" % (ESPERA_DA_APRESENTACAO_MS / 1000)
+		_derrubar()
+		# RECEITA QUE JA FUNCIONOU NAO SE TROCA. Se a ponte ja falou uma
+		# vez nesta sessao, a receita esta provada nesta maquina e o
+		# silencio de agora e outra coisa (o PC engasgado, o antivirus no
+		# meio de uma varredura). Trocar de receita ali seria abandonar o
+		# que funciona por causa de um tropeco.
+		if _sistema == "Windows" and not _ja_falou:
+			_codificado = not _codificado
+		_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS
 		return
-	_tranca.lock()
-	var lote := _recebidas.duplicate()
-	_recebidas.clear()
-	_tranca.unlock()
-	for linha in lote:
-		_digerir(linha)
+
+	# A LISTA DE PORTAS TEM DE CONTINUAR ACONTECENDO.
+	#
+	# Enquanto nenhuma porta esta aberta, o jogo esta procurando -- e
+	# procurar e pedir a lista de novo, nao esperar que a lista de um
+	# minuto atras mude sozinha. Sem isto, um Arduino espetado depois de
+	# o jogo abrir nunca entrava na fila (o ajudante do Unix so enumera
+	# quando mandam, e o jogo mandava UMA vez, na apresentacao). Ver
+	# `ESPERA_ENTRE_LISTAGENS_MS`.
+	if _apresentou and not is_open():
+		var agora2 := Time.get_ticks_msec()
+		if agora2 >= _proxima_listagem_ms:
+			_proxima_listagem_ms = agora2 + ESPERA_ENTRE_LISTAGENS_MS
+			_escrever("@LISTAR")
 
 func _digerir(linha: String) -> void:
 	if not linha.begins_with("#"):
@@ -382,6 +595,8 @@ func _digerir(linha: String) -> void:
 	match cabeca:
 		"PONTE":
 			_apresentou = true
+			_ja_falou = true
+			_falha = ""
 			_escrever("@LISTAR")
 		"PORTAS":
 			var achadas := PackedStringArray()
@@ -389,6 +604,16 @@ func _digerir(linha: String) -> void:
 				var nome := campos[i].strip_edges()
 				if not nome.is_empty():
 					achadas.append(nome)
+			# LISTA VAZIA NAO APAGA A LISTA BOA.
+			#
+			# Uma enumeracao que falhou no meio (o gerenciador de
+			# dispositivos ocupado, o registro momentaneamente sem
+			# resposta) devolve vazio -- e apagar a lista por causa dela
+			# joga o jogo de volta para "PROCURANDO ARDUINO..." depois de
+			# ele JA ter encontrado a porta. So uma lista vazia com a
+			# porta tambem fechada quer dizer "nao ha nada espetado".
+			if achadas.is_empty() and is_open():
+				return
 			_portas = achadas
 		"ABERTA":
 			_porta = campos[1].strip_edges() if campos.size() > 1 else _abrindo
@@ -407,6 +632,11 @@ func _digerir(linha: String) -> void:
 			_falha = campos[1].strip_edges() if campos.size() > 1 else "erro na ponte"
 		"MORREU":
 			# EOF do cano: o ajudante saiu. `poll()` sobe outro na sequencia.
+			# So a despedida da geracao QUE ESTA DE PE conta -- ver o
+			# comentario de `_geracao`.
+			var quem := int(campos[1]) if campos.size() > 1 else _geracao
+			if quem != _geracao:
+				return
 			var estava := _porta if not _porta.is_empty() else _abrindo
 			_derrubar()
 			_proxima_subida_ms = Time.get_ticks_msec() + ESPERA_ENTRE_SUBIDAS_MS

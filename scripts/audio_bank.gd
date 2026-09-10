@@ -176,9 +176,16 @@ func _ready() -> void:
 			_players[nome] = player
 		player.stream = stream
 
+## SOM PEDIDO COM O JOGO SAINDO NÃO É SOM: É UM ERRO NO CONSOLE.
+##
+## Na saída, `_exit_tree` do jogo fecha a porta serial, e fechar a porta
+## avisa quem estava ouvindo — inclusive este banco, que tenta tocar o
+## som de desconexão. Só que a essa altura os tocadores já estão saindo
+## da árvore, e o Godot recusa com um erro. Ninguém ia ouvir esse som de
+## qualquer jeito: o jogo está fechando. Quem toca é quem está de pé.
 func play(nome: String, volume_db: float = 0.0) -> void:
 	var player: AudioStreamPlayer = _players.get(nome)
-	if player != null and player.stream != null:
+	if player != null and player.stream != null and player.is_inside_tree():
 		player.volume_db = volume_db
 		player.play()
 

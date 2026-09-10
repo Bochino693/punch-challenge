@@ -205,25 +205,66 @@ botão do gabinete e olhe a linha **`Arduino (D2/D3)`**:
 | O número **sobe** | Fio, pino e placa certos. Se o crédito não entra, o problema é o modo de operação (LIVRE × 1 FICHA), não o botão. |
 | O número **não sobe** e a linha diz `CONECTADO` | O fio ou o pino. START é **D2**, CRÉDITO é **D3**, o outro lado de cada botão vai ao **GND**. |
 | Diz `SEM RESPOSTA EM COMx` | Porta errada, e o jogo já está tentando a próxima sozinho. |
-| Diz `PROCURANDO ARDUINO…` | O Windows não vê a placa: driver CH340 faltando, ou cabo USB só de carga. |
+| Diz `NÃO ABRIU EM COMx` | A porta não chegou a abrir: ou não existe, ou outro programa está com ela. O jogo passa para a próxima. |
+| Diz `PROCURANDO ARDUINO… (busca 7, nenhuma porta à vista)` | Ninguém está anunciando porta nenhuma. O número da busca subindo prova que a máquina **está** procurando. Passada a primeira volta, ela deixa de perguntar e tenta COM1 a COM32 uma por uma. |
 
 A linha **`portas vistas`**, logo abaixo, mostra todas as COM que o
-Windows anuncia. Se a do Nano não estiver ali, o problema é do driver e
-não do jogo.
+Windows anuncia. Se a do Nano não estiver ali, ainda assim o jogo vai
+achá-la na varredura cega — mas o driver CH340 continua valendo a pena
+instalar, porque com ele tudo é mais rápido.
 
-### Por que o jogo troca de porta sozinha
+### Por que o jogo procura em qualquer porta, sozinho
 
 Um PC de gabinete quase nunca tem uma porta COM só: o Windows inventa
 COM3 e COM4 para o Bluetooth, o leitor de cartão traz a dele. O jogo
 abria **a primeira da lista** e ficava esperando um `READY` que nunca
 chegava — a noite inteira, com os botões mortos.
 
-Agora a lista é uma fila, com as portas de conversor conhecido (CH340,
-FTDI, CP210x, Arduino oficial) na frente. Aberta uma porta, o jogo espera
-**três segundos** pela apresentação da placa; sem ela, fecha e vai para a
-próxima. A que responder fica.
+Hoje a busca tem quatro camadas, e cada uma cobre a falha da anterior:
 
-Para fixar uma porta à mão, use **PORTA SERIAL** na aba GOLPE.
+1. **A porta escolhida à mão**, se houver, ganha duas tentativas
+   exclusivas — mas só duas. Ver a seção seguinte.
+2. **As portas anunciadas pelo sistema**, com as de conversor conhecido
+   (CH340, FTDI, CP210x, Arduino oficial) na frente da fila.
+3. **A varredura cega**: fechada uma volta sem achar, o jogo passa a
+   tentar `COM1` … `COM32` (no Linux, `/dev/ttyACM0-7` e
+   `/dev/ttyUSB0-7`) mesmo que ninguém os tenha anunciado. Porta que não
+   existe recusa na hora, então a varredura inteira custa poucos
+   segundos.
+4. **A troca de caminho**: passada uma volta inteira e 40 s sem uma única
+   linha válida, o jogo troca a extensão nativa pela ponte do sistema (ou
+   o contrário) e recomeça. Ver "Os dois caminhos até a placa".
+
+Aberta uma porta, o jogo espera **8 segundos** pela primeira linha da
+placa — contados de quando a porta **confirmou** que abriu, e não de
+quando o jogo pediu. A diferença importa: pela ponte, entre o pedido e a
+porta aberta há um cano, um PowerShell e um driver, e num PC lento isso
+sozinho passava dos cinco segundos que a paciência antiga tinha inteira.
+A paciência acabava antes de a porta existir, e a máquina varria a lista
+sem dar a placa nenhuma chance de responder. Era este o "funciona no meu
+PC, não funciona no outro, com a mesma porta".
+
+**Qualquer linha válida serve de apresentação** — não só o `READY`. O
+`READY` sai uma vez, no arranque da placa; quando o jogo reinicia e o
+Arduino não, esse `READY` já passou há muito, e a porta certa ficava em
+"AGUARDANDO READY" para sempre com a placa despejando `TELEMETRY` e
+`PINS` quatro vezes por segundo nela. Hoje a primeira linha que o
+protocolo entender já vale por `CONECTADO`.
+
+### A porta fixada é preferência, não cadeado
+
+**PORTA SERIAL**, na aba GOLPE, fixa uma porta — e isso é gravado em
+disco, atravessando reinicializações e atualizações do jogo. Se essa
+porta estiver errada nesta máquina (um `COM5` escolhido noutro dia, num
+PC onde o Nano é `COM3`), a máquina ficava morta com a placa espetada e
+funcionando do lado.
+
+Hoje ela ganha **duas tentativas exclusivas** e depois volta para o fim
+da história: a varredura passa a incluir todas as portas, com a
+preferência ainda na frente da fila. A Central mostra o estado exato na
+linha `porta escolhida:`. Para voltar ao automático, gire a opção até
+**AUTO**, ou aperte **RECONECTAR** na aba DADOS — que refaz a escolha
+inteira do zero, caminho e tudo.
 
 ### O sketch compila sem a biblioteca das fitas
 
@@ -322,7 +363,35 @@ frequência, e a aba **DADOS** da Central separa as três:
 derrubar a máquina**. Veja a seção seguinte: hoje existe um segundo
 caminho até a placa, e ele não depende de arquivo nenhum que possa
 faltar. A Central diz qual dos dois está em uso na linha
-`caminho até a placa:`.
+`caminho até a placa:` e, logo abaixo, se a extensão carregou ou não na
+linha `extensão nativa:`.
+
+Ela não carrega por **dois** motivos, e os dois são silenciosos — o
+Windows recusa o `.dll` sem escrever nada em lugar nenhum:
+
+- **O `.dll` não viajou junto.** A `gdserial` é exportada **ao lado** do
+  executável, não dentro dele (uma biblioteca nativa não roda de dentro
+  de um `.pck`). Copiar só o `PunchChallenge.exe` para o outro PC deixa a
+  extensão para trás. **Leve a pasta inteira**, não o `.exe` sozinho.
+- **Falta o runtime do Visual C++.** Mesmo indo junto, o `gdserial.dll`
+  importa `VCRUNTIME140.dll` e o UCRT — o *Microsoft Visual C++
+  2015-2022 Redistributable (x64)*, que **não vem numa instalação limpa
+  do Windows**. No PC de quem desenvolve ele está sempre lá (o Visual
+  Studio, o Godot, meia dúzia de programas o instalam); no PC do cliente,
+  quase nunca. É a explicação mais comum para "funciona no meu PC" —
+  literalmente a mesma pasta, o mesmo cabo, a mesma placa, e um PC usa a
+  extensão e o outro não.
+
+Conferir na máquina do cliente, num terminal:
+
+```
+where VCRUNTIME140.dll
+```
+
+Nada listado quer dizer runtime ausente. Instalar o
+*VC++ 2015-2022 Redistributable x64* devolve o caminho rápido. **Nada
+disso é obrigatório**: sem a extensão o jogo funciona igual pela ponte —
+mas quem cuida da máquina precisa saber em qual dos dois ela está.
 
 Antes de exportar, `sh tools/conferir_exportacao.sh` confere que todos os
 binários declarados existem — a extensão continua sendo o caminho
@@ -385,6 +454,39 @@ Ou seja: `PING`, `CONFIG,…`, `LEDS,…`, `HIT,…`, `BUTTON,START` — todo o
 protocolo V2 desta página atravessa a ponte sem mudar uma vírgula. Quem
 está acima não sabe por qual caminho a linha veio.
 
+### O método que sempre funciona
+
+A pergunta prática — *o que eu faço para o Arduino pegar em qualquer PC?*
+— tem uma resposta curta: **nada**. O jogo faz sozinho. O que segue é o
+que ele tenta, em ordem, e por que nenhuma das etapas pode ficar presa:
+
+| Etapa | O que o jogo faz | Que falha ela cobre |
+| --- | --- | --- |
+| 1 | Extensão nativa, se carregou | o caminho rápido |
+| 2 | Ponte do sistema (PowerShell / `stty`) | `.dll` ausente, runtime do VC++ ausente, antivírus |
+| 3 | Ponte por `-EncodedCommand` | política de grupo que proíbe arquivos `.ps1` |
+| 4 | Três fontes de enumeração, em união | registro cego, driver que registrou a porta noutro lugar |
+| 5 | Varredura cega de `COM1`…`COM32` | enumeração que não devolve nada |
+| 6 | Troca de caminho a cada volta perdida | um caminho que não presta nesta máquina |
+| 7 | Ressurreição do ajudante, sem limite | ajudante morto, cabo com soluço, PowerShell derrubado |
+
+Nenhuma dessas etapas tem um estado final: se todas falharem, o ciclo
+recomeça pela primeira. **A máquina nunca desiste** — não existe mais
+combinação em que a busca "acaba" e a tela fica parada.
+
+Três coisas que o jogo **não** consegue resolver sozinho, e que valem a
+visita de quem cuida da máquina:
+
+1. **Cabo USB só de carga.** Não tem os fios de dados. Nenhum software
+   resolve; o PC nem chega a ver a placa.
+2. **Driver CH340 ausente.** Sem ele o Windows não cria porta nenhuma, e
+   nem a varredura cega tem o que abrir. Instalar o driver é de graça e
+   leva um minuto.
+3. **Alimentação.** Se o 5 V do Nano está ligado junto com o 5 V da fonte
+   das fitas, as duas fontes brigam e a placa reinicia sozinha. Num PC de
+   mesa a USB aguenta e o defeito não aparece; num notebook, não aguenta —
+   e aí é "funciona num PC e no outro não" de novo, mas por eletricidade.
+
 ### As três regras que fazem a ponte não estragar o jogo
 
 1. **Nada bloqueia.** Ler de um cano trava até a linha chegar; feito no
@@ -396,14 +498,29 @@ está acima não sabe por qual caminho a linha veio.
    e o jogo ficaria surdo por minutos. `cat` copia com `read`/`write`
    direto.
 3. **Nada insiste sem pausa.** Porta que recusa espera 0,7 s antes da
-   próxima tentativa, e ajudante que morre só é ressuscitado a cada 4 s.
-   Sem isso, uma porta ocupada viraria sessenta tentativas por segundo.
+   próxima tentativa, e ajudante que morre só é ressuscitado a cada
+   2,5 s. Sem isso, uma porta ocupada viraria sessenta tentativas por
+   segundo.
+4. **Nada desiste.** `poll()` — o batimento do backend — é chamado a cada
+   quadro **sempre**, inclusive quando o backend responde que não está
+   disponível. Era o contrário, e era fatal: a ponte responde
+   "indisponível" justamente enquanto está caída, então o batimento
+   parava no instante em que passava a ser necessário. Um ajudante que
+   caísse uma única vez nunca mais voltava.
+5. **A morte do ajudante é perguntada ao sistema, não ao cano.** Medido:
+   depois de o processo filho morrer, o cano do Godot devolve
+   `eof_reached() == false` **para sempre**, e `get_line()` passa a
+   voltar vazio na hora, com erro. Quem confiasse no fim-de-arquivo
+   nunca perceberia a morte — e ainda giraria em vazio queimando um
+   núcleo. Quem responde de verdade é `OS.is_process_running()`.
 
 ### Forçar um caminho
 
 `PUNCH_SERIAL=ponte` na variável de ambiente pula a extensão nativa mesmo
-que ela tenha carregado. Serve para comparar os dois no mesmo gabinete
-sem trocar arquivo de lugar.
+que ela tenha carregado, e `PUNCH_SERIAL=nativa` faz o contrário. Serve
+para comparar os dois no mesmo gabinete sem trocar arquivo de lugar —
+e, quando posto, ele manda: nem a troca automática de caminho o
+contraria, senão não haveria como comparar.
 
 ### Como isto é conferido
 
