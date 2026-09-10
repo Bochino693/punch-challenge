@@ -27,16 +27,17 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
 ------------------------------------------------------------------------
 
   No rodape da tela de abertura tem o carimbo da build.
-  Tem de dizer BUILD 45 ou maior.
+  Tem de dizer BUILD 46 ou maior.
 
   Se disser um numero menor, o Godot abriu outra pasta. Volte ao passo 1.
 
 
 ------------------------------------------------------------------------
-  3. AS QUATRO LINHAS QUE DIZEM TUDO
+  3. AS LINHAS QUE DIZEM TUDO
 ------------------------------------------------------------------------
 
-  Aperte F9 -> aba DADOS. Leia de cima para baixo, NESTA ORDEM:
+  Aperte F9 -> aba DADOS, secao DIAGNOSTICO DA PLACA.
+  Leia de cima para baixo, NESTA ORDEM:
 
   caminho ate a placa: extensao nativa
       ou   caminho ate a placa: ponte PowerShell
@@ -48,8 +49,38 @@ dentro de onde voce estava. Isso e normal. A pasta de dentro e o projeto.
       -- nem botao, nem credito, nem sensor.
 
   portas vistas: COM3, COM5...
-      Se disser "nenhuma", falta o driver CH340 no Windows. Clones de
-      Arduino Nano precisam dele. Procure "driver CH340" e instale.
+      Se disser "nenhuma", provavelmente falta o driver CH340 no
+      Windows -- clones de Arduino Nano precisam dele. Procure
+      "driver CH340" e instale; e de graca e leva um minuto.
+
+      MESMO ASSIM O JOGO NAO DESISTE. Passada a primeira volta sem
+      achar nada, ele para de perguntar ao Windows quais portas
+      existem e passa a tentar COM1 ate COM32 uma por uma. Se a placa
+      estiver espetada e falando, ele acha.
+
+  extensao nativa: carregada
+      ou   extensao nativa: nao carregou -- leve gdserial.dll junto...
+      A SEGUNDA NAO E DEFEITO: o jogo trabalha igual pela ponte. Mas
+      se voce quer o caminho rapido de volta, sao duas causas, as duas
+      silenciosas:
+        1. Voce copiou so o .EXE para o outro PC. O gdserial.dll fica
+           AO LADO do executavel, nao dentro dele. Leve a PASTA
+           INTEIRA.
+        2. Falta no PC o "Microsoft Visual C++ 2015-2022
+           Redistributable (x64)". Ele NAO vem no Windows limpo, e no
+           PC de quem programa esta sempre instalado -- e por isso que
+           "funciona no meu PC". Instale e a extensao passa a carregar.
+
+  busca: volta 3 - porta 7 de 34 - varredura cega LIGADA
+      E o cronometro da procura. Enquanto o numero da volta SOBE, a
+      maquina esta trabalhando. Se ele nao sobe, ai sim algo travou.
+
+  porta escolhida: automatica (varre todas)
+      E o que deve estar escrito. Se disser um nome de porta (COM5),
+      alguem fixou a porta a mao na aba GOLPE. Fixar uma porta que nao
+      existe NESTE PC era o jeito mais facil de matar a maquina.
+      Hoje ela tem duas tentativas e depois o jogo varre todas assim
+      mesmo -- mas o certo e deixar em AUTO.
 
   pinos agora: D2 START solto - D3 CREDITO solto
       APERTE O BOTAO E OLHE ESTA LINHA. Tem de mudar para APERTADO.

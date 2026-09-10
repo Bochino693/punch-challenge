@@ -13,6 +13,7 @@
 | tools/gerar_audio_arcade.py | Reproduz o banco; requer Python e NumPy somente para regenerar sons |
 | scripts/main.gd | Estados da partida, câmera, pontuação e montagem das telas |
 | tests/test_show_flow.gd | Captura antes da jogada, estados da abertura e controle dos sons |
+| tests/test_serial_teimoso.gd | A busca pelo Arduino: fila de portas, varredura cega, troca de caminho e ressurreição da ponte |
 
 O jogo não depende de Python para reproduzir áudio. A webcam no Windows usa
 a ponte Python/OpenCV já existente em tools/camera_bridge.py.
@@ -50,6 +51,8 @@ Execute com Godot 4.6:
 godot --headless --path . --editor --quit
 godot --headless --path . --script tests/test_core.gd
 godot --headless --path . --script tests/test_show_flow.gd
+godot --headless --path . --script tests/test_serial_teimoso.gd
+sh tools/conferir_ponte.sh
 ```
 
 Depois valide imagem, volume e câmera na máquina. O canvas é 1080 × 1920;

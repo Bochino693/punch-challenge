@@ -9,6 +9,9 @@ extends SerialLink
 
 var _motivo := ""
 
+func nome_do_caminho() -> String:
+	return SerialLink.CAMINHO_NENHUM
+
 func explicar(motivo: String) -> void:
 	_motivo = motivo
 
