@@ -84,6 +84,23 @@ diz qual dos dois está em uso:
 > antivírus estiver barrando, o caminho certo é tratar com quem
 > administra a máquina, não contornar.
 
+## 3b. A orientação do sensor NÃO importa mais
+
+Se você já leu em algum lugar que o sensor precisa estar montado com o
+eixo X apontando para o soco: **isso valia até a V9 e não vale mais.**
+
+A placa media um eixo só, e presumia o X. Montado de lado — que é o mais
+provável para quem usa o MPU-6050 pela primeira vez — a pancada acontecia
+no Y ou no Z, o X quase não via nada, e o golpe era **invisível**: nem
+pontuava, nem aparecia como recusa, porque o evento nunca chegava a
+existir. Da máquina só se via que "nada acontece".
+
+Agora a detecção usa a **magnitude do vetor**, que não tem orientação. Um
+soco de 12 g é um soco de 12 g em qualquer lado que o módulo esteja
+parafusado. O botão de eixo da Central virou informação (o `HIT` reporta
+qual eixo dominou a pancada) e não configuração — não há mais nada para
+acertar ali.
+
 ## 4. O sensor (MPU-6050) está pronto?
 
 Na Central, a telemetria mostra a aceleração **dinâmica** — já sem a
