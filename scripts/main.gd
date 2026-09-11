@@ -3264,11 +3264,12 @@ func _draw_score_hero() -> void:
 	)
 	if verdict_time >= 0.0:
 		_rotulo("PONTOS", 1110.0, color)
-		# A VELOCIDADE MEDIDA, ao lado dos pontos. Os pontos são uma nota
-		# que a máquina inventou a partir de uma curva ajustável; a
-		# velocidade é o que o sensor de fato viu. Quem duvida do placar
-		# ("essa máquina está roubando") tem aqui o número cru.
-		_apoio("%.1f m/s no sensor" % result_speed, 1330.0, Paleta.TINTA_FRACA)
+		# A VELOCIDADE CRUA SAIU DAQUI, e não do jogo: ela agora aparece
+		# DENTRO de cada cartão, ao lado do soco que a produziu. Repetir a
+		# do melhor soco solta no meio da tela dizia menos (não se sabe de
+		# qual dos dois é) e ocupava a linha que o veredito precisa.
+		# Quem duvida do placar continua tendo o número cru à vista — só
+		# que agora são dois, um por soco.
 		# O NOME DO NÍVEL VEM ANTES DA COLOCAÇÃO. A pessoa quer saber o
 		# que ela fez — "NOCAUTE" — e só depois onde isso a coloca. A
 		# ordem inversa transformava o veredito numa tabela.
@@ -3344,7 +3345,7 @@ const PLACAR_CORPO := 190
 ## a palavra MELHOR. É o que explica, sem texto de ajuda, por que a nota
 ## final é aquela.
 func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
-	const ALTURA := 132.0
+	const ALTURA := 140.0
 	const VAO := 24.0
 	var largura := (LARGURA_UTIL - VAO) * 0.5
 	# Qual soco vale a nota da rodada: o primeiro dos empatados, para a
@@ -3389,29 +3390,38 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 			1.0,
 			3.0 if (esperando or eh_melhor) else 2.0
 		)
-		_letreiro_centrado(
-			"SOCO %d" % (i + 1), caixa.position.y + 34.0,
-			_corpo(CORPO_APOIO), Color(cor, 0.95), fonte_texto
+		# TUDO AQUI DENTRO SE CENTRA NO CARTÃO, E NÃO NA TELA.
+		#
+		# `_letreiro_centrado` centra na LARGURA INTEIRA do visor — foi o
+		# que colocou "SOCO 2" e "2.1 m/s" no meio da tela, por cima do
+		# cartão da esquerda, em vez de dentro do seu. Para caixa, o
+		# ajudante certo é `_texto_cabendo`, que recebe x e largura.
+		var dentro := caixa.size.x - 16.0
+		var esq := caixa.position.x + 8.0
+		_texto_cabendo(
+			"SOCO %d" % (i + 1), caixa.position.y + 32.0,
+			CORPO_APOIO, Color(cor, 0.95), dentro, esq
 		)
 		if feito:
 			_texto_arcade(
-				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 96.0, 56,
-				Color.WHITE if not eh_melhor else cor, caixa.size.x, caixa.position.x
+				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 92.0, 54,
+				Color.WHITE if not eh_melhor else cor, dentro, esq
 			)
-			_letreiro_centrado(
-				"%.1f m/s" % float(socos[i]["velocidade"]), caixa.position.y + 122.0,
-				_corpo(CORPO_APOIO), Paleta.TINTA_LEVE, fonte_texto
+			_texto_cabendo(
+				"%.1f m/s" % float(socos[i]["velocidade"]), caixa.position.y + 126.0,
+				CORPO_APOIO, Paleta.TINTA_LEVE, dentro, esq
 			)
 			if eh_melhor:
-				_letreiro_centrado(
-					"MELHOR", caixa.position.y + 14.0,
-					_corpo(CORPO_APOIO), cor, fonte_texto
+				# A faixa MELHOR mora ACIMA do cartão: dentro dele ela
+				# brigaria com o rótulo do soco por 32 pixels de altura.
+				_texto_cabendo(
+					"★ MELHOR", caixa.position.y - 12.0,
+					CORPO_APOIO, cor, dentro, esq
 				)
 		else:
 			_texto_arcade(
 				"– – – –" if not esperando else "AGORA",
-				caixa.position.y + 96.0, 44, Color(cor, pulso),
-				caixa.size.x, caixa.position.x
+				caixa.position.y + 92.0, 42, Color(cor, pulso), dentro, esq
 			)
 
 func _placar(texto: String, centro: Vector2, cor: Color) -> void:
