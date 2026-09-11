@@ -244,6 +244,17 @@ var credito_gasto := false
 ## exatamente onde estava — e a segunda tentativa continua valendo a pena,
 ## porque ela pode substituir a primeira.
 const SOCOS_POR_RODADA := 2
+## QUANTO O RESULTADO DE UM SOCO FICA À VISTA ANTES DE PEDIR O PRÓXIMO.
+##
+## Contado a partir do VEREDITO, não do golpe: o placar já subiu e o nome
+## do nível já apareceu quando este relógio começa. Dois segundos e meio é
+## o tempo de ler o número e voltar a posição.
+##
+## E ele cobre, de sobra, o intervalo em que a placa ainda não aceita
+## outro golpe (1,2 s de tempo morto mais 200 ms de repouso). Isto é de
+## propósito: quando a tela diz "SOQUE", a placa já está pronta. Pedir um
+## soco que seria descartado é a pior coisa que esta máquina pode fazer.
+const ESPERA_PARA_O_PROXIMO_SOCO := 2.5
 ## Os socos desta rodada, na ordem em que aconteceram.
 ## Cada item: {"pontos": int, "velocidade": float, "simulado": bool}
 var socos: Array = []
@@ -767,11 +778,10 @@ func _process(delta: float) -> void:
 				_processar_armado(passo)
 			GameDef.State.MEASURING:
 				if state_time >= GameDef.IMPACTO_DURACAO:
-					# Ainda há soco a dar? Rearma em vez de ir ao resultado.
-					if socos.size() < SOCOS_POR_RODADA:
-						_armar_proximo_soco()
-					else:
-						_entrar_em_resultado()
+					# UM CAMINHO SÓ: todo soco vai para o resultado.
+					# Quem decide se ainda há outro é o próprio resultado,
+					# depois de mostrar este. Ver `_processar_resultado`.
+					_entrar_em_resultado()
 			GameDef.State.RESULT:
 				_processar_resultado(passo)
 	queue_redraw()
@@ -938,6 +948,15 @@ func _processar_armado(delta: float) -> void:
 ## braço e acerta de novo em menos que isso, mas o aviso na tela existe
 ## para que a pausa seja lida como parte do jogo, e não como travamento.
 func _armar_proximo_soco() -> void:
+	# O QUE O RESULTADO DEIXOU NA TELA SAI AGORA. Sem isto, o segundo soco
+	# seria pedido por cima da festa do primeiro: moldura na cor do nível,
+	# fundo tingido, contagem do placar ainda rodando.
+	sons.stop("score_loop")
+	displayed_score = 0.0
+	verdict_time = -1.0
+	result_time = 0.0
+	ranking_announced = false
+	fundo.matiz = Color(0, 0, 0, 0)
 	state = GameDef.State.ARMED
 	_iniciar_transicao()
 	state_time = 0.0
@@ -983,8 +1002,38 @@ func _fechar_rodada() -> void:
 	)
 	_salvar()
 
+## O RESULTADO É DE CADA SOCO, e não só do fim da rodada.
+##
+## Era assim: soco 1 → rearma calado → soco 2 → resultado. Quem jogava via
+## o primeiro golpe sumir num cartãozinho e a máquina pedir outro sem
+## dizer o que o primeiro valeu. O número é a razão de bater; escondê-lo
+## até o fim tira metade da graça e faz a segunda tentativa virar chute.
+##
+## Agora o caminho é UM SÓ e se repete igual para os dois socos:
+##
+##     soco → impacto → PLACAR SOBE → veredito → (próximo soco | fim)
+##
+## A única diferença entre o primeiro e o último é o que vem depois do
+## veredito: rearmar ou encerrar. Nada mais muda — mesma animação, mesma
+## contagem, mesmo som. Um caminho só é o que faz a máquina ser previsível
+## e o que impede um dos dois socos de ter um defeito que o outro não tem.
 func _entrar_em_resultado() -> void:
-	_fechar_rodada()
+	# A nota mostrada é a DESTE soco. A rodada só é fechada — ranking,
+	# estatística, disco — quando o último golpe já foi dado.
+	if socos.is_empty():
+		result_score = 0
+		result_speed = 0.0
+	else:
+		var ultimo: Dictionary = socos[socos.size() - 1]
+		result_score = int(ultimo["pontos"])
+		result_speed = float(ultimo["velocidade"])
+	if socos.size() >= SOCOS_POR_RODADA:
+		_fechar_rodada()
+	else:
+		# COLOCAÇÃO NO RANKING SÓ EXISTE NO FIM DA RODADA. Sem zerar aqui,
+		# o resultado do primeiro soco herdaria a colocação da rodada
+		# ANTERIOR e comemoraria um recorde que não aconteceu.
+		posicao_no_ranking = 0
 	sons.start_score_loop()
 	state = GameDef.State.RESULT
 	state_time = 0.0
@@ -1014,6 +1063,14 @@ func _processar_resultado(delta: float) -> void:
 			sons.play("ranking", -5.0)
 			sons.music(-24.0)
 		_marcar_atos_do_ranking()
+
+	# AINDA HÁ SOCO A DAR? O resultado deste fica à vista o tempo de ser
+	# lido, e a máquina rearma. É o mesmo caminho do último soco até aqui;
+	# só o que vem depois do veredito é diferente.
+	if socos.size() < SOCOS_POR_RODADA:
+		if verdict_time >= ESPERA_PARA_O_PROXIMO_SOCO:
+			_armar_proximo_soco()
+		return
 
 	if result_time > GameDef.RESULTADO_TIMEOUT:
 		_entrar_em_abertura()
@@ -2352,26 +2409,32 @@ func _receber_hit(msg: Dictionary) -> void:
 	if desde < TEMPO_MORTO_MS:
 		ultima_recusa = "o jogo ignorou: tempo morto (%d ms de %d)" % [desde, TEMPO_MORTO_MS]
 		return
-	# 4) O EVENTO PRECISA TER FÍSICA DE SOCO. Duração e pico de aceleração
-	#    não entram na nota — eles decidem se aquilo foi um soco.
-	# AS RECUSAS DO JOGO TAMBÉM FALAM. Elas eram anotadas só na linha de
-	# telemetria da Central — invisíveis para quem está com a máquina na
-	# frente. E são especialmente traiçoeiras porque os limiares ficam
-	# GRAVADOS NO DISCO: um `sensor_amin` de uma versão antiga sobrevive à
-	# atualização e passa a recusar, em silêncio, golpes que a placa já
-	# tinha aprovado.
-	if duracao < DURACAO_MINIMA_MS:
-		ultima_recusa = "o jogo recusou: %.0f ms (mínimo %.0f)" % [duracao, DURACAO_MINIMA_MS]
-		telemetria += "  •  recusado: curto demais"
-		if state == GameDef.State.ARMED and not central_aberta:
-			_show_notice("EVENTO CURTO DEMAIS")
-		return
-	if pico < sensor_amin:
-		ultima_recusa = "o jogo recusou: %.1f g (mínimo %.1f)" % [pico, sensor_amin]
-		telemetria += "  •  recusado: pico abaixo de %.1fg" % sensor_amin
-		if state == GameDef.State.ARMED and not central_aberta:
-			_show_notice("PICO ABAIXO DE %.1f g — AJUSTE NA CENTRAL" % sensor_amin)
-		return
+	# 4) A FÍSICA DO SOCO NÃO SE JULGA AQUI. Ver abaixo.
+	#
+	# AS TRAVAS DE FÍSICA SAÍRAM DESTE PONTO, e é isso que torna o caminho
+	# único de verdade.
+	#
+	# O jogo repetia, com números próprios, a mesma validação que o
+	# firmware já faz: duração mínima e pico mínimo. Dois juízes para o
+	# mesmo julgamento — e o segundo com valores GRAVADOS NO DISCO,
+	# portanto capazes de sobreviver a uma atualização e de discordar do
+	# primeiro para sempre.
+	#
+	# Era por aí que a máquina morria de vez: um `sensor_amin` envenenado
+	# por uma calibração ruim recusava, em silêncio, golpes que a placa
+	# tinha acabado de aprovar. Do lado de fora, "o sensor parou de
+	# funcionar" — e nenhuma reinstalação resolvia, porque o número estava
+	# no arquivo de ajustes e não no programa.
+	#
+	# Agora há um dono só para cada coisa:
+	#   A PLACA decide SE FOI UM SOCO — ela tem os 250 Hz, a linha de base
+	#   viva e a forma do impacto.
+	#   O JOGO decide SE ESTE SOCO CONTA AGORA — que é regra de jogo, não
+	#   de física.
+	#
+	# `sensor_amin` continua existindo, mas só como o que sempre deveria
+	# ter sido: um número que o jogo MANDA à placa no CONFIG, nunca um
+	# segundo filtro deste lado.
 	golpe_registrado = true
 	ultimo_golpe_ms = Time.get_ticks_msec()
 	_processar_golpe(speed, false)
@@ -3416,7 +3479,10 @@ func _draw_score_hero() -> void:
 		# OS DOIS SOCOS CONTINUAM À VISTA NO RESULTADO, com o que deu a
 		# nota marcado. É o que explica a nota final sem precisar de uma
 		# linha de texto dizendo "vale o melhor dos dois".
-		_draw_cartoes_dos_socos(1600.0, true)
+		# MELHOR só existe quando há com quem comparar. No resultado do
+		# primeiro soco a marca seria ruído: ele é o melhor porque é o
+		# único.
+		_draw_cartoes_dos_socos(1600.0, socos.size() >= SOCOS_POR_RODADA)
 
 ## O CARREGANDO: UM ANEL QUE GIRA E UMA FRASE DO QUE ESTÁ ACONTECENDO.
 ##
