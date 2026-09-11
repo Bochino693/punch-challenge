@@ -131,6 +131,7 @@ func _test_hit_so_em_armed() -> void:
 		assert(jogo.result_score == 0)
 		assert(jogo.state == estado)
 
+## UM GOLPE POR TENTATIVA (o rebote do saco não pode virar um segundo).
 func _test_um_golpe_por_rodada() -> void:
 	_armar()
 	jogo._receber_hit(_golpe(10.0))
@@ -141,12 +142,20 @@ func _test_um_golpe_por_rodada() -> void:
 	jogo.state = GameDef.State.ARMED
 	jogo._receber_hit(_golpe(14.0))
 	assert(jogo.result_score == primeiro)
-	# Evento curto demais e evento fraco demais também não entram.
-	_armar()
-	jogo._receber_hit({"speed": 12.0, "accel": 9.0, "duration_ms": 3.0, "axis": "X"})
-	assert(jogo.state == GameDef.State.ARMED)
-	jogo._receber_hit({"speed": 12.0, "accel": 0.2, "duration_ms": 45.0, "axis": "X"})
-	assert(jogo.state == GameDef.State.ARMED)
+	# QUEM JULGA A FÍSICA É A PLACA, E ESTE TESTE MUDOU POR ISSO.
+	#
+	# Aqui se exigia que o jogo recusasse um evento de 3 ms e um de 0,2 g.
+	# Ele recusava — repetindo, com números guardados no disco, a mesma
+	# validação que o firmware já faz. Dois juízes para o mesmo julgamento,
+	# e o segundo capaz de discordar do primeiro para sempre: foi assim
+	# que um `sensor_amin` envenenado por uma calibração ruim passou a
+	# recusar, em silêncio, golpes que a placa tinha aprovado.
+	#
+	# Agora o jogo confia no HIT e só decide SE ELE CONTA AGORA. Os
+	# eventos abaixo nem existem na prática: o firmware não emite HIT com
+	# menos de 14 ms nem com pico abaixo do gatilho. O que continua sendo
+	# regra do jogo é o que se testa acima — um golpe por tentativa, e o
+	# tempo morto do rebote.
 
 func _armar() -> void:
 	jogo.state = GameDef.State.ARMED

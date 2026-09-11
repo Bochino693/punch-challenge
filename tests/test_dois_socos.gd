@@ -68,14 +68,21 @@ func _rodada_nova() -> void:
 func _golpe(v: float) -> Dictionary:
 	return {"speed": v, "accel": 9.0, "duration_ms": 45.0, "axis": "X"}
 
-## Entrega um soco e deixa a máquina andar até ela decidir o que fazer.
+## Entrega um soco e deixa a máquina percorrer o caminho inteiro:
+## impacto → resultado deste soco → (rearma para o próximo | fim).
 func _socar(v: float) -> void:
 	jogo.golpe_registrado = false
 	jogo.ultimo_golpe_ms = jogo.NUNCA_MS
 	jogo.state = GameDef.State.ARMED
 	jogo._receber_hit(_golpe(v))
-	# passa o tempo do impacto, que é quando a máquina rearma ou conclui
+	# o tempo do impacto, que leva ao resultado DESTE soco
 	jogo.state_time = GameDef.IMPACTO_DURACAO + 0.01
+	jogo._process(0.02)
+	# o placar sobe e o veredito sai
+	jogo.result_time = GameDef.CONTAGEM_DURACAO + 0.01
+	jogo._process(0.02)
+	# e o resultado fica à vista até a máquina pedir o próximo
+	jogo.verdict_time = jogo.ESPERA_PARA_O_PROXIMO_SOCO + 0.01
 	jogo._process(0.02)
 
 func _test_primeiro_soco_rearma() -> void:
@@ -87,8 +94,17 @@ func _test_primeiro_soco_rearma() -> void:
 		_falhar("o primeiro soco tem de ficar guardado: %d" % jogo.socos.size())
 	jogo.state_time = GameDef.IMPACTO_DURACAO + 0.01
 	jogo._process(0.02)
+	if jogo.state != GameDef.State.RESULT:
+		_falhar("o primeiro soco tem de MOSTRAR o resultado dele (estado %d)" % jogo.state)
+	if jogo.result_score != int(jogo.socos[0]["pontos"]):
+		_falhar("o resultado mostrado tem de ser o DESTE soco: %d" % jogo.result_score)
+	# e só depois de ficar à vista é que a máquina pede o segundo
+	jogo.result_time = GameDef.CONTAGEM_DURACAO + 0.01
+	jogo._process(0.02)
+	jogo.verdict_time = jogo.ESPERA_PARA_O_PROXIMO_SOCO + 0.01
+	jogo._process(0.02)
 	if jogo.state != GameDef.State.ARMED:
-		_falhar("depois do primeiro soco a maquina REARMA, nao conclui (estado %d)" % jogo.state)
+		_falhar("passado o resultado do primeiro, a maquina REARMA (estado %d)" % jogo.state)
 
 func _test_melhor_dos_dois_vale() -> void:
 	_rodada_nova()
@@ -127,6 +143,10 @@ func _test_espera_esgotada_no_meio_nao_devolve() -> void:
 	_rodada_nova()
 	jogo._receber_hit(_golpe(2.5))
 	jogo.state_time = GameDef.IMPACTO_DURACAO + 0.01
+	jogo._process(0.02)
+	jogo.result_time = GameDef.CONTAGEM_DURACAO + 0.01
+	jogo._process(0.02)
+	jogo.verdict_time = jogo.ESPERA_PARA_O_PROXIMO_SOCO + 0.01
 	jogo._process(0.02)          # rearma para o segundo
 	var creditos_antes: int = jogo.credits
 	jogo.espera_left = 0.0

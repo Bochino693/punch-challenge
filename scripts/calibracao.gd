@@ -1,6 +1,9 @@
 class_name Calibracao
 extends RefCounted
 
+## O MAIOR GATILHO QUE AINDA DEIXA UM SOCO PASSAR. Ver `sugerir`.
+const TETO_DO_GATILHO_G := 5.0
+
 ## A CONTA DO ASSISTENTE DE CALIBRAÇÃO.
 ##
 ## Só matemática: recebe as amostras colhidas na Central e devolve os
@@ -73,7 +76,22 @@ static func sugerir(fracos: Array, fortes: Array, picos: Array, ruido: float) ->
 	return {
 		"vmin": cfg["min_speed"],
 		"vmax": cfg["max_speed"],
-		"amin": clampf(amin, 0.5, 15.0),
+		# O TETO DO GATILHO NAO PODE SER ALTO O BASTANTE PARA MATAR A MAQUINA.
+		#
+		# Era 15 g. Um soco de verdade fica entre 3 e 16 g, entao um
+		# gatilho de 15 g recusa praticamente TUDO -- e esta sugestao vai
+		# parar no disco e sobrevive a reinstalacao do jogo.
+		#
+		# E ele chegava la: `amin` sai de `ruido * 1,8`, e `ruido` e o maior
+		# pico visto no passo de REPOUSO. Bastava um soco ser contado como
+		# repouso -- que e exatamente o que acontecia com a calibracao presa
+		# ligada depois do F9 -- para o "ruido" virar 12 g e o gatilho
+		# saturar no teto. A maquina funcionava na primeira vez e nunca
+		# mais, sem nada na tela explicando.
+		#
+		# Cinco g e o limite do que ainda deixa passar um soco fraco
+		# legitimo. Acima disso a sugestao esta errada, venha de onde vier.
+		"amin": clampf(amin, 0.5, TETO_DO_GATILHO_G),
 		"ruido": ruido,
 		"fracos": fracos.size(),
 		"fortes": fortes.size(),

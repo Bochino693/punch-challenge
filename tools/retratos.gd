@@ -41,10 +41,22 @@ func run() -> void:
 	jogo.animation_time = 3.0
 	await _clicar("01_espera_primeiro")
 
-	# 2) a espera do SEGUNDO, com o primeiro ja marcado
+	# 2) O RESULTADO DO PRIMEIRO SOCO, que agora aparece sozinho
 	jogo.socos = [{"pontos": 2480, "velocidade": 2.1, "simulado": false}]
 	jogo.ultimo_soco_em = 2.7
-	await _clicar("02_espera_segundo")
+	jogo.state = GameDef.State.RESULT
+	jogo.result_score = 2480
+	jogo.result_speed = 2.1
+	jogo.displayed_score = 2480.0
+	jogo.verdict_time = 1.0
+	jogo.posicao_no_ranking = 0
+	await _clicar("02_resultado_do_primeiro")
+
+	# 3) e so entao a espera do segundo
+	jogo.state = GameDef.State.ARMED
+	jogo.verdict_time = -1.0
+	jogo.espera_left = GameDef.ESPERA_DO_SOCO
+	await _clicar("03_espera_segundo")
 
 	# 3) o resultado com os dois socos
 	jogo.socos = [
@@ -57,7 +69,7 @@ func run() -> void:
 	jogo.displayed_score = 6310.0
 	jogo.verdict_time = 1.0
 	jogo.posicao_no_ranking = 3
-	await _clicar("03_resultado")
+	await _clicar("04_resultado_final")
 
 	quit(0)
 
