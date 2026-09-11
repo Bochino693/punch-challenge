@@ -140,6 +140,12 @@ func motivo_da_falta() -> String:
 func list_ports() -> PackedStringArray:
 	return PackedStringArray()
 
+## As portas que o sistema identifica como placa (Arduino/CH340/FTDI), e
+## nao apenas como porta serial. Vazio quer dizer "nao sei", e nesse caso
+## o jogo trata todas igual. Ver `PonteProcessoLink.portas_promissoras`.
+func portas_promissoras() -> PackedStringArray:
+	return PackedStringArray()
+
 func open_port(_port: String, _baud: int = GameDef.SERIAL_BAUD) -> bool:
 	return false
 

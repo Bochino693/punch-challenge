@@ -1706,8 +1706,33 @@ func _sensor_ligado() -> bool:
 ## do pedido até a porta confirmar que abriu. `PORTA_PACIENCIA` cobra a
 ## PLACA: da porta aberta até a primeira linha válida. Nenhum dos dois
 ## desconta do outro.
-const PORTA_PACIENCIA := 8.0
-const ESPERA_DA_CONFIRMACAO := 6.0
+## QUANTO SE ESPERA UMA PORTA FALAR, e por que o numero caiu.
+##
+## Oito segundos foram escolhidos quando o firmware so se apresentava
+## DEPOIS de achar e calibrar o sensor -- dois segundos de bootloader mais
+## dois de calibracao, e margem para um PC lento. Desde a V9 o `READY` sai
+## como PRIMEIRA linha do `setup()`, antes do Wire e antes da calibracao:
+## a placa se anuncia em pouco mais de dois segundos depois do reset do
+## DTR, e a partir dai manda PINS quatro vezes por segundo.
+##
+## Quatro segundos e meio cobrem isso com o dobro de margem. E a conta que
+## importa e a da FILA: com quatro portas antes da certa, oito segundos
+## cada davam mais de meio minuto de "PROCURANDO ARDUINO..." com a placa
+## espetada e falando. Era essa a demora.
+const PORTA_PACIENCIA := 4.5
+const ESPERA_DA_CONFIRMACAO := 3.5
+## A PACIENCIA CURTA, para porta que o sistema NAO chama de placa.
+##
+## Bluetooth, leitor de cartao, porta virtual de impressora: elas ABREM
+## normalmente e nunca dizem nada, e e nelas que a espera longa era
+## desperdicada. Quando o gerenciador de dispositivos sabe distinguir (ver
+## `SerialLink.portas_promissoras`), a porta anonima ganha um segundo e
+## meio -- tempo de sobra para uma placa que ja estava ligada responder --
+## e a fila anda.
+##
+## Se o sistema NAO souber distinguir nenhuma, a lista de promissoras vem
+## vazia e TODAS ganham a paciencia inteira: "nao sei" nunca vira pressa.
+const PORTA_PACIENCIA_ANONIMA := 1.5
 ## Depois de tantas falhas seguidas, a porta fixada na Central deixa de
 ## ser exclusiva e a varredura volta a incluir todas. Ver
 ## `_fila_de_tentativas`.
@@ -1852,8 +1877,10 @@ func _tentar_conectar() -> void:
 		_fila_de_portas = _fila_de_tentativas()
 	var porta := _fila_de_portas[_porta_da_vez]
 	_porta_da_vez += 1
-	serial_status = "CONECTANDO %s (%d de %d, busca %d)" % [
-		porta, _porta_da_vez, _fila_de_portas.size(), _varreduras + 1
+	var marcada := link.portas_promissoras().has(porta)
+	serial_status = "CONECTANDO %s%s (%d de %d, busca %d)" % [
+		porta, " ✓" if marcada else "",
+		_porta_da_vez, _fila_de_portas.size(), _varreduras + 1
 	]
 	_porta_confirmada = false
 	_porta_pedida_em = animation_time
@@ -1865,6 +1892,28 @@ func _tentar_conectar() -> void:
 	else:
 		serial_status = "FALHA AO ABRIR %s" % porta
 		proxima_tentativa = animation_time + 0.8
+
+## QUANTO ESPERAR ESTA PORTA, especificamente.
+##
+## A porta que o Windows chama de Arduino/CH340/FTDI ganha a paciência
+## inteira. A que ele não sabe nomear ganha a curta — é quase sempre
+## Bluetooth ou leitor de cartão, que abre e nunca diz nada.
+##
+## E a regra de ouro: quando o sistema não sabe distinguir NENHUMA (lista
+## de promissoras vazia), todas ganham a paciência inteira. Falta de
+## informação não pode virar pressa, senão a máquina passa a descartar a
+## porta certa num PC onde a enumeração é cega — que é justamente o PC
+## onde tudo isso já é mais difícil.
+func _paciencia_da_porta() -> float:
+	if link == null:
+		return PORTA_PACIENCIA
+	var promissoras := link.portas_promissoras()
+	if promissoras.is_empty():
+		return PORTA_PACIENCIA
+	# A porta fixada pelo operador é escolha de gente: paciência inteira.
+	if not porta_configurada.is_empty() and porta_atual == porta_configurada:
+		return PORTA_PACIENCIA
+	return PORTA_PACIENCIA if promissoras.has(porta_atual) else PORTA_PACIENCIA_ANONIMA
 
 ## DESISTIR DESTA PORTA E PASSAR PARA A PRÓXIMA, num lugar só.
 ##
@@ -1929,7 +1978,7 @@ func _poll_serial(_delta: float) -> void:
 		# ajudante, o cano ou o driver. Ver `ESPERA_DA_CONFIRMACAO`.
 		_desistir_da_porta("NÃO ABRIU")
 		return
-	if _porta_confirmada and ultimo_sinal_ms < 0 and animation_time - _porta_aberta_em > PORTA_PACIENCIA:
+	if _porta_confirmada and ultimo_sinal_ms < 0 and animation_time - _porta_aberta_em > _paciencia_da_porta():
 		# CALADA DESDE QUE ABRIU: NÃO É O ENCANAMENTO. Ver o comentário de
 		# `PORTA_PACIENCIA`, acima, para o motivo do número.
 		_desistir_da_porta("SEM RESPOSTA")
@@ -3215,11 +3264,12 @@ func _draw_score_hero() -> void:
 	)
 	if verdict_time >= 0.0:
 		_rotulo("PONTOS", 1110.0, color)
-		# A VELOCIDADE MEDIDA, ao lado dos pontos. Os pontos são uma nota
-		# que a máquina inventou a partir de uma curva ajustável; a
-		# velocidade é o que o sensor de fato viu. Quem duvida do placar
-		# ("essa máquina está roubando") tem aqui o número cru.
-		_apoio("%.1f m/s no sensor" % result_speed, 1330.0, Paleta.TINTA_FRACA)
+		# A VELOCIDADE CRUA SAIU DAQUI, e não do jogo: ela agora aparece
+		# DENTRO de cada cartão, ao lado do soco que a produziu. Repetir a
+		# do melhor soco solta no meio da tela dizia menos (não se sabe de
+		# qual dos dois é) e ocupava a linha que o veredito precisa.
+		# Quem duvida do placar continua tendo o número cru à vista — só
+		# que agora são dois, um por soco.
 		# O NOME DO NÍVEL VEM ANTES DA COLOCAÇÃO. A pessoa quer saber o
 		# que ela fez — "NOCAUTE" — e só depois onde isso a coloca. A
 		# ordem inversa transformava o veredito numa tabela.
@@ -3295,7 +3345,7 @@ const PLACAR_CORPO := 190
 ## a palavra MELHOR. É o que explica, sem texto de ajuda, por que a nota
 ## final é aquela.
 func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
-	const ALTURA := 132.0
+	const ALTURA := 140.0
 	const VAO := 24.0
 	var largura := (LARGURA_UTIL - VAO) * 0.5
 	# Qual soco vale a nota da rodada: o primeiro dos empatados, para a
@@ -3340,29 +3390,38 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 			1.0,
 			3.0 if (esperando or eh_melhor) else 2.0
 		)
-		_letreiro_centrado(
-			"SOCO %d" % (i + 1), caixa.position.y + 34.0,
-			_corpo(CORPO_APOIO), Color(cor, 0.95), fonte_texto
+		# TUDO AQUI DENTRO SE CENTRA NO CARTÃO, E NÃO NA TELA.
+		#
+		# `_letreiro_centrado` centra na LARGURA INTEIRA do visor — foi o
+		# que colocou "SOCO 2" e "2.1 m/s" no meio da tela, por cima do
+		# cartão da esquerda, em vez de dentro do seu. Para caixa, o
+		# ajudante certo é `_texto_cabendo`, que recebe x e largura.
+		var dentro := caixa.size.x - 16.0
+		var esq := caixa.position.x + 8.0
+		_texto_cabendo(
+			"SOCO %d" % (i + 1), caixa.position.y + 32.0,
+			CORPO_APOIO, Color(cor, 0.95), dentro, esq
 		)
 		if feito:
 			_texto_arcade(
-				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 96.0, 56,
-				Color.WHITE if not eh_melhor else cor, caixa.size.x, caixa.position.x
+				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 92.0, 54,
+				Color.WHITE if not eh_melhor else cor, dentro, esq
 			)
-			_letreiro_centrado(
-				"%.1f m/s" % float(socos[i]["velocidade"]), caixa.position.y + 122.0,
-				_corpo(CORPO_APOIO), Paleta.TINTA_LEVE, fonte_texto
+			_texto_cabendo(
+				"%.1f m/s" % float(socos[i]["velocidade"]), caixa.position.y + 126.0,
+				CORPO_APOIO, Paleta.TINTA_LEVE, dentro, esq
 			)
 			if eh_melhor:
-				_letreiro_centrado(
-					"MELHOR", caixa.position.y + 14.0,
-					_corpo(CORPO_APOIO), cor, fonte_texto
+				# A faixa MELHOR mora ACIMA do cartão: dentro dele ela
+				# brigaria com o rótulo do soco por 32 pixels de altura.
+				_texto_cabendo(
+					"★ MELHOR", caixa.position.y - 12.0,
+					CORPO_APOIO, cor, dentro, esq
 				)
 		else:
 			_texto_arcade(
 				"– – – –" if not esperando else "AGORA",
-				caixa.position.y + 96.0, 44, Color(cor, pulso),
-				caixa.size.x, caixa.position.x
+				caixa.position.y + 92.0, 42, Color(cor, pulso), dentro, esq
 			)
 
 func _placar(texto: String, centro: Vector2, cor: Color) -> void:
