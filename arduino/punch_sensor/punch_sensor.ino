@@ -168,6 +168,7 @@ bool mpuResponde(uint8_t endereco);
 bool ligarMpu();
 void insistirNoMpu();
 void enviarPinos();
+char eixoDominante();
 void enviarStatus();
 void recusar(const __FlashStringHelper *motivo, unsigned long duracao);
 void escreverReg(uint8_t reg, uint8_t valor);
@@ -234,7 +235,7 @@ const unsigned long JANELA_MAX_MS = 160;
     Num impacto o pico chega quase junto com o inicio. Um empurrao
     forte, ainda que passe do gatilho, sobe devagar. 70 ms separa os
     dois sem apertar demais um golpe fraco e legitimo. */
-const unsigned long SUBIDA_MAX_MS = 70;
+const unsigned long SUBIDA_MAX_MS = 100;
 
 /*  A QUEDA E OBRIGATORIA.
     O evento so fecha quando o sinal volta abaixo de gatilho*FATOR_QUEDA
@@ -249,6 +250,12 @@ const uint8_t AMOSTRAS_DE_SUBIDA = 2;
 
 /*  Duracao minima de um impacto real. Abaixo disso e artefato. */
 const unsigned long DURACAO_MIN_MS = 14;
+
+/*  ACIMA DESTE PICO, A PLACA NAO DISCUTE.
+    Seis g num alvo, partindo do repouso e com a forca saindo dentro da
+    janela, e um soco. Nenhuma vibracao de gabinete, nenhum encostar e
+    nenhum empurrao chega a isso. Ver `pancada_inequivoca`. */
+const float PICO_INEQUIVOCO_G = 6.0f;
 
 /*  TEMPO MORTO, contado do FIM do golpe aceito.
     Maior que o balanco tipico do alvo. Alem dele, o proximo golpe ainda
@@ -306,7 +313,7 @@ float velocidadeIntegral = 0.0f;
 float velocidadePico = 0.0f;
 float picoGyroDps = 0.0f;
 float aAnterior = 0.0f;
-float sinalDoGolpe = 1.0f;
+float direcao[3] = {1.0f, 0.0f, 0.0f};   // direcao do impacto, congelada no gatilho
 float baseCongelada[3] = {0, 0, 0};
 uint8_t amostrasAcima = 0;
 bool saturouAccel = false;
@@ -608,8 +615,28 @@ void processarAmostra() {
       amostrasQuietas = 0;
     }
 
-    const float aEixo = din[indiceEixo()];
-    const float aAbs = fabsf(aEixo);
+    /*  A MAGNITUDE DO VETOR, E NAO UM EIXO ESCOLHIDO A MAO.
+
+        AQUI ESTAVA O DEFEITO MAIS CARO DESTE PROJETO, e o mais cruel de
+        descobrir. A deteccao media `din[eixoMedicao]` -- um unico eixo,
+        X por padrao. Isso presume que a pancada chega alinhada com o X do
+        sensor, o que so e verdade se alguem PARAFUSOU o modulo nessa
+        orientacao de proposito.
+
+        Montado de lado -- que e o mais provavel para quem esta usando o
+        MPU-6050 pela primeira vez --, a pancada acontece no Y ou no Z, o
+        eixo X quase nao ve nada, e o gatilho NUNCA dispara. Medido na
+        bancada: um soco de 12 g no eixo Z produzia zero HIT e ZERO
+        REJECT. Invisivel: nao havia sequer um evento para recusar, entao
+        nem o diagnostico de recusa aparecia. Da maquina so se via que
+        "nada acontece".
+
+        A magnitude do vetor nao tem orientacao. Seja qual for o lado em
+        que o modulo esteja parafusado, um soco de 12 g e um soco de 12 g.
+        Isso apaga uma classe inteira de erro de montagem -- e apaga
+        junto a necessidade de acertar o eixo na Central, que era um botao
+        que so servia para errar. */
+    const float aAbs = sqrtf(din[0] * din[0] + din[1] * din[1] + din[2] * din[2]);
 
     // AS TRES TRAVAS PARA COMECAR UM GOLPE, e todas precisam passar.
     const bool passouOTempoMorto = (millis() - fimDoUltimoGolpeMs) >= TEMPO_MORTO_MS;
@@ -626,7 +653,18 @@ void processarAmostra() {
       velocidadeIntegral = 0.0f;
       velocidadePico = 0.0f;
       picoGyroDps = giro;
-      sinalDoGolpe = (aEixo >= 0.0f) ? 1.0f : -1.0f;
+      /*  A DIRECAO DO IMPACTO, colhida do proprio impacto.
+
+          Integrar a magnitude seria errado: ela e sempre positiva, entao
+          a fase de FREADA somaria junto com a de aceleracao e a
+          velocidade sairia inflada. O que se quer e a componente ao longo
+          da direcao em que a pancada chegou -- que sobe, passa do pico e
+          volta, como na fisica de verdade.
+
+          Essa direcao e o vetor unitario do instante do gatilho. E o
+          mesmo calculo de antes, com o eixo escolhido AUTOMATICAMENTE e
+          por golpe, em vez de configurado a mao e igual para todos. */
+      for (uint8_t k = 0; k < 3; k++) direcao[k] = (aAbs > 0.001f) ? (din[k] / aAbs) : 0.0f;
       aAnterior = aAbs;
       caiu = false;
       for (uint8_t i = 0; i < 3; i++) baseCongelada[i] = baseAccel[i];
@@ -639,8 +677,17 @@ void processarAmostra() {
 
   // ------------------------------------------------ golpe em andamento
   // A base fica CONGELADA daqui ate o fim: o golpe nao mexe no proprio zero.
-  const float aEixoAssinado = (a[indiceEixo()] - baseCongelada[indiceEixo()]) * sinalDoGolpe;
-  const float aAbs = fabsf(aEixoAssinado);
+  // A componente ao longo da direcao do impacto, com a base congelada.
+  float dinAgora[3];
+  for (uint8_t k = 0; k < 3; k++) dinAgora[k] = a[k] - baseCongelada[k];
+  const float aEixoAssinado = dinAgora[0] * direcao[0]
+                            + dinAgora[1] * direcao[1]
+                            + dinAgora[2] * direcao[2];
+  // A forma (gatilho, pico, queda) se mede pela MAGNITUDE, que nao depende
+  // de o golpe torcer de direcao no meio do caminho.
+  const float aAbs = sqrtf(dinAgora[0] * dinAgora[0]
+                         + dinAgora[1] * dinAgora[1]
+                         + dinAgora[2] * dinAgora[2]);
 
   /*  INTEGRACAO POR TRAPEZIO.
       A soma retangular da V2 superestima sistematicamente a subida de um
@@ -708,8 +755,25 @@ void processarAmostra() {
   if (saturouGyro) Serial.println(F("SATURATION,GYRO"));
 
   // ------------------------------------------------ validacao da forma
+  /*  PANCADA INEQUIVOCA NAO PASSA POR JUIZ DE FORMA.
+
+      Um pico muito acima do gatilho, partindo de 200 ms de repouso e com
+      a forca saindo dentro da janela, ja e um soco -- e nada mais na
+      maquina produz isso. As checagens de SUBIDA e de GIRO existem para
+      separar casos DUVIDOSOS, e cobra-las de um golpe evidente so cria a
+      chance de recusar o que ninguem em sa consciencia recusaria.
+
+      Isto e o principio de que um soco e sempre muito mais forte que o
+      normal, escrito como regra: acima deste pico a placa nao discute.
+      A queda continua sendo exigida, porque e ela que separa impacto de
+      empurrao -- e empurrao sustentado com seis g nao existe. */
+  const bool pancada_inequivoca = picoG >= PICO_INEQUIVOCO_G;
+
   if (duracao < DURACAO_MIN_MS) { recusar(F("CURTO"), duracao); return; }
-  if (instanteDoPicoMs - golpeInicioMs > SUBIDA_MAX_MS) { recusar(F("LENTO"), duracao); return; }
+  if (!pancada_inequivoca && instanteDoPicoMs - golpeInicioMs > SUBIDA_MAX_MS) {
+    recusar(F("LENTO"), duracao);
+    return;
+  }
   /*  O GIROSCOPIO E DESEMPATE, E NAO VETO -- e esta foi a correcao que
       so apareceu quando a bancada ganhou um cenario de MONTAGEM RIGIDA.
 
@@ -730,7 +794,7 @@ void processarAmostra() {
       O preco de errar aqui e assimetrico, e a escolha segue isso: deixar
       passar um tranco no gabinete de vez em quando e um aborrecimento;
       recusar todo soco de uma montagem inteira mata a maquina. */
-  const bool pico_conclusivo = picoG >= accelMinG * 2.0f;
+  const bool pico_conclusivo = pancada_inequivoca || picoG >= accelMinG * 2.0f;
   if (giroMinimoDps > 0.0f && !pico_conclusivo && picoGyroDps < giroMinimoDps) {
     recusar(F("GIRO"), duracao);
     return;
@@ -769,7 +833,16 @@ void processarAmostra() {
   Serial.print(',');
   Serial.print(duracao);
   Serial.print(',');
-  Serial.println(eixoMedicao);
+  // O eixo que DOMINOU a pancada. E informacao para a Central, nao
+  // configuracao: a medida usa o vetor inteiro.
+  Serial.println(eixoDominante());
+}
+
+/*  Qual eixo levou a maior parte do impacto. So para a tela. */
+char eixoDominante() {
+  const float x = fabsf(direcao[0]), y = fabsf(direcao[1]), z = fabsf(direcao[2]);
+  if (x >= y && x >= z) return 'X';
+  return (y >= z) ? 'Y' : 'Z';
 }
 
 /*  O ESTADO CRU DOS DOIS PINOS, QUATRO VEZES POR SEGUNDO.
