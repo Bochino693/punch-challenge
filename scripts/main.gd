@@ -2119,6 +2119,27 @@ func _sem_caminho_ate_a_placa() -> void:
 	porta_atual = ""
 	_porta_confirmada = false
 	var motivo := link.motivo_da_falta()
+	# NÃO SE TROCA UM CAMINHO QUE ESTÁ SE LEVANTANDO SOZINHO.
+	#
+	# Esta é a outra metade do laço "PowerShell, depois nenhum, para
+	# sempre". A ponte ressuscita o ajudante dentro do `poll()`, com
+	# espera que dobra a cada fracasso — e trocar de caminho DERRUBA essa
+	# ponte no meio da recuperação e monta outra do zero, que recomeça a
+	# mesma espera. O supervisor que existe para salvar a máquina era o
+	# que a impedia de se salvar.
+	#
+	# E, num PC sem a extensão nativa, não há nem para onde trocar: a
+	# troca devolve a mesma ponte, com o relógio zerado. Puro atrito.
+	#
+	# Enquanto o backend disser que ainda vai tentar, o jogo espera. A
+	# frase na tela diz o que está acontecendo e, agora, o que o ajudante
+	# respondeu antes de cair.
+	if link.pode_insistir():
+		serial_status = "SUBINDO A PONTE ATÉ O ARDUINO…"
+		if not motivo.is_empty():
+			serial_status += " (%s)" % motivo
+		proxima_tentativa = animation_time + 1.0
+		return
 	serial_status = "SEM CAMINHO ATÉ O ARDUINO — PROCURANDO OUTRO…"
 	if not motivo.is_empty():
 		serial_status += " (%s)" % motivo

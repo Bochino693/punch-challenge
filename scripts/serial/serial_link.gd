@@ -90,7 +90,29 @@ static func _tentar_caminho(qual: String) -> SerialLink:
 		if qual == CAMINHO_NATIVO:
 			return null
 	var ponte := PonteProcessoLink.new()
-	if ponte.available():
+	# FICAR COM A PONTE QUE AINDA NÃO SUBIU, E ESTE É O CONSERTO DO
+	# "CONECTA E DESCONECTA SEM PARAR" NO PC DE DESTINO.
+	#
+	# Aqui se perguntava `available()` — "está de pé AGORA?" — e, na
+	# resposta negativa, a ponte era DESCARTADA e o jogo ficava com o
+	# backend vazio. Mas a ponte é feita para ressuscitar o ajudante
+	# sozinha, dentro do `poll()`: jogá-la fora é destruir exatamente a
+	# peça que ia consertar o problema.
+	#
+	# E o primeiro nascimento é o mais provável de falhar: é quando o
+	# script acaba de ser escrito no disco e o PowerShell é lançado pela
+	# primeira vez naquele PC. Num PC lento, ou com antivírus olhando um
+	# .ps1 recém-criado, isso demora mais do que o instante em que esta
+	# pergunta é feita.
+	#
+	# O resultado era o laço que se vê na máquina: backend vazio, o jogo
+	# diz "SEM CAMINHO", passados 40 s a troca de caminho monta tudo de
+	# novo, a ponte sobe, o supervisor a derruba, e recomeça. "PowerShell,
+	# depois nenhum, para sempre."
+	#
+	# Agora a ponte só é descartada quando falta a MATÉRIA-PRIMA (o script
+	# não veio na instalação). Aí não é lentidão, é ausência.
+	if ponte.available() or ponte.pode_insistir():
 		return ponte
 	_ultimo_motivo = ponte.motivo_da_falta()
 	return null
@@ -126,6 +148,10 @@ func nome_do_caminho() -> String:
 
 ## A extensão serial está presente e carregada?
 func available() -> bool:
+	return false
+
+## Este backend tenta de novo sozinho? Ver `PonteProcessoLink.pode_insistir`.
+func pode_insistir() -> bool:
 	return false
 
 ## Como o jogo está falando com a placa, em duas palavras, para a Central.

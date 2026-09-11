@@ -486,12 +486,39 @@ func nome_do_caminho() -> String:
 func available() -> bool:
 	return _cano != null
 
+## A PONTE VAI TENTAR DE NOVO SOZINHA? Ver `SerialLink._tentar_caminho`.
+##
+## `available()` responde "estou de pé AGORA", e essa é a pergunta errada
+## para decidir se vale a pena ficar com esta ponte: ela ressuscita o
+## ajudante dentro do `poll()`, e é normal que o primeiro nascimento
+## demore num PC lento ou com antivírus olhando o PowerShell.
+##
+## Só não vale insistir quando falta a matéria-prima — o script não veio
+## na instalação. Aí não é lentidão, é ausência, e nenhuma espera resolve.
+func pode_insistir() -> bool:
+	return not _programa_e_argumentos().is_empty()
+
+## A ÚLTIMA COISA QUE O AJUDANTE DISSE ANTES DE MORRER.
+##
+## O PowerShell, quando falha, ESCREVE O MOTIVO — e esse texto vem pelo
+## mesmo cano das mensagens do Arduino. Como ele não começa com `#`, ele
+## era tratado como linha da placa, não casava com nenhuma mensagem do
+## protocolo e era descartado em silêncio. A explicação do defeito
+## chegava até o jogo e era jogada fora, toda vez.
+##
+## Agora ela fica guardada, e vira o motivo que a Central mostra.
+var _ultima_palavra := ""
+
 ## Quantas vezes o ajudante precisou ser ressuscitado nesta sessao.
 func religadas() -> int:
 	return _religadas
 
 ## Frase curta para a Central Tecnica dizer POR QUE nao ha Arduino.
 func motivo_da_falta() -> String:
+	if not _ultima_palavra.is_empty():
+		if _falha.is_empty():
+			return "o ajudante disse: %s" % _ultima_palavra
+		return "%s (o ajudante disse: %s)" % [_falha, _ultima_palavra]
 	return _falha
 
 func descricao() -> String:
@@ -675,6 +702,12 @@ func poll() -> void:
 
 func _digerir(linha: String) -> void:
 	if not linha.begins_with("#"):
+		# COM PORTA ABERTA, isto é o Arduino falando. SEM porta aberta,
+		# ninguém deveria estar falando — então é o PowerShell explicando
+		# por que não vai dar certo, e essa frase é ouro. Ver
+		# `_ultima_palavra`.
+		if not is_open():
+			_ultima_palavra = linha.substr(0, 160)
 		line_received.emit(linha)
 		return
 	var campos := linha.substr(1).split(",")
