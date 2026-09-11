@@ -100,6 +100,23 @@ static var _ultimo_motivo := ""
 static func _motivo_de_nao_haver_caminho() -> String:
 	if not _ultimo_motivo.is_empty():
 		return _ultimo_motivo
+	if OS.get_name() == "Windows":
+		# AS DUAS CAUSAS DE VERDADE, num PC que não é o de desenvolvimento.
+		#
+		# 1. A extensão nativa (`gdserial.dll`) importa VCRUNTIME140.dll,
+		#    que NÃO faz parte do Windows: ela vem do "Visual C++
+		#    2015-2022 Redistributable". O PC de quem desenvolve tem
+		#    sempre, porque o Godot e outras ferramentas o instalam; um PC
+		#    limpo pode não ter, e aí o Windows nem carrega o .dll.
+		# 2. A ponte usa o PowerShell, que existe em todo Windows 10/11 —
+		#    mas uma política de rede ou de grupo pode barrar o que ela
+		#    precisa fazer.
+		#
+		# Confirmado por inspeção do próprio .dll deste repositório, e não
+		# por suposição: as importações dele são VCRUNTIME140.dll,
+		# api-ms-win-crt-*, SETUPAPI, CFGMGR32, ADVAPI32, KERNEL32.
+		return ("nem a extensão nativa nem a ponte subiram — instale o "
+			+ "Visual C++ 2015-2022 Redistributable (x64) e confira o PowerShell")
 	return "nem a extensão nativa nem a ponte subiram neste sistema"
 
 ## Qual degrau da escada é este backend. O jogo usa para pedir o OUTRO

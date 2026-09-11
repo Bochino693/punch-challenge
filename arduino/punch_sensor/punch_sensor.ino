@@ -1,7 +1,7 @@
 /*
-  PUNCH CHALLENGE -- FIRMWARE V2 (MPU-6050)
+  PUNCH CHALLENGE -- FIRMWARE V9 (MPU-6050)
   Placas: Arduino Uno / Nano (ATmega328P)
-  Sensor: MPU-6050 no barramento I2C (A4 = SDA, A5 = SCL), endereco 0x68.
+  Sensor: MPU-6050 no barramento I2C (A4 = SDA, A5 = SCL), endereco 0x68/0x69.
   Botoes: D2 = START, D3 = CREDIT (liga no GND; INPUT_PULLUP interno).
 
   PROTOCOLO SERIAL (115200 bps, uma linha por mensagem, campos com virgula):
@@ -11,29 +11,102 @@
                CONFIG,eixo,raio,vmin,amin[,vmax]
   Referencia completa: docs/PROTOCOLO_SERIAL.md no projeto Godot.
 
-  COMO MEDE: a aceleracao dinamica do eixo escolhido (bruta menos o
-  repouso calibrado) dispara a medicao quando passa de ACCEL_MIN_G.
-  Durante o golpe o firmware integra a aceleracao para obter a
-  velocidade de pico e guarda a aceleracao maxima. O giroscopio da uma
-  segunda estimativa (velocidade angular x raio do pendulo); vale a
-  maior das duas. A PONTUACAO e calculada no Godot -- aqui sai so medida.
+  ====================================================================
+  POR QUE ESTA VERSAO EXISTE
+  ====================================================================
+
+  A V2 media assim: quando |aceleracao do eixo| passava de um limiar,
+  integrava a aceleracao por ate 400 ms e mandava o resultado. Tres
+  defeitos vinham juntos, e sao exatamente os sintomas relatados:
+
+  1. SENSOR PARADO GERANDO SOCO. O "zero" de cada eixo era medido UMA VEZ
+     na calibracao e nunca mais. Se a montagem inclinasse depois -- um
+     saco que fica torto, um suporte que cede -- a gravidade se
+     reprojetava no eixo e virava "aceleracao dinamica" PERMANENTE. Pior:
+     se alguem encostasse na maquina durante os 2 segundos da calibracao
+     do arranque, o zero nascia errado e ficava errado a noite inteira.
+
+  2. DERIVA VIRANDO VELOCIDADE. Integrar por 400 ms sem ancora nenhuma:
+     um vies residual de 0,2 g dava 0,2 * 9,81 * 0,4 = 0,78 m/s do nada --
+     em cima de um piso de 0,8 m/s. Ou seja, ruido produzia "golpes" no
+     limiar.
+
+  3. REBOTE CONSUMINDO TENTATIVA. O tempo morto era de 650 ms. Um saco
+     pendurado balanca MUITO mais que isso, e cada volta do balanco
+     cruzava o limiar de novo: um soco virava dois.
+
+  E media numa escala que o jogo nao esperava. O `score_curve.gd` esta
+  escrito para um firmware que mede HONESTAMENTE (0,3 a 5,2 m/s); a V2
+  integrando por 400 ms produzia numeros varias vezes maiores. Dai
+  "todos os impactos valiam a mesma coisa": tudo saturava no teto.
+
+  ====================================================================
+  COMO A V9 MEDE
+  ====================================================================
+
+  TRES ESTADOS SEPARADOS, e nenhum deles se confunde com o outro:
+  porta aberta != placa identificada != sensor pronto e em repouso.
+
+  A) LINHA DE BASE VIVA, em vez de um zero de uma vez so.
+     Enquanto a maquina esta QUIETA, a base de cada eixo persegue a
+     leitura crua devagar (constante de tempo ~2 s). Isso absorve
+     gravidade, inclinacao da montagem e deriva termica sozinho. Quando
+     ha movimento, a base CONGELA -- um soco nunca contamina o proprio
+     zero.
+
+  B) O SOCO SO PODE COMECAR A PARTIR DO REPOUSO.
+     E preciso um periodo continuo de quietude (AMOSTRAS_DE_REPOUSO)
+     antes de qualquer golpe ser aceito. Esta unica regra mata quatro
+     coisas de uma vez: sensor parado, inclinacao sustentada, empurrao
+     lento e a oscilacao depois do primeiro golpe.
+
+  C) A FORMA DO EVENTO PRECISA SER DE SOCO.
+     Subida rapida (o pico chega em ate SUBIDA_MAX_MS), amostras
+     consecutivas acima do gatilho (um pico eletrico de uma amostra nao
+     passa), e -- obrigatorio -- A QUEDA: o sinal precisa voltar para
+     baixo do gatilho dentro da janela. Um empurrao sustentado nunca
+     fecha essa forma, e por isso NAO VIRA GOLPE. A janela e curta
+     (JANELA_MAX_MS), que e a duracao fisica de um impacto de verdade.
+
+  D) A MEDIDA E A INTEGRAL, e o giroscopio e TESTEMUNHA, nao somatorio.
+     A velocidade sai da integracao por trapezio da aceleracao dinamica,
+     com a base congelada no instante do gatilho. O giroscopio serve
+     para (i) confirmar que o alvo REALMENTE se moveu e (ii) substituir
+     a medida quando o acelerometro satura. A V2 usava o MAIOR entre os
+     dois e somava |gx|+|gy|+|gz| -- somar tres eixos so soma tres
+     ruidos, e o "maior" deixava esse ruido inflar a nota.
+
+  E) SEPARACAO EXPLICITA, que e o que o jogo pediu:
+       - VALIDAR se foi um impacto fisico  -> B e C
+       - MEDIR o impacto ja aceito          -> D
+       - CONVERTER medida em pontuacao      -> NAO ACONTECE AQUI.
+     A pontuacao e do `score_curve.gd`. Daqui sai medida em m/s, e nada
+     mais. Nao ha newtons: nao ha modelo de massa nem calibracao de
+     forca que sustente essa palavra, entao ela nao aparece.
+
+  F) CALIBRACAO QUE SE RECUSA A CALIBRAR ERRADO.
+     Ela mede a dispersao enquanto amostra. Se a maquina estava se
+     mexendo, ela NAO grava o zero novo, mantem o anterior e avisa
+     (ERROR,CALIB_MOVIMENTO). Um zero nascido torto era o defeito mais
+     caro da V2, porque estragava a noite inteira em silencio.
+
+  G) A SERIAL NUNCA FICA SURDA.
+     A calibracao da V2 bloqueava por ~2 s (400 amostras x delay(5)),
+     e nesse intervalo PING, START e CREDITO morriam -- bem no momento
+     em que o jogo acabara de abrir a porta e estava decidindo se aquela
+     COM tinha placa. Aqui a calibracao atende comandos e botoes a cada
+     volta.
 */
 
 #include <Wire.h>
 
 /*  AS FITAS SAO OPCIONAIS -- E O SKETCH COMPILA SEM ELAS.
 
-    AQUI ESTAVA O PIOR DEFEITO DESTE ARQUIVO. O `#include` da biblioteca
-    das fitas era incondicional: numa IDE sem a Adafruit NeoPixel
-    instalada, o sketch NAO COMPILA, nao ha upload, e a placa continua com
-    o firmware velho -- ou com nenhum. O sintoma nao e "as fitas nao
-    acendem": e "o Arduino nao faz nada", com START e CREDITO mortos
-    junto, porque nada chegou a ser gravado.
-
-    Uma peca de enfeite nunca pode impedir o botao de funcionar. Com o
-    `__has_include`, a placa sem a biblioteca grava, mede o soco e
-    responde aos botoes; quando a biblioteca for instalada, as fitas
-    entram sozinhas na proxima gravacao.
+    O `#include` da biblioteca das fitas e condicional de proposito: numa
+    IDE sem a Adafruit NeoPixel instalada, um include incondicional faz o
+    sketch NAO COMPILAR, nao ha upload, e a placa continua com o firmware
+    velho -- ou com nenhum. O sintoma nao e "as fitas nao acendem": e "o
+    Arduino nao faz nada", com START e CREDITO mortos junto.
 */
 #if defined(__has_include)
   #if __has_include(<Adafruit_NeoPixel.h>)
@@ -52,11 +125,6 @@
 #define LED_STATUS 13
 
 /*  AS DUAS FITAS DE LED DA MAQUINA
-    -------------------------------
-    Uma de cada lado do gabinete, subindo. Elas sao o placar que se le do
-    outro lado do salao: quem esta na fila nao consegue ler 9610 a dez
-    metros, mas ve a coluna de luz subir ate o topo e estourar em branco.
-    E o que faz a pessoa seguinte querer bater.
 
     LIGACAO (WS2812B / NeoPixel, 5 V):
       dado da fita esquerda  -> D5   (com resistor de 330 ohm em serie)
@@ -65,22 +133,12 @@
       GND da fonte           -> GND do Arduino (terra comum, obrigatorio)
 
     Trinta LEDs por fita a brilho maximo pedem quase dois amperes: tirar
-    isso do regulador do Uno queima a placa. A fonte e separada, e o unico
-    fio que volta ao Arduino e o terra.
-
-    Um capacitor de 1000 uF entre +5 V e GND da fita, junto do primeiro
-    LED, segura o pico da ligada.
-
-    BIBLIOTECA: Adafruit NeoPixel, pelo Gerenciador de Bibliotecas da
-    IDE do Arduino (Ferramentas > Gerenciar Bibliotecas > "Adafruit
-    NeoPixel"). Sem ela este sketch nao compila.
+    isso do regulador do Uno queima a placa. Um capacitor de 1000 uF
+    entre +5 V e GND da fita, junto do primeiro LED, segura o pico.
 */
 #define PINO_FITA_ESQ 5
 #define PINO_FITA_DIR 6
 #define LEDS_POR_FITA 30
-
-// Brilho maximo. 140 de 255 e o teto pratico com uma fonte de 2 A para as
-// duas fitas; 255 num salao escuro cega mais do que mostra.
 #define BRILHO_FITA 140
 
 #if TEM_FITAS
@@ -88,60 +146,38 @@ Adafruit_NeoPixel fitaEsq(LEDS_POR_FITA, PINO_FITA_ESQ, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel fitaDir(LEDS_POR_FITA, PINO_FITA_DIR, NEO_GRB + NEO_KHZ800);
 #endif
 
-// A altura da coluna, de 0 a 1. Quem manda nela e, por ordem de
-// prioridade, o jogo (comando LEDS) e, na falta dele, a propria medicao.
 float nivelFita = 0.0f;
 float nivelAlvo = 0.0f;
-unsigned long fitaComandadaMs = 0;   // ultimo LEDS recebido do jogo
+unsigned long fitaComandadaMs = 0;
 unsigned long ultimaFitaMs = 0;
-
-// Enquanto o jogo estiver mandando LEDS, a medicao local nao mexe na
-// coluna. Passados tres segundos sem comando, a placa volta a se virar
-// sozinha -- e a maquina continua tendo fita mesmo com o PC desligado.
 const unsigned long FITA_COMANDO_VALE_MS = 3000;
-const unsigned long FITA_QUADRO_MS = 25;      // 40 quadros por segundo
+const unsigned long FITA_QUADRO_MS = 25;
+float velocidadeMaxima = 5.20f;   // teto da coluna; igual ao teto do jogo
 
-// A velocidade que enche a coluna inteira. Chega pelo CONFIG; o padrao e
-// o mesmo teto de fabrica do jogo.
-float velocidadeMaxima = 16.0f;
-
-/*  PROTOTIPOS DECLARADOS A MAO.
-
-    A IDE do Arduino gera esses prototipos sozinha antes de compilar, e
-    e por isso que o sketch funciona sem eles. Mas essa geracao e um
-    truque do preprocessador da IDE: ela falha em casos que o C++ aceita
-    (funcao que devolve tipo declarado depois, macro no meio da
-    assinatura), e quando falha o erro que aparece nao tem nada a ver com
-    a causa. Declarando a mao, o arquivo compila como C++ comum -- e da
-    para conferir a compilacao fora da IDE, que foi como este arquivo
-    passou a ser verificado antes de sair daqui.
-*/
-void executarComando(String cmd);
-void configurar(const String &cmd);
-void atualizarFitas();
+// Prototipos declarados a mao: assim o arquivo compila como C++ comum e
+// da para conferir a compilacao fora da IDE do Arduino.
+void executarComando(const char *cmd);
+void configurar(const char *cmd);
 void calibrar();
 void enviarTelemetria();
 void processarAmostra();
 void processarBotoes();
 void processarComandos();
-void fecharGolpe();
 bool mpuVivo();
 bool mpuResponde(uint8_t endereco);
 bool ligarMpu();
 void insistirNoMpu();
 void enviarPinos();
 void escreverReg(uint8_t reg, uint8_t valor);
+void atualizarFitas();
+bool mpuLer(float *accelG, float *gyroDps);
 
-/*  A PLACA FUNCIONA COM OU SEM O SENSOR.
-
-    `mpuPronto` diz qual dos dois casos e o de agora -- e nenhum dos dois
-    impede botao, serial ou fita de funcionar.
-*/
+/*  A PLACA FUNCIONA COM OU SEM O SENSOR. */
 bool mpuPronto = false;
 unsigned long ultimaTentativaMpu = 0;
-uint8_t enderecoMpu = MPU_ADDR;   // 0x68 ou 0x69, decidido ao procurar
+uint8_t enderecoMpu = MPU_ADDR;
 
-// Escalas do MPU-6050 com a configuracao abaixo (+/-16 g, +/-2000  graus/s).
+// Escalas do MPU-6050 com a configuracao abaixo (+/-16 g, +/-2000 graus/s).
 const float LSB_POR_G = 2048.0f;
 const float LSB_POR_DPS = 16.4f;
 
@@ -149,32 +185,118 @@ const float LSB_POR_DPS = 16.4f;
 const unsigned long AMOSTRA_US = 4000;      // 250 Hz
 const unsigned long TELEMETRIA_MS = 250;
 
-// Reconhecimento do golpe.
-const float FIM_GOLPE_FATOR = 0.40f;        // encerra abaixo de 40% do limiar
-const unsigned long FIM_GOLPE_MS = 60;      // ...por este tempo
-const unsigned long GOLPE_MAX_MS = 400;     // golpe nao dura mais que isso
-const unsigned long COOLDOWN_MS = 650;      // um golpe por vez
+/*  ------------------------------------------------------------------
+    OS NUMEROS DA DETECCAO, e o raciocinio de cada um.
+    ------------------------------------------------------------------ */
+
+/*  O QUE CONTA COMO "QUIETO".
+    Com o MPU na escala de +/-16 g, um LSB vale 1/2048 g. O ruido tipico
+    de repouso fica bem abaixo de 0,05 g; 0,12 g da folga para vibracao
+    de salao (som alto, gente passando, ventilador do gabinete) sem
+    deixar passar movimento de verdade. */
+const float RUIDO_G = 0.12f;
+const float RUIDO_DPS = 15.0f;
+
+/*  QUANTO TEMPO DE QUIETUDE ANTES DE ACEITAR UM SOCO.
+    50 amostras a 250 Hz = 200 ms. E a regra que sozinha resolve
+    "sensor parado dispara", inclinacao sustentada, empurrao lento e
+    rebote: nenhum deles apresenta 200 ms de quietude antes do evento. */
+const uint16_t AMOSTRAS_DE_REPOUSO = 50;
+
+/*  A JANELA DO IMPACTO.
+    Um soco num saco/alvo e um evento de dezenas de milissegundos. 160 ms
+    cobre o impacto inteiro com folga; passar disso e balanco, nao soco.
+    Era 400 ms na V2 -- tempo de sobra para a deriva virar velocidade. */
+const unsigned long JANELA_MAX_MS = 160;
+
+/*  A SUBIDA PRECISA SER RAPIDA.
+    Num impacto o pico chega quase junto com o inicio. Um empurrao
+    forte, ainda que passe do gatilho, sobe devagar. 70 ms separa os
+    dois sem apertar demais um golpe fraco e legitimo. */
+const unsigned long SUBIDA_MAX_MS = 70;
+
+/*  A QUEDA E OBRIGATORIA.
+    O evento so fecha quando o sinal volta abaixo de gatilho*FATOR_QUEDA
+    e fica la por MS_DE_QUEDA. Sinal que NAO cai dentro da janela e
+    inclinacao ou empurrao sustentado, e e descartado sem virar golpe. */
+const float FATOR_QUEDA = 0.35f;
+const unsigned long MS_DE_QUEDA = 24;
+
+/*  Duas amostras consecutivas acima do gatilho. Um pico eletrico de uma
+    amostra so -- ruido de I2C, interferencia do cabo -- nao passa. */
+const uint8_t AMOSTRAS_DE_SUBIDA = 2;
+
+/*  Duracao minima de um impacto real. Abaixo disso e artefato. */
+const unsigned long DURACAO_MIN_MS = 14;
+
+/*  TEMPO MORTO, contado do FIM do golpe aceito.
+    Maior que o balanco tipico do alvo. Alem dele, o proximo golpe ainda
+    precisa dos 200 ms de repouso -- sao duas travas, nao uma. */
+const unsigned long TEMPO_MORTO_MS = 1200;
+
+/*  O giroscopio como TESTEMUNHA: o alvo precisa ter se mexido de
+    verdade. Um tranco no gabinete sacode o acelerometro sem girar o
+    pendulo. Valor baixo de proposito -- e prova de movimento, nao
+    medida de forca, e golpe fraco legitimo precisa passar. */
+const float GIRO_MINIMO_DPS = 25.0f;
+
+/*  Velocidade com que a base persegue a leitura crua ENQUANTO QUIETO.
+    0,002 por amostra a 250 Hz da constante de tempo de ~2 s: rapido o
+    bastante para acompanhar a maquina sendo reposicionada, lento o
+    bastante para nao comer o comeco de um soco. */
+const float BASE_ALFA = 0.002f;
 
 // Configuracao ativa (chega pelo comando CONFIG; padroes sensatos).
 char eixoMedicao = 'X';
 float raioMetros = 0.45f;
-float velocidadeMinima = 0.8f;   // m/s -- abaixo disso nem reporta
-float accelMinG = 3.5f;          // g -- evita balanco/toque como golpe
+/*  O PISO DE VELOCIDADE ACOMPANHA O PISO DA PONTUACAO.
+    Era 0,8 aqui contra 0,30 no `score_curve.gd`: a faixa 0,30-0,80
+    existia na curva e era jogada fora pelo firmware, ou seja, golpe
+    fraco legitimo sumia antes de chegar ao jogo. */
+float velocidadeMinima = 0.30f;
+float accelMinG = 3.00f;
 
-// Offsets de repouso, medidos na calibracao.
-float offAccel[3] = {0, 0, 0};   // em g
-float offGyro[3] = {0, 0, 0};    // em  graus/s
+// Linha de base viva (em g e em graus/s).
+float baseAccel[3] = {0, 0, 0};
+float baseGyro[3] = {0, 0, 0};
+bool baseIniciada = false;
 
 // Estado da medicao em andamento.
 bool golpeAtivo = false;
+bool baseValida = false;
 unsigned long golpeInicioMs = 0;
 unsigned long golpeAbaixoMs = 0;
+unsigned long instanteDoPicoMs = 0;
 float picoG = 0.0f;
-float velocidadeIntegral = 0.0f; // m/s, integracao da aceleracao
+float velocidadeIntegral = 0.0f;
+float velocidadePico = 0.0f;
 float picoGyroDps = 0.0f;
+float aAnterior = 0.0f;
+float sinalDoGolpe = 1.0f;
+float baseCongelada[3] = {0, 0, 0};
+uint8_t amostrasAcima = 0;
 bool saturouAccel = false;
 bool saturouGyro = false;
-unsigned long ultimoGolpeMs = 0;
+bool caiu = false;
+unsigned long fimDoUltimoGolpeMs = 0;
+
+// Contador de quietude.
+uint16_t amostrasQuietas = 0;
+/*  A TRAVA DE REPOUSO, e por que ela e um ESTADO e nao uma pergunta.
+
+    "A maquina esta em repouso?" perguntado a cada amostra nunca pode
+    autorizar um soco: a amostra que inicia o golpe ja nao esta quieta, e
+    a seguinte ja tem o contador zerado pela primeira. Medido na bancada:
+    a placa rejeitava repouso, inclinacao, empurrao e ruido -- e rejeitava
+    junto TODOS os socos de verdade.
+
+    Entao o repouso vira uma AUTORIZACAO que se conquista e se gasta: ela
+    acende depois de AMOSTRAS_DE_REPOUSO amostras quietas seguidas, e so
+    apaga quando um golpe comeca, e aceito, ou e descartado. Depois disso
+    e preciso ficar quieto de novo para reconquista-la. E isso que impede
+    o rebote do saco de virar um segundo soco: entre uma volta e outra do
+    balanco nunca ha 200 ms de quietude. */
+bool prontoParaGolpe = false;
 
 // Ultima medida, para a telemetria.
 float ultimaVelocidade = 0.0f;
@@ -182,115 +304,82 @@ float ultimoPicoG = 0.0f;
 
 unsigned long ultimaAmostraUs = 0;
 unsigned long ultimaTelemetriaMs = 0;
-String bufferSerial = "";
+
+/*  BUFFER DE COMANDO EM char[], e nao em String.
+    O `String` do Arduino fragmenta os 2 KB de RAM do ATmega328P ao
+    longo de horas de operacao. Numa maquina que fica ligada a noite
+    toda, isso termina em travamento sem causa aparente. */
+char bufferSerial[52];
+uint8_t bufferUso = 0;
 
 // ---------------------------------------------------------------- MPU-6050
 /*  POR QUE TODA CHAMADA AO Wire LEVA UM (uint8_t) NA FRENTE.
-
-    A biblioteca Wire declara DUAS versoes de `requestFrom`: uma que
-    recebe (int, int) e outra (uint8_t, uint8_t). Chamando com
-    `MPU_ADDR` -- que e um #define, ou seja, um int -- e um `(uint8_t)`
-    no segundo argumento, NENHUMA das duas e melhor que a outra: a
-    primeira precisa promover o segundo argumento, a segunda precisa
-    converter o primeiro. O compilador chama isso de ambiguidade e
-    despeja meia tela de "note: candidate 1 / candidate 2" em vermelho a
-    cada compilacao.
-
-    Nao era erro -- o sketch gravava --, mas ambiguidade e o compilador
-    dizendo que NAO SABE qual funcao voce quis. Um dia ele escolhe a
-    outra, o endereco vira 0x68 truncado de um int diferente, e o defeito
-    aparece como "o sensor parou de ler" numa maquina que estava boa.
-
-    Com os dois argumentos em uint8_t, so uma versao serve, e a
-    compilacao sai limpa.
-*/
+    A biblioteca Wire declara duas versoes de `requestFrom` -- (int,int) e
+    (uint8_t,uint8_t). Chamar com um #define (int) e um (uint8_t) deixa as
+    duas igualmente ruins e o compilador acusa ambiguidade. Convertendo
+    os dois lados, a escolha e unica. */
 void escreverReg(uint8_t reg, uint8_t valor) {
-  Wire.beginTransmission(enderecoMpu);
-  Wire.write(reg);
-  Wire.write(valor);
+  Wire.beginTransmission((uint8_t)enderecoMpu);
+  Wire.write((uint8_t)reg);
+  Wire.write((uint8_t)valor);
   Wire.endTransmission();
 }
 
-/*  PROCURA O SENSOR NOS DOIS ENDERECOS, E ACEITA QUALQUER CLONE.
-
-    Duas armadilhas moravam aqui, e as duas reprovavam modulo bom:
-
-    ENDERECO. O MPU-6050 responde em 0x68 com o pino AD0 no terra e em
-    0x69 com ele no positivo. O AD0 do GY-521 tem um resistor na placa
-    que o puxa para baixo, mas em varios clones esse resistor nao existe
-    e o pino fica solto -- e pino solto flutua. Procurar so em 0x68 e
-    apostar.
-
-    WHO_AM_I. Exigia-se que o registrador 0x75 devolvesse exatamente
-    0x68. Metade dos modulos vendidos como "MPU-6050" traz na verdade um
-    MPU-6500, um MPU-9250 ou um ICM-20608, que devolvem 0x70, 0x71, 0x73
-    ou 0x98 -- e medem aceleracao igualzinho. Exigir 0x68 era reprovar
-    hardware que funciona.
-
-    O que interessa e se ALGUEM RESPONDE no barramento. Quem responder,
-    serve.
-*/
 bool mpuResponde(uint8_t endereco) {
-  Wire.beginTransmission(endereco);
-  if (Wire.endTransmission() != 0) return false;
-  Wire.beginTransmission(endereco);
-  Wire.write((uint8_t)0x75); // WHO_AM_I
-  if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom(endereco, (uint8_t)1);
-  if (Wire.available() < 1) return false;
-  const uint8_t quem = (uint8_t)Wire.read();
-  // Zero e 0xFF sao barramento mudo ou em curto, nao um chip.
-  return quem != 0x00 && quem != 0xFF;
+  Wire.beginTransmission((uint8_t)endereco);
+  return Wire.endTransmission() == 0;
 }
 
+/*  O MPU-6050 pode estar em 0x68 ou 0x69, conforme o pino AD0. Modulo
+    generico com AD0 em alta responde so no segundo -- e o sintoma e
+    identico ao de sensor queimado. Procurar nos dois custa nada. */
 bool mpuVivo() {
-  if (mpuResponde(0x68)) { enderecoMpu = 0x68; return true; }
-  if (mpuResponde(0x69)) { enderecoMpu = 0x69; return true; }
+  if (mpuResponde(MPU_ADDR)) { enderecoMpu = MPU_ADDR; return true; }
+  if (mpuResponde(MPU_ADDR + 1)) { enderecoMpu = MPU_ADDR + 1; return true; }
   return false;
 }
 
-bool mpuLer(float accelG[3], float gyroDps[3]) {
-  Wire.beginTransmission(enderecoMpu);
-  Wire.write((uint8_t)0x3B); // ACCEL_XOUT_H: 14 bytes seguidos (accel, temp, gyro)
+bool mpuLer(float *accelG, float *gyroDps) {
+  Wire.beginTransmission((uint8_t)enderecoMpu);
+  Wire.write((uint8_t)0x3B);
   if (Wire.endTransmission(false) != 0) return false;
-  Wire.requestFrom(enderecoMpu, (uint8_t)14);
-  if (Wire.available() < 14) return false;
+  if (Wire.requestFrom((uint8_t)enderecoMpu, (uint8_t)14) != 14) return false;
+
   int16_t bruto[7];
   for (uint8_t i = 0; i < 7; i++) {
-    /*  DOIS `Wire.read()` NA MESMA EXPRESSAO ERA UM DEFEITO ESPERANDO A
-        VEZ DELE.
-
-        Estava escrito `(Wire.read() << 8) | Wire.read()`. O C++ NAO
-        define qual dos dois roda primeiro -- e a ordem aqui e tudo: o
-        MPU-6050 manda o byte alto e depois o baixo, e trocar os dois
-        transforma uma leitura de 1,02 g num numero sem sentido. Hoje o
-        compilador do AVR calha de avaliar na ordem que da certo; uma
-        atualizacao da IDE, um nivel de otimizacao diferente, e o sensor
-        "para de funcionar" sem ninguem ter mexido no hardware.
-
-        Com duas variaveis nomeadas, a ordem esta escrita e nao depende
-        de sorte.
-    */
-    const uint8_t alto = (uint8_t)Wire.read();
-    const uint8_t baixo = (uint8_t)Wire.read();
-    bruto[i] = (int16_t)(((uint16_t)alto << 8) | (uint16_t)baixo);
+    bruto[i] = (int16_t)((Wire.read() << 8) | Wire.read());
   }
+  // bruto[0..2] = accel, bruto[3] = temperatura, bruto[4..6] = giro
+  saturouAccel = false;
+  saturouGyro = false;
   for (uint8_t i = 0; i < 3; i++) {
-    if (bruto[i] >= 32760 || bruto[i] <= -32760) saturouAccel = true;
-    if (bruto[4 + i] >= 32760 || bruto[4 + i] <= -32760) saturouGyro = true;
-    accelG[i] = (float)bruto[i] / LSB_POR_G - offAccel[i];
-    gyroDps[i] = (float)bruto[4 + i] / LSB_POR_DPS - offGyro[i];
+    if (bruto[i] >= 32700 || bruto[i] <= -32700) saturouAccel = true;
+    if (bruto[4 + i] >= 32700 || bruto[4 + i] <= -32700) saturouGyro = true;
+    accelG[i] = (float)bruto[i] / LSB_POR_G;
+    gyroDps[i] = (float)bruto[4 + i] / LSB_POR_DPS;
   }
   return true;
 }
 
+/*  ------------------------------------------------------------------
+    CALIBRACAO QUE SE RECUSA A CALIBRAR ERRADO.
+    ------------------------------------------------------------------
+    A V2 gravava a media sem olhar a dispersao. Se alguem encostasse na
+    maquina durante os 2 s da calibracao do arranque -- e no arranque
+    alguem quase sempre esta com a mao na maquina --, o zero nascia
+    torto e ficava torto. Dai o "sensor parado dispara" que nao tinha
+    explicacao: o sensor estava parado, o ZERO e que estava errado.
+
+    Agora a dispersao e medida junto. Se a maquina estava se mexendo, o
+    zero anterior e mantido e o jogo e avisado.
+*/
 void calibrar() {
-  // A maquina precisa estar PARADA. A media do repouso vira o zero de
-  // cada eixo -- e o que tira a gravidade e a inclinacao da montagem.
-  const uint16_t AMOSTRAS = 400;
-  double somaA[3] = {0, 0, 0};
-  double somaG[3] = {0, 0, 0};
-  for (uint8_t i = 0; i < 3; i++) { offAccel[i] = 0; offGyro[i] = 0; }
+  const uint16_t AMOSTRAS = 300;      // 300 x 4 ms = 1,2 s
+  float somaA[3] = {0, 0, 0};
+  float somaG[3] = {0, 0, 0};
+  float maxA[3], minA[3];
+  bool primeira = true;
+  uint16_t validas = 0;
 
   for (uint16_t n = 0; n < AMOSTRAS; n++) {
     float a[3], g[3];
@@ -298,24 +387,58 @@ void calibrar() {
       for (uint8_t i = 0; i < 3; i++) {
         somaA[i] += a[i];
         somaG[i] += g[i];
+        if (primeira) { maxA[i] = a[i]; minA[i] = a[i]; }
+        else {
+          if (a[i] > maxA[i]) maxA[i] = a[i];
+          if (a[i] < minA[i]) minA[i] = a[i];
+        }
       }
+      primeira = false;
+      validas++;
     }
-    if (n % 40 == 0) {
+    if (n % 30 == 0) {
       Serial.print(F("CALIBRATING,"));
-      Serial.println((int)(n * 100L / AMOSTRAS));
+      Serial.println((int)((long)n * 100L / (long)AMOSTRAS));
     }
-    delay(5);
+    /*  A SERIAL NAO PODE FICAR SURDA AQUI.
+        Este e exatamente o instante em que o jogo acabou de abrir a
+        porta (o DTR resetou a placa) e esta decidindo se esta COM tem
+        Arduino. Uma calibracao que nao responde PING faz o jogo
+        descartar a porta CERTA e seguir procurando. */
+    processarComandos();
+    processarBotoes();
+    delay(4);
   }
+
+  if (validas < AMOSTRAS / 2) {
+    Serial.println(F("ERROR,CALIB_LEITURA"));
+    return;
+  }
+
+  // A maquina se mexeu durante a medida? Entao este zero nao presta.
+  float dispersao = 0.0f;
   for (uint8_t i = 0; i < 3; i++) {
-    offAccel[i] = (float)(somaA[i] / AMOSTRAS);
-    offGyro[i] = (float)(somaG[i] / AMOSTRAS);
+    const float d = maxA[i] - minA[i];
+    if (d > dispersao) dispersao = d;
   }
+  if (dispersao > RUIDO_G * 3.0f) {
+    Serial.println(F("ERROR,CALIB_MOVIMENTO"));
+    return;                    // mantem a base anterior, de proposito
+  }
+
+  for (uint8_t i = 0; i < 3; i++) {
+    baseAccel[i] = somaA[i] / (float)validas;
+    baseGyro[i] = somaG[i] / (float)validas;
+  }
+  baseIniciada = true;
+  amostrasQuietas = 0;
+
   Serial.print(F("CALIBRATED,"));
-  Serial.print(offAccel[0], 3);
+  Serial.print(baseAccel[0], 3);
   Serial.print(',');
-  Serial.print(offAccel[1], 3);
+  Serial.print(baseAccel[1], 3);
   Serial.print(',');
-  Serial.println(offAccel[2], 3);
+  Serial.println(baseAccel[2], 3);
 }
 
 // ---------------------------------------------------------------- golpe
@@ -325,6 +448,29 @@ uint8_t indiceEixo() {
     case 'Z': return 2;
     default: return 0;
   }
+}
+
+/*  A magnitude do giro, e nao a soma dos tres eixos.
+    Somar |gx|+|gy|+|gz| soma tres ruidos e infla o numero; a magnitude
+    e a grandeza fisica de verdade e nao depende de a montagem estar
+    torta. */
+float magnitudeGiro(const float *g) {
+  const float x = g[0] - baseGyro[0];
+  const float y = g[1] - baseGyro[1];
+  const float z = g[2] - baseGyro[2];
+  return sqrtf(x * x + y * y + z * z);
+}
+
+/*  DESCARTA O EVENTO EM ANDAMENTO sem reportar nada.
+    Usado quando a forma nao fechou como soco: empurrao sustentado,
+    subida lenta demais, ou a janela estourando sem queda. */
+void abandonarGolpe() {
+  golpeAtivo = false;
+  prontoParaGolpe = false;
+  amostrasAcima = 0;
+  digitalWrite(LED_STATUS, LOW);
+  fimDoUltimoGolpeMs = millis();
+  amostrasQuietas = 0;
 }
 
 void processarAmostra() {
@@ -339,66 +485,158 @@ void processarAmostra() {
   ultimaAmostraUs = agora;
   if (dt <= 0.0f || dt > 0.05f) dt = 0.004f;
 
-  const float aEixo = a[indiceEixo()];
-  const float aAbs = fabsf(aEixo);
-  const float giroAbs = fabsf(g[0]) + fabsf(g[1]) + fabsf(g[2]); // soma = robustez a montagem torta
+  // Primeira leitura depois de ligar: a base comeca de onde o sensor esta.
+  if (!baseIniciada) {
+    for (uint8_t i = 0; i < 3; i++) { baseAccel[i] = a[i]; baseGyro[i] = g[i]; }
+    baseIniciada = true;
+    return;
+  }
+
+  // Aceleracao dinamica: a leitura crua menos a base viva. E o que tira
+  // a gravidade E a inclinacao da montagem, continuamente.
+  float din[3];
+  for (uint8_t i = 0; i < 3; i++) din[i] = a[i] - baseAccel[i];
+  const float giro = magnitudeGiro(g);
+
+  // A amostra e "quieta"? Todos os eixos dentro do ruido, e o giro tambem.
+  bool quieta = (fabsf(din[0]) < RUIDO_G && fabsf(din[1]) < RUIDO_G
+                 && fabsf(din[2]) < RUIDO_G && giro < RUIDO_DPS);
 
   if (!golpeAtivo) {
-    if (aAbs > accelMinG && millis() - ultimoGolpeMs >= COOLDOWN_MS) {
+    if (quieta) {
+      if (amostrasQuietas < 65000) amostrasQuietas++;
+      // Conquistou a autorizacao de socar. Ver `prontoParaGolpe`.
+      if (amostrasQuietas >= AMOSTRAS_DE_REPOUSO) prontoParaGolpe = true;
+      /*  A BASE SO ANDA ENQUANTO ESTA QUIETO.
+          E o que absorve inclinacao e deriva termica sem nunca deixar um
+          soco contaminar o proprio zero. */
+      for (uint8_t i = 0; i < 3; i++) {
+        baseAccel[i] += (a[i] - baseAccel[i]) * BASE_ALFA;
+        baseGyro[i] += (g[i] - baseGyro[i]) * BASE_ALFA;
+      }
+    } else {
+      amostrasQuietas = 0;
+    }
+
+    const float aEixo = din[indiceEixo()];
+    const float aAbs = fabsf(aEixo);
+
+    // AS TRES TRAVAS PARA COMECAR UM GOLPE, e todas precisam passar.
+    const bool passouOTempoMorto = (millis() - fimDoUltimoGolpeMs) >= TEMPO_MORTO_MS;
+
+    if (aAbs > accelMinG && prontoParaGolpe && passouOTempoMorto) {
+      amostrasAcima++;
+      if (amostrasAcima < AMOSTRAS_DE_SUBIDA) return;  // pico de uma amostra nao vale
       golpeAtivo = true;
+      prontoParaGolpe = false;   // gasta a autorizacao; reconquista-se no repouso
       golpeInicioMs = millis();
       golpeAbaixoMs = 0;
+      instanteDoPicoMs = golpeInicioMs;
       picoG = aAbs;
       velocidadeIntegral = 0.0f;
-      picoGyroDps = giroAbs;
-      saturouAccel = false;
-      saturouGyro = false;
+      velocidadePico = 0.0f;
+      picoGyroDps = giro;
+      sinalDoGolpe = (aEixo >= 0.0f) ? 1.0f : -1.0f;
+      aAnterior = aAbs;
+      caiu = false;
+      for (uint8_t i = 0; i < 3; i++) baseCongelada[i] = baseAccel[i];
       digitalWrite(LED_STATUS, HIGH);
+    } else if (aAbs <= accelMinG) {
+      amostrasAcima = 0;
     }
     return;
   }
 
-  // Golpe em andamento: acumula velocidade e guarda os picos.
-  velocidadeIntegral += aEixo * 9.81f * dt;
-  if (velocidadeIntegral < 0.0f) velocidadeIntegral = 0.0f; // pendulo voltando nao desconta
-  if (aAbs > picoG) picoG = aAbs;
-  if (giroAbs > picoGyroDps) picoGyroDps = giroAbs;
+  // ------------------------------------------------ golpe em andamento
+  // A base fica CONGELADA daqui ate o fim: o golpe nao mexe no proprio zero.
+  const float aEixoAssinado = (a[indiceEixo()] - baseCongelada[indiceEixo()]) * sinalDoGolpe;
+  const float aAbs = fabsf(aEixoAssinado);
 
-  if (aAbs < accelMinG * FIM_GOLPE_FATOR) {
+  /*  INTEGRACAO POR TRAPEZIO.
+      A soma retangular da V2 superestima sistematicamente a subida de um
+      impacto -- e superestimar a subida e superestimar a nota. O trapezio
+      usa a media entre a amostra anterior e a atual. */
+  velocidadeIntegral += ((aAnterior + aEixoAssinado) * 0.5f) * 9.81f * dt;
+  aAnterior = aEixoAssinado;
+  if (velocidadeIntegral < 0.0f) velocidadeIntegral = 0.0f;
+  // A velocidade do golpe e o PICO da integral: depois do pico vem a
+  // desaceleracao, que e fisica real e nao deve apagar a medida.
+  if (velocidadeIntegral > velocidadePico) velocidadePico = velocidadeIntegral;
+
+  if (aAbs > picoG) {
+    picoG = aAbs;
+    instanteDoPicoMs = millis();
+  }
+  if (giro > picoGyroDps) picoGyroDps = giro;
+
+  if (aAbs < accelMinG * FATOR_QUEDA) {
     if (golpeAbaixoMs == 0) golpeAbaixoMs = millis();
+    if (millis() - golpeAbaixoMs >= MS_DE_QUEDA) caiu = true;
   } else {
     golpeAbaixoMs = 0;
   }
 
-  const bool acabou = (golpeAbaixoMs != 0 && millis() - golpeAbaixoMs >= FIM_GOLPE_MS)
-                      || (millis() - golpeInicioMs >= GOLPE_MAX_MS);
-  if (!acabou) return;
+  const unsigned long duracao = millis() - golpeInicioMs;
+  const bool estourou = duracao >= JANELA_MAX_MS;
+  if (!caiu && !estourou) return;
+
+  /*  A JANELA ESTOUROU SEM A QUEDA FORMAL: E EMPURRAO OU E SOCO?
+
+      A regra "sem queda, sem soco" e quase certa, e o "quase" custava um
+      golpe forte legitimo. Medido na bancada: soco de 14 g num alvo que
+      sai balancando forte NAO fecha a queda dentro da janela -- o
+      balanco mantem o sinal acima do piso -- e o soco era descartado.
+      A pessoa bate com tudo e a maquina nao marca nada.
+
+      O que separa os dois casos nao e a queda ate o piso, e sim ONDE o
+      sinal esta quando a janela fecha, comparado ao proprio pico:
+
+        - EMPURRAO SUSTENTADO: a forca continua aplicada, e o sinal
+          termina a janela ainda perto do pico.
+        - SOCO: o contato ja acabou; o que sobra e o alvo balancando,
+          muito abaixo do pico do impacto.
+
+      Metade do pico separa os dois com folga larga, e nao depende de
+      calibrar mais nenhum numero. */
+  if (!caiu) {
+    if (aAbs >= picoG * 0.5f) {
+      abandonarGolpe();      // ainda perto do pico: forca sustentada
+      return;
+    }
+    // ja decaiu: foi impacto, e o que sobrou e o alvo balancando
+  }
 
   golpeAtivo = false;
+  prontoParaGolpe = false;
+  amostrasAcima = 0;
   digitalWrite(LED_STATUS, LOW);
-  ultimoGolpeMs = millis();
-
-  // Duas estimativas de velocidade; vale a maior.
-  const float vGyro = (picoGyroDps * DEG_TO_RAD) * raioMetros;
-  const float velocidade = fmaxf(velocidadeIntegral, vGyro);
-  const unsigned long duracao = millis() - golpeInicioMs;
+  fimDoUltimoGolpeMs = millis();
+  amostrasQuietas = 0;
 
   if (saturouAccel) Serial.println(F("SATURATION,ACCEL"));
   if (saturouGyro) Serial.println(F("SATURATION,GYRO"));
 
-  if (velocidade < velocidadeMinima) return; // encostou, nao socou
+  // ------------------------------------------------ validacao da forma
+  if (duracao < DURACAO_MIN_MS) return;                       // artefato
+  if (instanteDoPicoMs - golpeInicioMs > SUBIDA_MAX_MS) return; // subida lenta
+  if (picoGyroDps < GIRO_MINIMO_DPS) return;                  // o alvo nao se moveu
+
+  // ------------------------------------------------ medida
+  /*  O ACELEROMETRO E A MEDIDA; o giroscopio so assume quando ele
+      satura. A V2 usava `max(integral, giro)` sempre -- e era por ai que
+      ruido de giro virava nota. */
+  float velocidade = velocidadePico;
+  if (saturouAccel) {
+    const float vGiro = (picoGyroDps * 0.01745329f) * raioMetros;
+    if (vGiro > velocidade) velocidade = vGiro;
+  }
+
+  if (velocidade < velocidadeMinima) return;   // encostou, nao socou
 
   ultimaVelocidade = velocidade;
   ultimoPicoG = picoG;
 
-  /*  A FITA SOBE NO MESMO INSTANTE DO GOLPE.
-
-      Sem esperar o jogo: o PC ainda vai receber a linha, calcular a
-      pontuacao e comecar a animar o placar, e sao decimos de segundo em
-      que a luz ficaria parada logo depois da pancada. Quando o comando
-      LEDS chegar, ele assume -- e o que a coluna fizer daqui ate la
-      apenas antecipa o mesmo destino.
-  */
+  // A fita sobe no mesmo instante do golpe, sem esperar o jogo.
   const float faixa = velocidadeMaxima - velocidadeMinima;
   float f = (faixa > 0.01f) ? (velocidade - velocidadeMinima) / faixa : 0.0f;
   if (f < 0.0f) f = 0.0f;
@@ -416,20 +654,10 @@ void processarAmostra() {
 }
 
 /*  O ESTADO CRU DOS DOIS PINOS, QUATRO VEZES POR SEGUNDO.
-
-    "O botao nao funciona" tem quatro causas possiveis e o mesmo sintoma:
-    fio solto, pino errado, placa muda, ou o jogo ignorando o aperto.
-    Discutir isso por telefone e impossivel; ver o pino na tela resolve em
-    dez segundos.
-
     `PINS,1,0` quer dizer START apertado, CREDITO solto. Com INPUT_PULLUP
     o pino em repouso le ALTO e o aperto o leva ao terra, entao o valor
-    aqui ja vai invertido: 1 e APERTADO, que e o que a pessoa espera ler.
-
-    Isto e independente da deteccao de aperto e do tempo morto: e o pino,
-    cru. Se este numero nao muda quando o botao e apertado, o problema e
-    ANTES do firmware -- e ai nao adianta mexer em codigo.
-*/
+    aqui ja vai invertido: 1 e APERTADO. Se este numero nao muda quando o
+    botao e apertado, o problema e ANTES do firmware. */
 void enviarPinos() {
   Serial.print(F("PINS,"));
   Serial.print(digitalRead(PINO_BOTAO_START) == LOW ? 1 : 0);
@@ -457,17 +685,22 @@ void processarBotoes() {
 }
 
 // ---------------------------------------------------------------- telemetria
+/*  A TELEMETRIA MOSTRA A ACELERACAO DINAMICA, nao a crua.
+    E o numero que a deteccao realmente usa. Mostrar o cru fazia a
+    Central exibir ~1 g parado (a gravidade) e quem olhava concluia que o
+    sensor estava enlouquecendo. Com o dinamico, sensor parado mostra
+    zero -- e isso e verificavel a olho. */
 void enviarTelemetria() {
-  if (golpeAtivo) return; // durante o golpe a serial fica livre para o HIT
+  if (golpeAtivo) return;   // durante o golpe a serial fica livre para o HIT
   float a[3], g[3];
   if (!mpuLer(a, g)) return;
   Serial.print(F("TELEMETRY,"));
-  Serial.print(a[0], 2); Serial.print(',');
-  Serial.print(a[1], 2); Serial.print(',');
-  Serial.print(a[2], 2); Serial.print(',');
-  Serial.print(g[0], 1); Serial.print(',');
-  Serial.print(g[1], 1); Serial.print(',');
-  Serial.print(g[2], 1); Serial.print(',');
+  Serial.print(a[0] - baseAccel[0], 2); Serial.print(',');
+  Serial.print(a[1] - baseAccel[1], 2); Serial.print(',');
+  Serial.print(a[2] - baseAccel[2], 2); Serial.print(',');
+  Serial.print(g[0] - baseGyro[0], 1); Serial.print(',');
+  Serial.print(g[1] - baseGyro[1], 1); Serial.print(',');
+  Serial.print(g[2] - baseGyro[2], 1); Serial.print(',');
   Serial.print(ultimaVelocidade, 2); Serial.print(',');
   Serial.println(ultimoPicoG, 2);
 }
@@ -477,242 +710,155 @@ void processarComandos() {
   while (Serial.available() > 0) {
     const char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
-      bufferSerial.trim();
-      if (bufferSerial.length() > 0) executarComando(bufferSerial);
-      bufferSerial = "";
-    } else if (bufferSerial.length() < 48) {
-      bufferSerial += c;
+      if (bufferUso > 0) {
+        bufferSerial[bufferUso] = '\0';
+        executarComando(bufferSerial);
+        bufferUso = 0;
+      }
+    } else if (bufferUso < sizeof(bufferSerial) - 1) {
+      bufferSerial[bufferUso++] = c;
     }
   }
 }
 
-void executarComando(String cmd) {
-  cmd.toUpperCase();
-  if (cmd == "PING") {
+void executarComando(const char *cmd) {
+  // Comparacao sem diferenciar maiuscula, sem alocar String.
+  if (strcasecmp(cmd, "PING") == 0) {
     Serial.println(F("PONG"));
-  } else if (cmd == "RESET") {
+  } else if (strcasecmp(cmd, "RESET") == 0) {
     golpeAtivo = false;
+    prontoParaGolpe = false;
+    amostrasAcima = 0;
+    amostrasQuietas = 0;
     digitalWrite(LED_STATUS, LOW);
     Serial.println(F("OK,RESET"));
-  } else if (cmd == "CALIBRATE") {
+  } else if (strcasecmp(cmd, "CALIBRATE") == 0) {
     calibrar();
     Serial.println(F("OK,CALIBRATE"));
-  } else if (cmd == "TEST") {
-    /* Golpe sintetico: confere a corrente inteira -- Arduino, serial e
-       jogo -- sem ninguem socar o saco. Se o TEST aparece na tela e o
-       soco real nao, o problema e mecanico, nao de software. */
-    Serial.print(F("HIT,7.50,9.20,120,"));
+  } else if (strcasecmp(cmd, "TEST") == 0) {
+    /*  Golpe sintetico: confere a corrente inteira -- Arduino, serial e
+        jogo -- sem ninguem socar o saco. Se o TEST aparece na tela e o
+        soco real nao, o problema e mecanico, nao de software.
+        O valor fica no meio da escala nova (0,30 a 5,20 m/s). */
+    Serial.print(F("HIT,2.60,8.00,45,"));
     Serial.println(eixoMedicao);
-  } else if (cmd.startsWith("LEDS,")) {
-    /*  A COLUNA COMANDADA PELO JOGO.
-
-        `LEDS,0` a `LEDS,1000` (por mil). E o jogo que manda enquanto o
-        placar sobe na tela, e por isso a fita acompanha o NUMERO subindo
-        em vez do golpe cru: as duas coisas ficam no mesmo compasso, que
-        e o que faz a maquina parecer uma peca so em vez de um monitor com
-        uma fita pendurada.
-
-        Passados tres segundos sem comando, a placa volta a se virar
-        sozinha -- a fita continua funcionando com o PC desligado.
-    */
-    long permil = cmd.substring(5).toInt();
+  } else if (strncasecmp(cmd, "LEDS,", 5) == 0) {
+    long permil = atol(cmd + 5);
     if (permil < 0) permil = 0;
     if (permil > 1000) permil = 1000;
     nivelAlvo = (float)permil / 1000.0f;
     fitaComandadaMs = millis();
-    Serial.println(F("OK,LEDS"));
-  } else if (cmd.startsWith("CONFIG,")) {
+  } else if (strncasecmp(cmd, "CONFIG,", 7) == 0) {
     configurar(cmd);
   } else {
-    Serial.println(F("ERROR,COMANDO_DESCONHECIDO"));
+    Serial.println(F("ERROR,COMANDO"));
   }
 }
 
-void configurar(const String &cmd) {
-  // CONFIG,eixo,raio_m,velocidade_min,accel_min_g
-  char eixo = 0;
-  float raio = 0, vmin = 0, amin = 0;
-  // O quinto campo (vmax) e OPCIONAL de proposito: uma placa nova tem de
-  // continuar aceitando o CONFIG de quatro campos de uma versao antiga do
-  // jogo, senao atualizar um lado quebra o outro.
-  float vmax = velocidadeMaxima;
-  int campos = sscanf(cmd.c_str(), "CONFIG,%c,%f,%f,%f,%f", &eixo, &raio, &vmin, &amin, &vmax);
-  const bool eixoOk = (eixo == 'X' || eixo == 'Y' || eixo == 'Z');
-  const bool faixaOk = raio >= 0.05f && raio <= 1.50f
-                       && vmin >= 0.2f && vmin <= 20.0f
-                       && amin >= 0.5f && amin <= 15.0f;
-  const bool tetoOk = vmax > vmin && vmax <= 40.0f;
-  if ((campos != 4 && campos != 5) || !eixoOk || !faixaOk || !tetoOk) {
-    Serial.println(F("ERROR,PARAM"));
-    return;
+/*  CONFIG,eixo,raio,vmin,amin[,vmax]
+    A placa REVALIDA tudo: um valor absurdo vindo de um arquivo de
+    ajustes corrompido nao pode virar uma maquina que nunca detecta nada
+    (ou que detecta tudo). */
+void configurar(const char *cmd) {
+  char copia[52];
+  strncpy(copia, cmd, sizeof(copia) - 1);
+  copia[sizeof(copia) - 1] = '\0';
+
+  char *campo = strtok(copia, ",");      // "CONFIG"
+  campo = strtok(NULL, ",");             // eixo
+  if (campo == NULL) { Serial.println(F("ERROR,CONFIG")); return; }
+  const char e = (char)toupper(campo[0]);
+  if (e == 'X' || e == 'Y' || e == 'Z') eixoMedicao = e; else eixoMedicao = 'X';
+
+  campo = strtok(NULL, ",");             // raio
+  if (campo == NULL) { Serial.println(F("ERROR,CONFIG")); return; }
+  raioMetros = constrain(atof(campo), 0.05f, 1.50f);
+
+  campo = strtok(NULL, ",");             // vmin
+  if (campo == NULL) { Serial.println(F("ERROR,CONFIG")); return; }
+  velocidadeMinima = constrain(atof(campo), 0.10f, 20.0f);
+
+  campo = strtok(NULL, ",");             // amin
+  if (campo == NULL) { Serial.println(F("ERROR,CONFIG")); return; }
+  accelMinG = constrain(atof(campo), 0.5f, 15.0f);
+
+  campo = strtok(NULL, ",");             // vmax (opcional)
+  if (campo != NULL) {
+    velocidadeMaxima = constrain(atof(campo), velocidadeMinima + 0.5f, 40.0f);
   }
-  eixoMedicao = eixo;
-  raioMetros = raio;
-  velocidadeMinima = vmin;
-  accelMinG = amin;
-  velocidadeMaxima = vmax;
+
   Serial.println(F("OK,CONFIG"));
 }
 
-// ------------------------------------------------------------- as fitas
+/*  A COR DE CADA ALTURA -- a mesma escala do jogo: do azul frio ao
+    branco estourado, e a fita repete essa escala de baixo para cima. */
 #if TEM_FITAS
-/*  A COR DE CADA ALTURA -- a mesma escala do jogo.
-    As oito faixas de pontuacao do Punch Challenge vao do azul frio ao
-    branco estourado, e a fita repete essa escala de baixo para cima. Quem
-    olha a maquina de longe aprende a ler a cor antes de ler o numero: azul
-    e "passou por aqui", vermelho e "bateu forte", branco e "chamou todo
-    mundo".
-*/
-uint32_t corDoNivel(Adafruit_NeoPixel &fita, float f) {
-  if (f < 0.25f) {           // azul-aco -> verde
-    float k = f / 0.25f;
-    return fita.Color((uint8_t)(20 * k), (uint8_t)(90 + 130 * k), (uint8_t)(180 - 120 * k));
-  }
-  if (f < 0.55f) {           // verde -> ambar
-    float k = (f - 0.25f) / 0.30f;
-    return fita.Color((uint8_t)(20 + 235 * k), (uint8_t)(220 - 40 * k), (uint8_t)(60 - 50 * k));
-  }
-  if (f < 0.85f) {           // ambar -> vermelho
-    float k = (f - 0.55f) / 0.30f;
-    return fita.Color(255, (uint8_t)(180 - 150 * k), (uint8_t)(10 + 20 * k));
-  }
-  float k = (f - 0.85f) / 0.15f;   // vermelho -> branco estourado
-  return fita.Color(255, (uint8_t)(30 + 225 * k), (uint8_t)(30 + 225 * k));
+uint32_t corDaAltura(float f, Adafruit_NeoPixel &fita) {
+  if (f < 0.25f)      return fita.Color(0, 90, 200);
+  else if (f < 0.50f) return fita.Color(0, 200, 140);
+  else if (f < 0.70f) return fita.Color(230, 190, 0);
+  else if (f < 0.88f) return fita.Color(255, 90, 0);
+  else                return fita.Color(255, 255, 255);
 }
+#endif
 
-/*  O DESENHO DA COLUNA.
+void atualizarFitas() {
+#if TEM_FITAS
+  const unsigned long agora = millis();
+  if (agora - ultimaFitaMs < FITA_QUADRO_MS) return;
+  ultimaFitaMs = agora;
 
-    Abaixo do nivel, a cor cheia. NO nivel, um LED branco: e a ponta da
-    coluna, e sem ela o topo se confunde com o resto. Acima, apagado --
-    mas nao preto: um azul quase invisivel mantem a fita VISIVEL como
-    objeto quando esta vazia, que e o que impede a maquina desligada de
-    parecer quebrada.
-*/
-void desenharFita(Adafruit_NeoPixel &fita, float nivel) {
-  const int acesos = (int)(nivel * LEDS_POR_FITA + 0.5f);
-  for (int i = 0; i < LEDS_POR_FITA; i++) {
-    const float f = (float)i / (float)(LEDS_POR_FITA - 1);
-    if (i < acesos - 1) {
-      fita.setPixelColor(i, corDoNivel(fita, f));
-    } else if (i == acesos - 1) {
-      fita.setPixelColor(i, fita.Color(255, 255, 255));
-    } else {
-      fita.setPixelColor(i, fita.Color(0, 0, 6));
-    }
+  // Passados tres segundos sem comando do jogo, a placa volta a se virar
+  // sozinha -- a fita continua funcionando com o PC desligado.
+  if (agora - fitaComandadaMs > FITA_COMANDO_VALE_MS) {
+    nivelAlvo *= 0.94f;      // decai devagar depois do golpe
+    if (nivelAlvo < 0.004f) nivelAlvo = 0.0f;
   }
-  fita.show();
-}
 
-/*  A RESPIRACAO DE QUEM ESTA ESPERANDO.
+  nivelFita += (nivelAlvo - nivelFita) * 0.25f;
+  if (fabsf(nivelAlvo - nivelFita) < 0.002f) nivelFita = nivelAlvo;
 
-    Maquina parada com fita apagada parece maquina desligada, e ninguem
-    poe ficha em maquina desligada. Uma onda lenta subindo diz "estou
-    ligada, venha bater" sem gastar a luz que o golpe vai precisar.
-*/
-void fitaEmEspera(unsigned long agora) {
+  const int acesos = (int)(nivelFita * (float)LEDS_POR_FITA + 0.5f);
   for (int i = 0; i < LEDS_POR_FITA; i++) {
-    const float fase = (float)i / (float)LEDS_POR_FITA;
-    float onda = sinf((agora * 0.0016f) - fase * 3.4f);
-    onda = onda > 0.0f ? onda * onda : 0.0f;
-    const uint8_t v = (uint8_t)(onda * 70.0f);
-    const uint32_t cor = fitaEsq.Color(v, (uint8_t)(v / 4), (uint8_t)(v / 3));
+    const float altura = (float)(i + 1) / (float)LEDS_POR_FITA;
+    const uint32_t cor = (i < acesos) ? corDaAltura(altura, fitaEsq) : 0;
     fitaEsq.setPixelColor(i, cor);
     fitaDir.setPixelColor(i, cor);
   }
   fitaEsq.show();
   fitaDir.show();
+#endif
 }
 
-void atualizarFitas() {
-  const unsigned long agora = millis();
-  if (agora - ultimaFitaMs < FITA_QUADRO_MS) return;
-  ultimaFitaMs = agora;
-
-  const bool comandada = (agora - fitaComandadaMs) < FITA_COMANDO_VALE_MS;
-  if (!comandada && nivelAlvo <= 0.001f && !golpeAtivo) {
-    fitaEmEspera(agora);
-    return;
-  }
-
-  /*  A COLUNA SOBE DEPRESSA E DESCE DEVAGAR.
-
-      Subir junto com o golpe e o ponto do efeito -- se ela demorasse, a
-      luz chegaria depois do soco e ninguem ligaria uma coisa a outra.
-      Descer devagar e o que deixa a marca no ar tempo suficiente para a
-      fila ver ate onde a pessoa chegou.
-  */
-  const float passo = (nivelAlvo > nivelFita) ? 0.22f : 0.012f;
-  nivelFita += (nivelAlvo - nivelFita) * passo * 4.0f;
-  if (nivelFita < 0.0f) nivelFita = 0.0f;
-  if (nivelFita > 1.0f) nivelFita = 1.0f;
-  desenharFita(fitaEsq, nivelFita);
-  desenharFita(fitaDir, nivelFita);
-
-  // Sem comando do jogo, a coluna desinfla sozinha depois do golpe.
-  if (!comandada && !golpeAtivo) {
-    nivelAlvo -= 0.006f;
-    if (nivelAlvo < 0.0f) nivelAlvo = 0.0f;
-  }
-}
-
-#else   // TEM_FITAS
-// Sem a biblioteca, as fitas viram uma funcao vazia. Todo o resto do
-// firmware -- sensor, botoes, serial -- continua igual.
-void atualizarFitas() {}
-#endif  // TEM_FITAS
-
-// ---------------------------------------------------------------- ciclo
 void setup() {
+  Serial.begin(115200);
   pinMode(PINO_BOTAO_START, INPUT_PULLUP);
   pinMode(PINO_BOTAO_CREDIT, INPUT_PULLUP);
   pinMode(LED_STATUS, OUTPUT);
   digitalWrite(LED_STATUS, LOW);
 
 #if TEM_FITAS
-  fitaEsq.begin();
-  fitaDir.begin();
-  fitaEsq.setBrightness(BRILHO_FITA);
-  fitaDir.setBrightness(BRILHO_FITA);
-  fitaEsq.clear();
-  fitaDir.clear();
-  fitaEsq.show();
-  fitaDir.show();
+  fitaEsq.begin(); fitaEsq.setBrightness(BRILHO_FITA); fitaEsq.show();
+  fitaDir.begin(); fitaDir.setBrightness(BRILHO_FITA); fitaDir.show();
 #endif
 
-  Serial.begin(115200);
+  /*  O `READY` SAI ANTES DE QUALQUER COISA QUE POSSA FALHAR.
 
-  /*  O `READY` VEM ANTES DE TUDO, E A PLACA NUNCA TRAVA.
+      A placa SEMPRE chega ao `loop()`. Sem sensor ela avisa, segue
+      funcionando -- botoes, serial, fitas -- e tenta o sensor de novo a
+      cada dois segundos. Um fio de I2C mal encaixado que alguem empurre
+      de volta passa a funcionar sozinho, sem desligar nada.
 
-      AQUI ESTAVA O DEFEITO QUE MATAVA A MAQUINA INTEIRA. Estava assim:
-
-          if (!mpuVivo()) {
-            Serial.println(F("ERROR,NO_MPU"));
-            while (true) { pisca o LED; }     // <- para sempre
-          }
-          ...
-          Serial.println(F("READY,..."));     // <- nunca chegava aqui
-
-      Sem o sensor respondendo, a placa entrava num laco infinito ANTES
-      de chegar ao `loop()`. Consequencia: `processarBotoes()` nunca
-      rodava, e START e CREDITO ficavam MORTOS. O `READY` tambem nunca
-      saia, entao o jogo nunca reconhecia a porta e ficava trocando de
-      COM a noite inteira. As fitas idem.
-
-      Um problema no sensor derrubava os botoes, a serial e a
-      iluminacao -- tres coisas que nao dependem dele para nada. E o LED
-      piscando em D13, unica pista que sobrava, ninguem ve dentro do
-      gabinete fechado.
-
-      A regra agora e outra: a placa SEMPRE chega ao `loop()`. Sem
-      sensor ela avisa, segue funcionando -- botoes, serial, fitas -- e
-      tenta o sensor de novo a cada dois segundos. Um fio de I2C mal
-      encaixado que alguem empurre de volta passa a funcionar sozinho,
-      sem desligar nada.
-  */
-  Serial.println(F("READY,PUNCH_MPU6050,V3"));
+      E o `READY` vem primeiro porque e ele que faz o jogo reconhecer
+      esta COM como sendo a do Arduino. Qualquer coisa antes dele que
+      possa travar -- procurar sensor, calibrar -- e uma porta certa
+      sendo descartada como muda. */
+  Serial.println(F("READY,PUNCH_MPU6050,V9"));
 
   Wire.begin();
-  Wire.setClock(400000); // I2C rapido: a leitura nao pode atrasar a amostragem
+  Wire.setClock(400000);   // I2C rapido: a leitura nao pode atrasar a amostragem
+
+  ultimaAmostraUs = micros();
 
   if (ligarMpu()) {
     calibrar();
@@ -723,32 +869,29 @@ void setup() {
 }
 
 /*  Acorda o MPU e o deixa na escala do jogo. Devolve falso se ele nao
-    responde -- e nesse caso a placa continua trabalhando sem ele.
-*/
+    responde -- e nesse caso a placa continua trabalhando sem ele. */
 bool ligarMpu() {
   if (!mpuVivo()) {
     mpuPronto = false;
     return false;
   }
-  escreverReg(0x6B, 0x01); // PWR_MGMT_1: acorda, clock do giroscopio X
-  escreverReg(0x1A, 0x03); // CONFIG: DLPF ~44 Hz -- corta ruido, mantem o golpe
-  escreverReg(0x1B, 0x18); // GYRO_CONFIG: +/-2000  graus/s
-  escreverReg(0x1C, 0x18); // ACCEL_CONFIG: +/-16 g
+  escreverReg(0x6B, 0x01);   // PWR_MGMT_1: acorda, clock do giroscopio X
+  escreverReg(0x1A, 0x03);   // CONFIG: DLPF ~44 Hz -- corta ruido, mantem o golpe
+  escreverReg(0x1B, 0x18);   // GYRO_CONFIG: +/-2000 graus/s
+  escreverReg(0x1C, 0x18);   // ACCEL_CONFIG: +/-16 g
   delay(50);
   mpuPronto = true;
+  baseIniciada = false;      // base nova para um sensor recem-ligado
   return true;
 }
 
 /*  Tenta o sensor de novo, de dois em dois segundos, enquanto ele
-    faltar. E o que permite consertar um fio com a maquina ligada.
-*/
+    faltar. E o que permite consertar um fio com a maquina ligada. */
 void insistirNoMpu() {
   if (mpuPronto) return;
   const unsigned long agora = millis();
   if (agora - ultimaTentativaMpu < 2000) return;
   ultimaTentativaMpu = agora;
-  // O LED de status pisca enquanto falta sensor: e a pista de quem esta
-  // com a tampa aberta.
   digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
   if (ligarMpu()) {
     digitalWrite(LED_STATUS, LOW);

@@ -175,8 +175,20 @@ var score_dead_zone := ScoreCurve.DEFAULT_DEAD_ZONE
 ## Configuração enviada ao firmware (CONFIG,eixo,raio,vmin,amin).
 var sensor_eixo := "X"
 var sensor_raio := 0.45
-var sensor_vmin := 0.8
-var sensor_amin := 3.5
+## O PISO QUE O JOGO MANDA À PLACA É O MESMO PISO DA PONTUAÇÃO.
+##
+## Estava 0,8 aqui contra 0,30 no `ScoreCurve.DEFAULT_MIN_SPEED`, e a
+## diferença não era cosmética: o jogo manda este número à placa no
+## `CONFIG`, e a placa DESCARTA tudo abaixo dele. A faixa de 0,30 a 0,80
+## existia na curva de pontuação e nunca chegava a ser pontuada — golpe
+## fraco legítimo sumia antes de virar linha na serial, e o "RESTAURAR
+## PADRÕES" da Central já gravava 0,30, então a mesma máquina media
+## diferente antes e depois de alguém tocar naquele botão.
+##
+## Os dois vêm da mesma fonte agora. O gatilho de 3,0 g é o mesmo com que
+## o firmware V9 foi medido na bancada.
+var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
+var sensor_amin := 3.0
 ## Porta serial configurada; "" = automática (primeira disponível).
 var porta_configurada := ""
 
@@ -187,8 +199,33 @@ var espera_left := GameDef.ESPERA_DO_SOCO
 ## quando a espera acaba sem soco — e, sendo consumido na devolução,
 ## impede que a mesma ficha volte duas vezes.
 var credito_gasto := false
-## O GOLPE DA RODADA JÁ FOI. Um soco por rodada: o saco balança depois do
-## impacto e o MPU-6050 vê esse balanço como um segundo evento.
+## DOIS SOCOS POR JOGADOR, e cada um aparece sozinho na tela.
+##
+## A rodada deixou de ser um golpe só. São dois, um depois do outro, e a
+## interface mostra os dois SEPARADAMENTE — quem está jogando precisa ver
+## o que fez o primeiro antes de armar o segundo, senão a segunda tentativa
+## vira chute.
+##
+## A NOTA DA RODADA É O MELHOR DOS DOIS, e não a soma. A soma passaria de
+## 9999, e 9999 é o teto de que dependem os oito níveis do `ScoreTier`, a
+## cor da moldura de LED, a coluna das fitas, o ranking e o histórico das
+## estatísticas. Somar obrigaria a mexer em todos eles e a invalidar o
+## ranking que já está gravado. Com o melhor dos dois, a escala fica
+## exatamente onde estava — e a segunda tentativa continua valendo a pena,
+## porque ela pode substituir a primeira.
+const SOCOS_POR_RODADA := 2
+## Os socos desta rodada, na ordem em que aconteceram.
+## Cada item: {"pontos": int, "velocidade": float, "simulado": bool}
+var socos: Array = []
+## Quando o último soco entrou, em `animation_time`. É o relógio da
+## animação do cartão — o cartão do soco que acabou de acontecer nasce
+## grande e brilhando e assenta em meio segundo, que é o que faz a pessoa
+## olhar para ELE e não varrer a tela procurando o que mudou.
+var ultimo_soco_em := -100.0
+
+## O GOLPE DESTA TENTATIVA JÁ FOI. O saco balança depois do impacto e o
+## MPU-6050 vê esse balanço como um segundo evento; esta trava vale por
+## tentativa, e é rearmada quando a próxima começa.
 var golpe_registrado := false
 ## Instante do último golpe ACEITO, para o tempo morto entre eventos.
 ##
@@ -696,7 +733,11 @@ func _process(delta: float) -> void:
 				_processar_armado(passo)
 			GameDef.State.MEASURING:
 				if state_time >= GameDef.IMPACTO_DURACAO:
-					_entrar_em_resultado()
+					# Ainda há soco a dar? Rearma em vez de ir ao resultado.
+					if socos.size() < SOCOS_POR_RODADA:
+						_armar_proximo_soco()
+					else:
+						_entrar_em_resultado()
 			GameDef.State.RESULT:
 				_processar_resultado(passo)
 	queue_redraw()
@@ -816,6 +857,7 @@ func _processar_contagem(delta: float) -> void:
 		espera_left = GameDef.ESPERA_DO_SOCO
 		# A rodada nova começa sem golpe e sem saturação pendente.
 		golpe_registrado = false
+		socos.clear()
 		saturacao_recente = ""
 		sons.play("armado", -6.0)
 		sons.play("go")
@@ -832,11 +874,83 @@ func _processar_armado(delta: float) -> void:
 		# fazia o saldo evaporar sozinho. O limite continua existindo,
 		# senão a máquina passa a tarde armada se a pessoa foi embora,
 		# mas agora ele devolve em vez de cobrar.
-		sons.play("error", -4.0)
-		_devolver_credito()
-		_entrar_em_abertura()
+		# QUEM JÁ SOCOU NÃO TEM FICHA A RECEBER DE VOLTA.
+		#
+		# Com dois socos por rodada, a espera pode acabar no MEIO da
+		# rodada — o primeiro soco saiu, o segundo não. Devolver a ficha
+		# aí seria pagar de volta uma partida que aconteceu, e bastaria
+		# socar uma vez e esperar para jogar de graça a noite inteira.
+		# Quem já socou vai para o resultado com o que fez; só quem não
+		# socou nenhuma vez recebe a ficha de volta.
+		if socos.is_empty():
+			sons.play("error", -4.0)
+			_devolver_credito()
+			_entrar_em_abertura()
+		else:
+			_entrar_em_resultado()
+
+## O SEGUNDO SOCO DA RODADA.
+##
+## Entre um soco e outro a máquina NÃO volta ao resultado nem à abertura:
+## ela rearma. O que muda em relação ao primeiro é só o relógio da espera
+## e o aviso na tela — o resto do caminho do golpe é exatamente o mesmo,
+## de propósito, para não haver dois jeitos de um soco ser aceito.
+##
+## SOBRE O TEMPO MORTO E O SEGUNDO SOCO: o firmware exige 1,2 s desde o
+## fim do golpe anterior MAIS 200 ms de repouso antes de aceitar outro, e
+## o jogo exige os seus 900 ms. Somado, o segundo soco só passa a valer
+## cerca de 1,4 s depois do primeiro. Isso é DE PROPÓSITO: é o que impede
+## o balanço do saco de gastar a segunda tentativa. Nenhuma pessoa recua o
+## braço e acerta de novo em menos que isso, mas o aviso na tela existe
+## para que a pausa seja lida como parte do jogo, e não como travamento.
+func _armar_proximo_soco() -> void:
+	state = GameDef.State.ARMED
+	_iniciar_transicao()
+	state_time = 0.0
+	espera_left = GameDef.ESPERA_DO_SOCO
+	golpe_registrado = false
+	sons.play("armado", -6.0)
+	sons.play("go")
+	moldura.set_estado(LedFrame.ARMADA)
+	_show_notice("SOCO %d DE %d" % [socos.size() + 1, SOCOS_POR_RODADA])
+
+## FECHA A RODADA E DECIDE A NOTA.
+##
+## Aqui, e só aqui, a rodada vira ranking, estatística e disco. Enquanto
+## isso ficou dentro de `_registrar_impacto`, cada soco entrava no Top 20
+## sozinho: dois socos da mesma pessoa disputavam duas linhas da tabela,
+## e a estatística contava duas partidas onde houve uma.
+func _fechar_rodada() -> void:
+	var melhor := 0
+	var melhor_v := 0.0
+	var simulado := false
+	for soco in socos:
+		if int(soco["pontos"]) >= melhor:
+			melhor = int(soco["pontos"])
+			melhor_v = float(soco["velocidade"])
+		if bool(soco["simulado"]):
+			simulado = true
+	result_score = clampi(melhor, 0, GameDef.SCORE_MAX)
+	result_speed = melhor_v
+	result_simulado = simulado
+
+	plays += 1
+	var origem := "SIMULAÇÃO" if result_simulado else "MPU-6050"
+	posicao_no_ranking = _entrar_no_ranking(result_score, result_photo_path, origem)
+	photo_retained = posicao_no_ranking > 0
+	# A TABELA SÓ APARECE 2,5 s (NO MÍNIMO) DEPOIS DAQUI. Tempo de sobra
+	# para o pool de linhas decodificar qualquer foto do Top 20 que ainda
+	# não estava em cache, antes de a tela precisar dela de verdade.
+	_prewarm_fotos_do_ranking()
+	statistics = StatisticsStore.record(
+		statistics, result_score,
+		GameDef.faixa_de(result_score),
+		posicao_no_ranking > 0
+	)
+	_salvar()
 
 func _entrar_em_resultado() -> void:
+	_fechar_rodada()
 	sons.start_score_loop()
 	state = GameDef.State.RESULT
 	state_time = 0.0
@@ -1210,6 +1324,15 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	## chegam juntos e nenhum dos dois brilha.
 	# A ficha foi usada de verdade: daqui em diante não há o que devolver.
 	credito_gasto = false
+	# O SOCO ENTRA NA RODADA. A nota da rodada sai em `_fechar_rodada`;
+	# aqui o que importa é ESTE golpe, porque é ele que manda no
+	# espetáculo do impacto — nível, tremor, clarão e som.
+	socos.append({
+		"pontos": clampi(pontos, 0, GameDef.SCORE_MAX),
+		"velocidade": maxf(velocidade, 0.0),
+		"simulado": simulado,
+	})
+	ultimo_soco_em = animation_time
 	result_score = clampi(pontos, 0, GameDef.SCORE_MAX)
 	result_speed = maxf(velocidade, 0.0)
 	result_simulado = simulado
@@ -1237,21 +1360,11 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	zoom_impacto = float(receita["zoom"])
 	pancada_tempo = 0.0
 	pancada_forca = forca
-	plays += 1
-	var origem := "SIMULAÇÃO" if simulado else "MPU-6050"
-	posicao_no_ranking = _entrar_no_ranking(result_score, result_photo_path, origem)
-	photo_retained = posicao_no_ranking > 0
-	# A TABELA SÓ APARECE 2,5 s (NO MÍNIMO) DEPOIS DAQUI. Tempo de sobra
-	# para o pool de linhas decodificar qualquer foto do Top 20 que
-	# ainda não estava em cache, antes de a tela precisar dela de
-	# verdade.
-	_prewarm_fotos_do_ranking()
-	statistics = StatisticsStore.record(
-		statistics, result_score,
-		GameDef.faixa_de(result_score),
-		posicao_no_ranking > 0
-	)
-	_salvar()
+	# RANKING, ESTATÍSTICA E DISCO SAÍRAM DAQUI, e isso é a correção que
+	# os dois socos exigem: enquanto estavam neste ponto, cada soco entrava
+	# no Top 20 sozinho — dois socos da mesma pessoa disputando duas linhas
+	# da tabela, e a estatística contando duas partidas onde houve uma.
+	# Agora é `_fechar_rodada`, uma vez por rodada, com a nota final.
 
 func _disparar_veredito() -> void:
 	sons.stop("score_loop")
@@ -1695,7 +1808,18 @@ func _tentar_conectar() -> void:
 	# É também o defeito que aparece SÓ NO COMPUTADOR NOVO, porque no PC
 	# de quem desenvolve a extensão está sempre lá.
 	if link == null or not link.available():
-		serial_status = "SEM CAMINHO ATÉ O ARDUINO — VEJA docs/PROTOCOLO_SERIAL.md"
+		# A FRASE PRECISA DIZER O QUE FAZER, e não só que deu errado.
+		#
+		# "SEM CAMINHO ATÉ O ARDUINO" é o estado em que NENHUM dos dois
+		# caminhos subiu — nem a extensão nativa, nem a ponte por
+		# processo. Num PC de destino a causa quase sempre é uma das duas
+		# do arquivo docs/QUANDO_NAO_ACHA_O_ARDUINO.md, e as duas se
+		# conferem em um minuto. Mandar a pessoa ler o protocolo serial
+		# inteiro era mandá-la para o lugar errado.
+		serial_status = "SEM CAMINHO ATÉ O ARDUINO — %s" % (
+			link.motivo_da_falta() if link != null and not link.motivo_da_falta().is_empty()
+			else "VEJA docs/QUANDO_NAO_ACHA_O_ARDUINO.md"
+		)
 		proxima_tentativa = animation_time + 1.0
 		return
 	portas_visiveis = link.list_ports()
@@ -2392,7 +2516,7 @@ func _click_central(p: Vector2) -> void:
 		sensor_eixo = "X"
 		sensor_raio = 0.45
 		sensor_vmin = ScoreCurve.DEFAULT_MIN_SPEED
-		sensor_amin = 3.5
+		sensor_amin = 3.0
 		_show_notice("PADRÕES RESTAURADOS")
 	else:
 		return
@@ -2875,9 +2999,13 @@ func _draw_partida() -> void:
 func _draw_espera_do_soco() -> void:
 	_draw_farol(Paleta.AMBAR)
 	var piscada := 0.78 + 0.22 * sin(animation_time * 4.4)
-	_texto_arcade("SOQUE AGORA!", 1420.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
+	var chamada := "SOQUE AGORA!" if socos.is_empty() else "AGORA O SEGUNDO!"
+	_texto_arcade(chamada, 1420.0, 96, Color(Color.WHITE, piscada), LARGURA_UTIL)
 	_rotulo("ACERTE O ALVO COM TODA A FORÇA", 1488.0, Color.WHITE)
 	_rotulo("RECORDE DA CASA  %04d" % _melhor(), 1556.0, Paleta.AMBAR)
+	# Os dois socos ficam à vista DURANTE a espera: é enquanto se prepara
+	# para bater que saber o que o primeiro valeu muda alguma coisa.
+	_draw_cartoes_dos_socos(1606.0, false)
 
 	# O RELÓGIO SÓ APARECE NO FIM, e vem acompanhado da promessa.
 	#
@@ -3098,6 +3226,10 @@ func _draw_score_hero() -> void:
 		_texto_arcade(ScoreTier.nome_de(result_score), 1440.0, 84, color, LARGURA_UTIL)
 		if posicao_no_ranking > 0:
 			_rotulo("%dº LUGAR NO TOP 20" % posicao_no_ranking, 1520.0, Paleta.AMBAR)
+		# OS DOIS SOCOS CONTINUAM À VISTA NO RESULTADO, com o que deu a
+		# nota marcado. É o que explica a nota final sem precisar de uma
+		# linha de texto dizendo "vale o melhor dos dois".
+		_draw_cartoes_dos_socos(1600.0, true)
 
 ## O CARREGANDO: UM ANEL QUE GIRA E UMA FRASE DO QUE ESTÁ ACONTECENDO.
 ##
@@ -3144,6 +3276,94 @@ func _carregando(centro: Vector2, raio: float, cor: Color, texto := "") -> void:
 ## `tabular` importa: sem ele, cada algarismo tem a sua largura e o
 ## placar DANÇA de lado enquanto sobe de 0000 a 9999.
 const PLACAR_CORPO := 190
+
+## OS DOIS SOCOS, LADO A LADO E CADA UM COM O SEU NÚMERO.
+##
+## Este é o pedido "dois socos apresentados individualmente", e ele é uma
+## exigência de JOGO antes de ser de tela: entre o primeiro e o segundo
+## golpe a pessoa precisa saber o que já fez para decidir como bater de
+## novo. Um total sozinho não diz isso — some com a informação que a
+## segunda tentativa existe para usar.
+##
+## Três estados por cartão, e os três se leem de longe:
+##   • VAZIO   — ainda não aconteceu: contorno apagado e travessão.
+##   • À ESPERA— é este que a máquina está esperando agora: borda âmbar
+##               pulsando, no mesmo compasso do "SOQUE AGORA!".
+##   • FEITO   — pontos em quatro dígitos e a velocidade crua embaixo.
+##
+## No resultado, o cartão que deu a nota da rodada ganha a cor do nível e
+## a palavra MELHOR. É o que explica, sem texto de ajuda, por que a nota
+## final é aquela.
+func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
+	const ALTURA := 132.0
+	const VAO := 24.0
+	var largura := (LARGURA_UTIL - VAO) * 0.5
+	# Qual soco vale a nota da rodada: o primeiro dos empatados, para a
+	# marca não pular de um cartão para o outro entre dois quadros.
+	var melhor_i := -1
+	var melhor_p := -1
+	for i in socos.size():
+		if int(socos[i]["pontos"]) > melhor_p:
+			melhor_p = int(socos[i]["pontos"])
+			melhor_i = i
+
+	for i in SOCOS_POR_RODADA:
+		var rect := Rect2(MARGEM + float(i) * (largura + VAO), y, largura, ALTURA)
+		var feito := i < socos.size()
+		var esperando := (not feito) and i == socos.size() and state == GameDef.State.ARMED
+		var eh_melhor := marcar_melhor and feito and i == melhor_i
+
+		var cor := Paleta.TINTA_LEVE
+		if eh_melhor:
+			cor = GameDef.classificar(int(socos[i]["pontos"]))["cor_faixa"]
+		elif feito:
+			cor = Paleta.TINTA_FRACA
+		elif esperando:
+			cor = Paleta.AMBAR
+
+		# O cartão do soco recém-chegado nasce maior e volta ao tamanho.
+		var crescer := 0.0
+		if feito and i == socos.size() - 1:
+			var idade := animation_time - ultimo_soco_em
+			if idade >= 0.0 and idade < 0.5:
+				crescer = (1.0 - idade / 0.5) * 10.0
+		var caixa := rect.grow(crescer)
+
+		var pulso := 1.0
+		if esperando:
+			pulso = 0.62 + 0.38 * sin(animation_time * 4.4)
+
+		_cartao(
+			caixa,
+			Paleta.CARTAO if feito or esperando else Paleta.VAZIO,
+			Color(cor, pulso),
+			1.0,
+			3.0 if (esperando or eh_melhor) else 2.0
+		)
+		_letreiro_centrado(
+			"SOCO %d" % (i + 1), caixa.position.y + 34.0,
+			_corpo(CORPO_APOIO), Color(cor, 0.95), fonte_texto
+		)
+		if feito:
+			_texto_arcade(
+				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 96.0, 56,
+				Color.WHITE if not eh_melhor else cor, caixa.size.x, caixa.position.x
+			)
+			_letreiro_centrado(
+				"%.1f m/s" % float(socos[i]["velocidade"]), caixa.position.y + 122.0,
+				_corpo(CORPO_APOIO), Paleta.TINTA_LEVE, fonte_texto
+			)
+			if eh_melhor:
+				_letreiro_centrado(
+					"MELHOR", caixa.position.y + 14.0,
+					_corpo(CORPO_APOIO), cor, fonte_texto
+				)
+		else:
+			_texto_arcade(
+				"– – – –" if not esperando else "AGORA",
+				caixa.position.y + 96.0, 44, Color(cor, pulso),
+				caixa.size.x, caixa.position.x
+			)
 
 func _placar(texto: String, centro: Vector2, cor: Color) -> void:
 	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO)

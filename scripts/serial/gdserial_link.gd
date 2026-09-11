@@ -154,6 +154,8 @@ func open_port(port: String, baud: int = GameDef.SERIAL_BAUD) -> bool:
 	return false
 
 func close_port() -> void:
+	# O meio de linha que ficou nao vale para a proxima porta.
+	_sobras.clear()
 	if _mgr != null and not _port.is_empty():
 		_mgr.close(_port)
 		var fechada := _port
@@ -172,12 +174,61 @@ func poll() -> void:
 	if _mgr != null:
 		_mgr.poll_events()
 
+## O QUE SOBROU DE UMA LEITURA, esperando o \n que fecha a linha.
+var _sobras := PackedByteArray()
+
+## Teto do que se guarda sem nunca ver um \n. Placa muda com o cabo na
+## tomada, ou porta que nao e Arduino nenhum, despeja bytes para sempre:
+## sem um teto, isso e memoria subindo a noite inteira.
+const LIMITE_DE_SOBRAS := 4096
+
+## AQUI ESTAVAM DOIS DEFEITOS, e os dois faziam SUMIR o soco.
+##
+## 1. CADA PEDACO ERA TRATADO COMO UMA LINHA INTEIRA.
+##    A serial nao entrega linhas, entrega bytes: um `HIT,4.10,14.00,50,X`
+##    chega partido em dois pedacos com frequencia, e dois pedacos chegam
+##    juntos com a mesma frequencia. Tratar cada pedaco como uma linha
+##    fazia o `ArduinoProtocol.parse` recusar as duas metades -- e a
+##    recusa e SILENCIOSA, porque e a mesma recusa que protege o jogo de
+##    lixo. O sintoma exato: "o Arduino conecta, mas os impactos nao
+##    chegam durante a partida". E piora com a camera ligada ou a F9
+##    aberta, porque o intervalo entre leituras aumenta e os pedacos
+##    ficam maiores.
+##
+## 2. OS BYTES ERAM LIDOS COMO UTF-8.
+##    `get_string_from_utf8()` num fluxo que e ASCII puro por contrato:
+##    qualquer byte de ruido de linha, lixo do reset da placa ou baud
+##    divergente vira "Unicode parsing error: Byte N is not a correct
+##    continuation byte after XX" no console -- e leva a linha junto.
+##
+## Agora os bytes sao acumulados, cortados no \n, e so o que e ASCII
+## imprimivel passa. O protocolo inteiro cabe em 0x20..0x7E, entao
+## descartar o resto nao perde nada que o jogo saiba ler.
 func _on_data(port: String, data: PackedByteArray) -> void:
 	if port != _port:
 		return
-	var line := data.get_string_from_utf8().strip_edges()
-	if not line.is_empty():
-		line_received.emit(line)
+	_sobras.append_array(data)
+	if _sobras.size() > LIMITE_DE_SOBRAS:
+		# Fica com a cauda: o comeco ja e lixo velho sem fim de linha.
+		_sobras = _sobras.slice(_sobras.size() - LIMITE_DE_SOBRAS)
+	while true:
+		var corte := _sobras.find(10)   # \n
+		if corte < 0:
+			break
+		var cru := _sobras.slice(0, corte)
+		_sobras = _sobras.slice(corte + 1)
+		var linha := _somente_ascii(cru)
+		if not linha.is_empty():
+			line_received.emit(linha)
+
+## So o ASCII imprimivel sobrevive. O \r do fim de linha do Windows cai
+## aqui junto com o ruido, que e o que se quer.
+static func _somente_ascii(cru: PackedByteArray) -> String:
+	var limpo := PackedByteArray()
+	for b in cru:
+		if b >= 32 and b <= 126:
+			limpo.append(b)
+	return limpo.get_string_from_ascii().strip_edges()
 
 func _on_disconnected(port: String) -> void:
 	if port != _port:
