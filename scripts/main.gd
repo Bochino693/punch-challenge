@@ -187,6 +187,18 @@ var sensor_raio := 0.45
 ##
 ## Os dois vêm da mesma fonte agora. O gatilho de 3,0 g é o mesmo com que
 ## o firmware V9 foi medido na bancada.
+## O QUE A PLACA DIZ DA PRÓPRIA DETECÇÃO. Ver `STATUS` no firmware.
+##
+## `sensor_pronto` falso com a máquina PARADA é a resposta inteira para
+## "o sensor não faz nada": a montagem nunca fica quieta o bastante, a
+## autorização de soco nunca acende, e NENHUM golpe será aceito. Sem este
+## número, isso é indistinguível de sensor desligado.
+var sensor_pronto := false
+var sensor_ruido := 0.0
+var sensor_quietas := 0
+## A última recusa da placa, em palavras de gente. Ver `_recusa_da_placa`.
+var ultima_recusa := ""
+
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 var sensor_amin := 3.0
 ## Porta serial configurada; "" = automática (primeira disponível).
@@ -2182,6 +2194,15 @@ func _on_serial_line(line: String) -> void:
 				msg["gyro"].x, msg["gyro"].y, msg["gyro"].z,
 				msg["peak_g"],
 			]
+		"REJECT":
+			_recusa_da_placa(msg)
+		"STATUS":
+			sensor_pronto = bool(msg["ready"])
+			sensor_ruido = float(msg["noise_g"])
+			sensor_quietas = int(msg["quiet_samples"])
+		"NOISE":
+			sensor_ruido = float(msg["noise_g"])
+			_show_notice("PISO DE RUÍDO MEDIDO: %.3f g" % sensor_ruido)
 		"SATURATION":
 			# SATURAÇÃO NÃO VIRA 9999. O sensor chegou ao fim da escala e
 			# parou de medir: a máquina não sabe quanto aquele golpe valeu,
@@ -2227,6 +2248,39 @@ func _sensor_apareceu() -> void:
 	sensor_presente = true
 	serial_status = "CONECTADO %s" % porta_atual
 
+## A PLACA VIU ALGO E DESCARTOU — E AGORA ISSO APARECE NA TELA.
+##
+## Este é o buraco que fez este projeto andar em círculos. Quando a
+## máquina não marcava o soco, não havia como saber SE a placa tinha
+## visto alguma coisa nem POR QUE descartou: "nada acontece" é o mesmo
+## sintoma para sensor sem sinal, evento abaixo do gatilho, forma
+## recusada, giro de menos e velocidade abaixo do piso. Sem distinguir
+## entre elas, só resta adivinhar um limiar por vez — que é exatamente o
+## que se fez, versão após versão.
+##
+## Cada motivo aponta um ajuste diferente, e a frase diz qual:
+const RECUSAS := {
+	"CURTO": "EVENTO CURTO DEMAIS — VIBRAÇÃO, NÃO SOCO",
+	"LENTO": "SUBIDA LENTA — EMPURRÃO, NÃO IMPACTO",
+	"SUSTENTADO": "FORÇA SUSTENTADA — O SINAL NÃO CAIU",
+	"GIRO": "O ALVO NÃO SE MOVEU — BAIXE O GIRO MÍNIMO",
+	"FRACO": "ABAIXO DO PISO DE VELOCIDADE",
+}
+
+func _recusa_da_placa(msg: Dictionary) -> void:
+	# Golpe recusado ainda é prova de que o sensor está vivo e medindo.
+	_sensor_apareceu()
+	var motivo := str(msg["reason"])
+	ultima_recusa = "%s  •  %.1f g, %.0f ms, %.0f °/s, %.2f m/s" % [
+		motivo, float(msg["peak_g"]), float(msg["duration_ms"]),
+		float(msg["gyro_dps"]), float(msg["speed"]),
+	]
+	telemetria = "RECUSADO: %s" % ultima_recusa
+	# Só incomoda quem está jogando quando ele está esperando um soco —
+	# fora daí a informação fica na Central, que é onde se regula.
+	if state == GameDef.State.ARMED and not central_aberta:
+		_show_notice(str(RECUSAS.get(motivo, "GOLPE RECUSADO: %s" % motivo)))
+
 func _receber_hit(msg: Dictionary) -> void:
 	# Golpe medido é a prova definitiva de que o sensor está lá, mesmo que
 	# o `OK,MPU` tenha se perdido no cabo.
@@ -2254,11 +2308,23 @@ func _receber_hit(msg: Dictionary) -> void:
 		return
 	# 4) O EVENTO PRECISA TER FÍSICA DE SOCO. Duração e pico de aceleração
 	#    não entram na nota — eles decidem se aquilo foi um soco.
+	# AS RECUSAS DO JOGO TAMBÉM FALAM. Elas eram anotadas só na linha de
+	# telemetria da Central — invisíveis para quem está com a máquina na
+	# frente. E são especialmente traiçoeiras porque os limiares ficam
+	# GRAVADOS NO DISCO: um `sensor_amin` de uma versão antiga sobrevive à
+	# atualização e passa a recusar, em silêncio, golpes que a placa já
+	# tinha aprovado.
 	if duracao < DURACAO_MINIMA_MS:
+		ultima_recusa = "o jogo recusou: %.0f ms (mínimo %.0f)" % [duracao, DURACAO_MINIMA_MS]
 		telemetria += "  •  recusado: curto demais"
+		if state == GameDef.State.ARMED and not central_aberta:
+			_show_notice("EVENTO CURTO DEMAIS")
 		return
 	if pico < sensor_amin:
+		ultima_recusa = "o jogo recusou: %.1f g (mínimo %.1f)" % [pico, sensor_amin]
 		telemetria += "  •  recusado: pico abaixo de %.1fg" % sensor_amin
+		if state == GameDef.State.ARMED and not central_aberta:
+			_show_notice("PICO ABAIXO DE %.1f g — AJUSTE NA CENTRAL" % sensor_amin)
 		return
 	golpe_registrado = true
 	ultimo_golpe_ms = Time.get_ticks_msec()
@@ -4055,6 +4121,35 @@ func _central_dados() -> void:
 		888.0, 17, Paleta.VERDE if sensor_presente else Paleta.AMBAR,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
+	# A TERCEIRA PERGUNTA, QUE FALTAVA: O SENSOR ESTÁ PRONTO PARA ACEITAR?
+	#
+	# "Porta aberta", "placa identificada" e "sensor presente" já eram
+	# estados distintos aqui. Faltava o quarto, e é o que estava matando a
+	# máquina em silêncio: a placa só aceita um soco depois de ver a
+	# montagem PARADA por 200 ms seguidos. Numa montagem que vibra — caixa
+	# de som dentro do gabinete, ventilador, salão cheio — essa autorização
+	# pode nunca acender, e aí nenhum golpe é aceito, nunca, sem nada na
+	# tela dizendo por quê.
+	#
+	# Se esta linha ficar VERMELHA com a máquina parada, é esta a resposta
+	# inteira: recalibre (a calibração mede o ruído desta montagem) ou veja
+	# o que está vibrando.
+	_texto(
+		"detecção: %s  •  piso de ruído %.3f g  •  %d amostras quietas" % [
+			"PRONTA PARA O SOCO" if sensor_pronto else "NÃO ARMADA — a montagem não fica quieta",
+			sensor_ruido, sensor_quietas,
+		],
+		916.0, 17, Paleta.VERDE if sensor_pronto else Paleta.VERMELHO,
+		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+	)
+	# A ÚLTIMA RECUSA, COM OS NÚMEROS DO EVENTO. É o que diz QUAL limiar
+	# está errado nesta montagem, em vez de deixar adivinhar um por vez.
+	if not ultima_recusa.is_empty():
+		_texto(
+			"última recusa: %s" % ultima_recusa,
+			944.0, 15, Paleta.AMBAR, HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
+		)
+
 	# A EXTENSÃO NATIVA CARREGOU? A PERGUNTA QUE FALTAVA, e a que explica
 	# o "funciona no meu PC" inteiro.
 	#

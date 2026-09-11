@@ -80,6 +80,50 @@ static func parse(line: String) -> Dictionary:
 			if vals[0] < 0.0 or vals[0] > 60.0 or vals[1] < 0.0 or vals[1] > 17.0 or vals[2] <= 0.0 or vals[2] > 5000.0:
 				return {"type": ""}
 			return {"type": "HIT", "speed": vals[0], "accel": vals[1], "duration_ms": vals[2], "axis": eixo}
+		"REJECT":
+			# REJECT,<motivo>,<pico_g>,<duracao_ms>,<giro_dps>,<velocidade>
+			#
+			# A PLACA VIU ALGO E DESCARTOU, e diz por quê. É o que
+			# transforma "nada acontece" — que é o mesmo sintoma para seis
+			# causas diferentes — numa frase que aponta o limiar errado.
+			if parts.size() != 6:
+				return {"type": ""}
+			var nums := _floats(parts, 2, 4)
+			if nums.is_empty():
+				return {"type": ""}
+			return {
+				"type": "REJECT",
+				"reason": parts[1].strip_edges().to_upper(),
+				"peak_g": nums[0],
+				"duration_ms": nums[1],
+				"gyro_dps": nums[2],
+				"speed": nums[3],
+			}
+		"STATUS":
+			# STATUS,<pronto>,<amostras_quietas>,<ruido_g>,<gatilho_g>
+			#
+			# `pronto` em 0 com a máquina PARADA é a resposta inteira: a
+			# montagem nunca fica quieta, nenhum golpe será aceito.
+			if parts.size() != 5:
+				return {"type": ""}
+			var st := _floats(parts, 2, 3)
+			if st.is_empty():
+				return {"type": ""}
+			return {
+				"type": "STATUS",
+				"ready": parts[1].strip_edges() == "1",
+				"quiet_samples": int(st[0]),
+				"noise_g": st[1],
+				"trigger_g": st[2],
+			}
+		"NOISE":
+			# NOISE,<ruido_g>,<ruido_dps> — o piso medido nesta montagem.
+			if parts.size() != 3:
+				return {"type": ""}
+			var nz := _floats(parts, 1, 2)
+			if nz.is_empty():
+				return {"type": ""}
+			return {"type": "NOISE", "noise_g": nz[0], "noise_dps": nz[1]}
 		"SATURATION":
 			if parts.size() != 2:
 				return {"type": ""}

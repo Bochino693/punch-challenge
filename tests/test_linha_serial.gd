@@ -23,6 +23,7 @@ func _initialize() -> void:
 	_test_byte_a_byte()
 	_test_lixo_nao_ascii_nao_derruba_a_linha_boa()
 	_test_teto_das_sobras()
+	_test_diagnosticos_da_placa()
 	print("LINHA_SERIAL_OK")
 	quit(0)
 
@@ -102,3 +103,30 @@ func _test_teto_das_sobras() -> void:
 	_mandar(elo, "\n" + HIT + "\n")
 	if not _colhidas.has(HIT):
 		_falhar("depois do lixo a linha boa tem de passar: %s" % str(_colhidas))
+
+
+## AS MENSAGENS DE DIAGNÓSTICO DA PLACA.
+##
+## Elas são a diferença entre "nada acontece" e uma frase que aponta o
+## limiar errado. Se o protocolo as recusar, elas somem exatamente como
+## sumia o HIT — em silêncio — e o diagnóstico volta a ser adivinhação.
+func _test_diagnosticos_da_placa() -> void:
+	var r := ArduinoProtocol.parse("REJECT,GIRO,9.20,45,3.1,2.10")
+	if r["type"] != "REJECT" or str(r["reason"]) != "GIRO":
+		_falhar("REJECT não foi entendido: %s" % str(r))
+	if not is_equal_approx(float(r["peak_g"]), 9.2) or not is_equal_approx(float(r["speed"]), 2.10):
+		_falhar("números do REJECT: %s" % str(r))
+
+	var st := ArduinoProtocol.parse("STATUS,0,37,0.158,3.00")
+	if st["type"] != "STATUS" or bool(st["ready"]):
+		_falhar("STATUS não foi entendido: %s" % str(st))
+	if int(st["quiet_samples"]) != 37:
+		_falhar("amostras quietas: %s" % str(st))
+
+	var nz := ArduinoProtocol.parse("NOISE,0.158,12.0")
+	if nz["type"] != "NOISE" or not is_equal_approx(float(nz["noise_g"]), 0.158):
+		_falhar("NOISE não foi entendido: %s" % str(nz))
+
+	# Mensagem truncada continua sendo lixo, e lixo não vira diagnóstico.
+	if ArduinoProtocol.parse("REJECT,GIRO,9.20")["type"] != "":
+		_falhar("REJECT incompleto tem de ser recusado")
