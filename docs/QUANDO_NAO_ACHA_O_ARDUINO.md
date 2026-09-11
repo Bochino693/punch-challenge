@@ -84,6 +84,37 @@ diz qual dos dois está em uso:
 > antivírus estiver barrando, o caminho certo é tratar com quem
 > administra a máquina, não contornar.
 
+## 3a. "Conecta e desconecta sem parar" no PC de destino
+
+Sintoma: a Central mostra "ponte PowerShell", depois "nenhum", e de novo,
+sem nunca firmar. É o caso mais confuso de todos, porque **no PC de quem
+desenvolve ele nunca aparece** — lá a extensão nativa carrega e a ponte
+nunca chega a ser usada. No PC de destino a ponte é o único caminho, e
+era ela que estava quebrada.
+
+**A solução mais direta é fazer o PC de destino usar a extensão nativa,
+como o seu PC de produção faz.** Um comando, uma vez por máquina:
+
+Instale o **Visual C++ 2015-2022 Redistributable (x64)** da Microsoft.
+Confira antes:
+
+```powershell
+Test-Path C:\Windows\System32\VCRUNTIME140.dll
+```
+
+`False` → é isto. A `gdserial.dll` importa esse arquivo, que não faz
+parte do Windows. Sem ele o Windows nem carrega a extensão, o jogo cai
+para a ponte, e passa a depender de PowerShell, política de execução e
+antivírus — tudo que a extensão nativa não precisa.
+
+Com o redistribuível instalado, o PC de destino passa a usar exatamente
+o mesmo caminho que o seu PC de produção. A ponte volta a ser o que
+deveria ser: um plano B que quase nunca entra.
+
+Se ainda assim quiser rodar pela ponte, a Central agora mostra **o que o
+PowerShell respondeu** antes de cair — a frase aparece entre parênteses
+na linha "caminho até a placa". Me mande essa frase.
+
 ## 3b. A orientação do sensor NÃO importa mais
 
 Se você já leu em algum lugar que o sensor precisa estar montado com o
