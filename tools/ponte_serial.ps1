@@ -258,9 +258,25 @@ function Enumerar() {
     $nomes = @($todos | Where-Object { $_ } | Sort-Object -Unique)
     if ($nomes.Count -eq 0) { return @() }
 
+    # A PONTE JA SABE QUAL PORTA TEM CARA DE ARDUINO -- E PASSA A DIZER.
+    #
+    # Esta funcao sempre soube separar as duas: o gerenciador de
+    # dispositivos diz "Arduino Uno (COM3)" ou "USB-SERIAL CH340 (COM5)",
+    # e `ChiaAArduino` reconhece. Mas o que ia para o jogo era so a ORDEM,
+    # e ordem se perde: o jogo gastava a mesma paciencia longa numa porta
+    # de Bluetooth e na porta da placa. Com quatro portas antes da certa,
+    # isso e meio minuto de "PROCURANDO ARDUINO..." com a placa espetada e
+    # falando.
+    #
+    # O asterisco marca "esta tem cara de Arduino". O jogo da a paciencia
+    # inteira as marcadas e uma paciencia curta as outras -- e o caso
+    # normal, que e a placa aparecer com o nome dela, passa a resolver em
+    # segundos. Nome sem asterisco continua sendo tentado: marca e
+    # PREFERENCIA, nunca cadeado, porque ha driver generico que nao se
+    # anuncia.
     $frente = @($nomes | Where-Object { ChiaAArduino ([string]$script:mapaPnp[$_]) } | Sort-Object { NumeroDaPorta $_ })
     $fundo  = @($nomes | Where-Object { -not (ChiaAArduino ([string]$script:mapaPnp[$_])) } | Sort-Object { NumeroDaPorta $_ })
-    return @($frente + $fundo)
+    return @(@($frente | ForEach-Object { "$_*" }) + $fundo)
 }
 
 function AnunciarPortas([bool]$sempre) {

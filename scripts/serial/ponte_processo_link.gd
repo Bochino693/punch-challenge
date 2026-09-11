@@ -46,6 +46,8 @@ var _cano: FileAccess = null
 var _pid := -1
 var _apresentou := false
 var _portas: PackedStringArray = PackedStringArray()
+## As que o sistema chama de Arduino/CH340/FTDI. Ver `portas_promissoras`.
+var _promissoras: PackedStringArray = PackedStringArray()
 var _porta := ""
 var _abrindo := ""
 var _ultima_abertura_ms := -100000
@@ -77,9 +79,32 @@ var _religadas := 0
 ## Ja funcionou alguma vez nesta sessao? Um ajudante que JA falou merece
 ## paciencia infinita; um que nunca falou merece a troca de receita.
 var _ja_falou := false
+## O caminho do PowerShell que de fato serviu nesta maquina.
+var _programa_que_serviu := ""
 
 const ESPERA_ENTRE_ABERTURAS_MS := 700
-const ESPERA_ENTRE_SUBIDAS_MS := 2500
+## A PRIMEIRA PAUSA ENTRE DUAS TENTATIVAS DE SUBIR O AJUDANTE.
+##
+## Ela DOBRA a cada fracasso, ate o teto. E a diferenca entre uma falha
+## passageira e uma falha permanente, e antes ela nao existia: a pausa era
+## fixa em 2,5 s, para sempre.
+##
+## POR QUE ISSO IMPORTA MAIS DO QUE PARECE. `_subir()` roda na THREAD
+## PRINCIPAL, e faz duas coisas caras: grava o script no disco e tenta
+## CRIAR PROCESSO ate seis vezes (a lista de candidatos a PowerShell). No
+## Windows, com o Defender examinando cada lancamento de PowerShell e cada
+## .ps1 recem-gravado, isso custa de centenas de milissegundos a segundos.
+## Numa maquina onde o PowerShell esta barrado por politica, o ajudante
+## NUNCA sobe -- e o jogo pagava esse preco a cada 2,5 segundos, a noite
+## inteira. E engasgo periodico no jogo e rodape piscando entre "subindo"
+## e "caiu", que e exatamente o que se ve na maquina.
+##
+## Com o recuo, uma falha permanente custa uma tentativa por minuto em vez
+## de vinte e quatro, e uma falha passageira continua sendo resolvida no
+## primeiro segundo e meio.
+const ESPERA_ENTRE_SUBIDAS_MS := 1500
+const ESPERA_ENTRE_SUBIDAS_TETO_MS := 60000
+var _espera_de_subida_ms := ESPERA_ENTRE_SUBIDAS_MS
 ## SEIS SEGUNDOS ERAM POUCOS, e o preco de errar era a maquina morta.
 ##
 ## O prazo existe para trocar de receita quando a politica do Windows
@@ -119,7 +144,23 @@ func _init() -> void:
 ## de exportado, e um indice dentro do .pck. Por isso ele e copiado para
 ## `user://` a cada partida -- barato (poucos KB) e garante que uma
 ## correcao no script chegue junto com a atualizacao do jogo.
+## O QUE JA FOI DESEMBRULHADO NESTA SESSAO. Regravar o mesmo .ps1 a cada
+## tentativa e disco na thread principal e, pior, um arquivo de script
+## recem-escrito para o antivirus examinar de novo -- toda vez. Uma vez por
+## sessao basta: o conteudo so muda quando o jogo e atualizado, e uma
+## atualizacao reinicia o processo.
+static var _desembrulhados := {}
+
 static func _desembrulhar(origem: String, nome: String) -> String:
+	if _desembrulhados.has(origem):
+		var guardado: String = _desembrulhados[origem]
+		if not guardado.is_empty() and FileAccess.file_exists(guardado):
+			return guardado
+	var achado := _desembrulhar_de_fato(origem, nome)
+	_desembrulhados[origem] = achado
+	return achado
+
+static func _desembrulhar_de_fato(origem: String, nome: String) -> String:
 	# NO EDITOR, `res://` E UMA PASTA DE VERDADE -- e vale usar o arquivo
 	# de la, sem copia. Nao e economia: e que um `powershell.exe -File`
 	# apontando para dentro do AppData e um dos desenhos que antivirus
@@ -298,7 +339,17 @@ func _subir() -> void:
 	var canos := {}
 	var ultimo := ""
 	var recusados: Array[String] = []
-	for candidato in receita[1]:
+	# O CANDIDATO QUE JA FUNCIONOU VAI NA FRENTE.
+	#
+	# A lista tem seis lugares onde o PowerShell pode estar, e percorre-la
+	# do zero a cada tentativa significa repetir ate cinco criacoes de
+	# processo fracassadas -- na thread principal -- antes de chegar na que
+	# presta. Nesta maquina, a que presta e sempre a mesma.
+	var candidatos: Array = receita[1].duplicate()
+	if not _programa_que_serviu.is_empty() and candidatos.has(_programa_que_serviu):
+		candidatos.erase(_programa_que_serviu)
+		candidatos.push_front(_programa_que_serviu)
+	for candidato in candidatos:
 		ultimo = str(candidato)
 		canos = OS.execute_with_pipe(ultimo, argumentos)
 		if not canos.is_empty() and canos.has("stdio"):
@@ -308,6 +359,9 @@ func _subir() -> void:
 	if canos.is_empty():
 		_falha = "o sistema recusou abrir %s" % ", ".join(recusados)
 		return
+	_programa_que_serviu = ultimo
+	# Nasceu: a espera volta ao minimo para a proxima queda.
+	_espera_de_subida_ms = ESPERA_ENTRE_SUBIDAS_MS
 	_cano = canos["stdio"]
 	_pid = int(canos.get("pid", -1))
 	_prazo_da_apresentacao_ms = Time.get_ticks_msec() + ESPERA_DA_APRESENTACAO_MS
@@ -448,6 +502,15 @@ func descricao() -> String:
 func list_ports() -> PackedStringArray:
 	return _portas
 
+## AS PORTAS QUE O SISTEMA IDENTIFICA COMO PLACA, e nao apenas como porta.
+##
+## Vazio quer dizer "nao sei" -- e "nao sei" nao pode virar "nenhuma":
+## quando a lista esta vazia o jogo trata TODAS com a paciencia inteira,
+## que e exatamente o comportamento antigo. A marca so acelera quando ha
+## informacao; ela nunca exclui uma porta da fila.
+func portas_promissoras() -> PackedStringArray:
+	return _promissoras
+
 func open_port(port: String, baud: int = GameDef.SERIAL_BAUD) -> bool:
 	if _cano == null or port.is_empty():
 		return false
@@ -509,7 +572,12 @@ func poll() -> void:
 		# `SerialLink.poll`.
 		var agora := Time.get_ticks_msec()
 		if agora >= _proxima_subida_ms:
-			_proxima_subida_ms = agora + ESPERA_ENTRE_SUBIDAS_MS
+			_proxima_subida_ms = agora + _espera_de_subida_ms
+			# Dobra a espera enquanto fracassa; `_subir` a devolve ao
+			# minimo assim que o ajudante nasce.
+			_espera_de_subida_ms = mini(
+				_espera_de_subida_ms * 2, ESPERA_ENTRE_SUBIDAS_TETO_MS
+			)
 			_religadas += 1
 			_subir()
 		return
@@ -619,8 +687,19 @@ func _digerir(linha: String) -> void:
 			_escrever("@LISTAR")
 		"PORTAS":
 			var achadas := PackedStringArray()
+			var promissoras := PackedStringArray()
 			for i in range(1, campos.size()):
 				var nome := campos[i].strip_edges()
+				if nome.is_empty():
+					continue
+				# O ASTERISCO VEM DA PONTE e quer dizer "o gerenciador de
+				# dispositivos chama isto de Arduino/CH340/FTDI". Ele sai
+				# do nome aqui: ninguem abaixo desta linha precisa saber
+				# que ele existiu, so a fila de tentativas do jogo.
+				if nome.ends_with("*"):
+					nome = nome.substr(0, nome.length() - 1).strip_edges()
+					if not nome.is_empty():
+						promissoras.append(nome)
 				if not nome.is_empty():
 					achadas.append(nome)
 			# LISTA VAZIA NAO APAGA A LISTA BOA.
@@ -634,6 +713,7 @@ func _digerir(linha: String) -> void:
 			if achadas.is_empty() and is_open():
 				return
 			_portas = achadas
+			_promissoras = promissoras
 		"ABERTA":
 			_porta = campos[1].strip_edges() if campos.size() > 1 else _abrindo
 			_abrindo = ""
