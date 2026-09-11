@@ -1,8 +1,23 @@
 extends SceneTree
 
 ## Testes de fluxo: abre a cena de verdade e dirige a máquina de estados.
-## Prova as regras que valem dinheiro — crédito, golpe válido, foto — e
-## as que valem confiança: a barra de espaço não pontua em salão.
+## Prova as regras que valem dinheiro — crédito, golpe válido, foto.
+##
+## LEIA O `SHOW_FLOW_OK` COM DESCONFIANÇA, E OLHE O ERRO PADRÃO JUNTO.
+##
+## `assert()` neste arranjo (`--headless --script`) IMPRIME a falha e
+## SEGUE EM FRENTE: não derruba o processo e não muda o código de saída.
+## Ou seja, este arquivo já imprimiu `SHOW_FLOW_OK` durante muito tempo
+## enquanto falhava — e foi assim que se acumulou a impressão de que o
+## projeto estava testado. Quem rodar isto precisa conferir que NÃO há
+## nenhuma linha `SCRIPT ERROR` na saída; só as duas coisas juntas são
+## um teste verde.
+##
+## Três testes saíram daqui porque exercitavam código que NÃO EXISTE mais
+## no jogo: a simulação por barra de espaço (`_apertou_espaco`,
+## `_soltou_espaco`, `carga_tempo`, `simulacao_bancada`,
+## `simulacao_escolhida`) e o botão "simulacao" da Central. Eles falhavam
+## em silêncio a cada rodada.
 
 class FakeCamera extends CameraService:
 	var shots := 0
@@ -26,10 +41,17 @@ func run() -> void:
 	root.add_child(jogo)
 	await process_frame
 	jogo.set_process(false)
-	# A máquina de testes nunca é a de um salão: sem simulação ligada e
-	# sem Central aberta, para as regras de produção valerem.
-	jogo.simulacao_bancada = false
-	jogo.simulacao_por_ambiente = false
+	# A máquina de testes nunca é a de um salão: sem Central aberta, para
+	# as regras de produção valerem.
+	#
+	# `simulacao_bancada` e `simulacao_por_ambiente` SAÍRAM DAQUI porque
+	# NÃO EXISTEM neste projeto -- nem em main.gd nem em nenhum outro
+	# script. Atribuir propriedade inexistente num `Control` não é erro de
+	# compilação: falha em tempo de execução, e falhava JÁ NA TERCEIRA
+	# LINHA deste arquivo. Ou seja, este teste não chegava a exercitar
+	# nada, e passava a impressão contrária por nunca ter sido rodado até
+	# o fim. Quem liberar a simulação de bancada de novo, use
+	# `_simulador_liberado()`, que é o que o jogo de fato consulta.
 	jogo.central_aberta = false
 
 	_test_entrada()
@@ -37,11 +59,9 @@ func run() -> void:
 	await _test_foto_antes_de_armar()
 	_test_hit_so_em_armed()
 	_test_um_golpe_por_rodada()
-	_test_barra_nao_pontua_em_producao()
 	_test_start_e_credito_independentes()
 	_test_timeout_devolve_credito()
 	_test_quatro_digitos()
-	_test_bancada_sem_sensor()
 	_test_medico_da_camera()
 	_test_interpretador_da_ponte()
 	_test_exame_nao_briga_com_a_ponte()
@@ -133,25 +153,12 @@ func _armar() -> void:
 	jogo.golpe_registrado = false
 	jogo.ultimo_golpe_ms = jogo.NUNCA_MS
 	jogo.result_score = 0
+	# RODADA LIMPA, e não só tentativa limpa. Desde os dois socos por
+	# rodada, `socos` decide coisas de dinheiro — entre elas se a ficha
+	# volta quando a espera acaba. Um teste que herdasse os socos do teste
+	# anterior provaria outra coisa que não a que diz provar.
+	jogo.socos.clear()
 
-# ------------------------------------------------- barra de espaço
-func _test_barra_nao_pontua_em_producao() -> void:
-	_armar()
-	assert(not jogo._simulador_liberado())
-	jogo._apertou_espaco()
-	assert(jogo.carga_tempo < 0.0)
-	jogo._soltou_espaco()
-	assert(jogo.state == GameDef.State.ARMED)
-	assert(jogo.result_score == 0)
-	# Com a chave da bancada ligada, ela volta a valer.
-	jogo.simulacao_bancada = true
-	_armar()
-	jogo._apertou_espaco()
-	assert(jogo.carga_tempo >= 0.0)
-	jogo.carga_tempo = 2.0
-	jogo._soltou_espaco()
-	assert(jogo.state == GameDef.State.MEASURING)
-	jogo.simulacao_bancada = false
 
 # ------------------------------------------------- START e CRÉDITO
 func _test_start_e_credito_independentes() -> void:
@@ -180,8 +187,12 @@ func _test_start_e_credito_independentes() -> void:
 	assert(jogo.credits == 0)
 	assert(jogo.credito_gasto)
 
+## A ESPERA QUE ACABA SEM NENHUM SOCO DEVOLVE A FICHA.
+## O caso oposto — espera acabando com um soco já dado — está em
+## `tests/test_dois_socos.gd`, junto do resto da rodada de dois golpes.
 func _test_timeout_devolve_credito() -> void:
 	jogo.state = GameDef.State.ARMED
+	jogo.socos.clear()
 	jogo.espera_left = 0.05
 	jogo.credito_gasto = true
 	jogo.game_mode = "credit"
@@ -206,51 +217,6 @@ func _test_quatro_digitos() -> void:
 	jogo.central_aberta = false
 	jogo.queue_redraw()
 
-# ------------------------------------------- bancada sem sensor
-## A BARRA TEM DE VOLTAR SOZINHA NUMA MÁQUINA SEM SENSOR.
-##
-## Uma instalação que rodou uma versão anterior tem `simulacao_bancada:
-## false` gravado no disco. Lendo só o arquivo, ela ficava com a barra
-## morta para sempre, esperando um MPU-6050 que ainda não existe — e o
-## sintoma era "o espaço parou de funcionar", sem nada na tela explicando.
-func _test_bancada_sem_sensor() -> void:
-	# Arquivo de uma versão anterior: desligada, e sem escolha do operador.
-	jogo.simulacao_bancada = false
-	jogo.simulacao_escolhida = false
-	var disco := FileAccess.open(SettingsStore.PATH, FileAccess.WRITE)
-	disco.store_string(JSON.stringify({"simulacao_bancada": false, "mode": "credit"}))
-	disco.close()
-	jogo._carregar()
-	assert(jogo.simulacao_bancada)
-	assert(jogo._simulador_liberado())
-
-	# PLACA ENCONTRADA NÃO É SENSOR ENCONTRADO, e a diferença importa.
-	#
-	# O firmware manda o `READY` ANTES de procurar o MPU-6050 — foi assim
-	# que os botões voltaram a funcionar com o sensor solto. Se o READY
-	# ainda desligasse a bancada, uma máquina SEM sensor perderia a barra
-	# de espaço e não sobraria jeito nenhum de jogar nela.
-	jogo._on_serial_line("READY,PUNCH_MPU6050,V3")
-	assert(jogo.simulacao_bancada)
-	assert(jogo._simulador_liberado())
-
-	# Quem desliga é a prova de que o sensor existe.
-	jogo._on_serial_line("OK,MPU")
-	assert(not jogo.simulacao_bancada)
-	assert(not jogo._simulador_liberado())
-
-	# E um golpe medido também prova, mesmo que o `OK,MPU` se perca.
-	jogo.simulacao_bancada = true
-	jogo.sensor_presente = false
-	jogo._on_serial_line("HIT,7.50,9.20,120,X")
-	assert(not jogo.simulacao_bancada)
-
-	# Mas a escolha do operador manda mais que o sensor.
-	jogo.simulacao_bancada = true
-	jogo.simulacao_escolhida = true
-	jogo.sensor_presente = false
-	jogo._on_serial_line("OK,MPU")
-	assert(jogo.simulacao_bancada)
 
 # ------------------------------------------- médico da câmera
 ## O DIAGNÓSTICO TEM DE AGIR, e não só relatar.
@@ -346,12 +312,12 @@ func _test_rolagem_da_central() -> void:
 	# lugar. Sem essa distinção, rolar faria o clique acertar outro botão.
 	jogo.central_pagina = 0
 	jogo.central_rolagem = 0.0
-	var alvo: Rect2 = jogo.BOTOES_SIMPLES["simulacao"]
+	var alvo: Rect2 = jogo.BOTOES_SIMPLES["modo_livre"]
 	var meio := alvo.position + alvo.size * 0.5
-	assert(jogo._tocou("simulacao", meio))
+	assert(jogo._tocou("modo_livre", meio))
 	jogo.central_rolagem = 120.0
-	assert(not jogo._tocou("simulacao", meio))
-	assert(jogo._tocou("simulacao", meio - Vector2(0.0, 120.0)))
+	assert(not jogo._tocou("modo_livre", meio))
+	assert(jogo._tocou("modo_livre", meio - Vector2(0.0, 120.0)))
 	var fixo: Rect2 = jogo.BOTOES_SIMPLES["salvar"]
 	assert(jogo._tocou("salvar", fixo.position + fixo.size * 0.5))
 
