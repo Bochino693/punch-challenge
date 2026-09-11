@@ -39,6 +39,7 @@ func run() -> void:
 	_test_rodada_entra_uma_vez_no_ranking()
 	_test_espera_esgotada_no_meio_nao_devolve()
 	_test_espera_esgotada_sem_soco_devolve()
+	_test_calibracao_nao_engole_o_jogo()
 
 	jogo.queue_free()
 	await process_frame
@@ -142,3 +143,46 @@ func _test_espera_esgotada_sem_soco_devolve() -> void:
 	jogo._process(0.02)
 	if jogo.credits != creditos_antes + 1:
 		_falhar("sem nenhum soco, a ficha volta (%d -> %d)" % [creditos_antes, jogo.credits])
+
+
+## O ASSISTENTE DE CALIBRAÇÃO NÃO PODE ENGOLIR A PARTIDA.
+##
+## `_receber_hit` decide, ANTES de tudo, que golpe recebido durante a
+## calibração vira AMOSTRA e não pontuação — e volta em silêncio. Está
+## certo enquanto a calibração está acontecendo.
+##
+## O defeito é que ela podia continuar "acontecendo" depois de fechada: o
+## F9 (`_fechar_central`) não desligava `calib_ativo`. Quem abrisse o
+## assistente e fechasse a Central pelo F9 — em vez de terminar os quatro
+## passos — deixava a máquina num estado em que TODO soco era consumido
+## como amostra de calibração e NENHUM pontuava. Em silêncio, para sempre,
+## até reiniciar o jogo.
+##
+## E o sintoma é cruel de diagnosticar, porque a máquina parece saudável:
+## a placa mede, a serial entrega, a Central mostra os números subindo — e
+## no jogo não acontece nada.
+func _test_calibracao_nao_engole_o_jogo() -> void:
+	# O caminho de quem regula a máquina e sai pelo F9.
+	jogo.central_aberta = true
+	jogo._abrir_calibracao()
+	jogo._fechar_central()
+	if jogo.calib_ativo:
+		_falhar("fechar a Central tem de encerrar a calibração")
+
+	# E, fechada a Central, o soco pontua como sempre.
+	_rodada_nova()
+	jogo._receber_hit(_golpe(3.0))
+	if jogo.state != GameDef.State.MEASURING:
+		_falhar("depois do F9 o soco tem de pontuar (estado %d)" % jogo.state)
+	if jogo.socos.size() != 1:
+		_falhar("o soco tem de entrar na rodada")
+
+	# Trava de segurança: mesmo que algo deixe a calibração ligada, um
+	# jogo com a Central FECHADA não pode ser engolido por ela.
+	jogo.calib_ativo = true
+	jogo.central_aberta = false
+	_rodada_nova()
+	jogo._receber_hit(_golpe(3.0))
+	if jogo.socos.size() != 1:
+		_falhar("calibração ligada com a Central fechada nao pode engolir o soco")
+	jogo._fechar_calibracao()

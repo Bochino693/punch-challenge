@@ -198,6 +198,24 @@ var sensor_ruido := 0.0
 var sensor_quietas := 0
 ## A última recusa da placa, em palavras de gente. Ver `_recusa_da_placa`.
 var ultima_recusa := ""
+## Os ajustes do sensor foram descartados por serem de outra escala.
+var ajustes_do_sensor_zerados := false
+
+## A ESCALA DE MEDIDA DO FIRMWARE, gravada junto dos ajustes.
+##
+## Os limiares do sensor e a curva de pontuação são calibrados CONTRA UM
+## FIRMWARE. Quando a placa muda de escala — a V9 mudou —, os números
+## guardados no disco deixam de querer dizer o que queriam, e continuam
+## sendo enviados à placa no `CONFIG`: um `sensor_vmin` de 0,8 medido na
+## escala antiga manda a V9 descartar tudo abaixo disso, e a máquina volta
+## a não pontuar por um motivo que ninguém consegue ver.
+##
+## O arquivo de ajustes sobrevive à atualização do jogo — é para isso que
+## ele existe —, então a defesa tem de estar aqui: ajuste de escala
+## anterior é DESCARTADO e volta ao padrão desta versão. Quem tinha
+## calibração fina refaz o assistente, o que é minutos; quem não tinha
+## ganha uma máquina que funciona.
+const ESCALA_DO_SENSOR := 9
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 var sensor_amin := 3.0
@@ -594,6 +612,10 @@ func _ready() -> void:
 	add_child(medico)
 	sons.set_volumes(volume_musica, volume_efeitos)
 	_aplicar_faixas()
+	if ajustes_do_sensor_zerados:
+		ajustes_do_sensor_zerados = false
+		_show_notice("FIRMWARE NOVO: AJUSTES DO SENSOR VOLTARAM AO PADRÃO")
+		_salvar()
 	if _converteu_esquema:
 		_converteu_esquema = false
 		_salvar()
@@ -2293,18 +2315,42 @@ func _receber_hit(msg: Dictionary) -> void:
 	]
 	# 0) CALIBRANDO: o golpe vira AMOSTRA, e não pontuação. Não conta
 	#    partida, não entra no ranking, não gasta ficha.
-	if calib_ativo:
+	#
+	#    E A CALIBRAÇÃO SÓ EXISTE COM A CENTRAL ABERTA. Esta segunda
+	#    condição é cinto e suspensório: a calibração acontece dentro da
+	#    Central e em lugar nenhum mais, então um `calib_ativo` ligado com
+	#    a Central FECHADA é, por definição, estado inconsistente — e não
+	#    pode ser o motivo de uma partida inteira não pontuar. Sem ela, um
+	#    único caminho esquecido (foi o F9) mata a máquina em silêncio.
+	if calib_ativo and central_aberta:
 		_calibracao_recebeu(speed, pico)
 		return
+	# AS TRAVAS ABAIXO DEIXAM RASTRO, e isso não é luxo de diagnóstico.
+	#
+	# Elas eram quatro `return` mudos. Quando uma delas prendia um soco
+	# legítimo — e uma prendeu, por meses —, não havia NADA, em lugar
+	# nenhum, dizendo que o golpe tinha chegado e sido descartado. O
+	# sintoma era idêntico ao de sensor quebrado, e mandou procurar defeito
+	# na placa, no cabo e no firmware, que estavam certos.
+	#
+	# Agora cada uma escreve por que recusou. Fica na Central, que é onde
+	# se olha quando a máquina não faz o que devia.
 	# 1) FORA DE ARMED NÃO PONTUA. Nem na abertura, nem na foto, nem no
 	#    resultado, nem com a Central aberta.
 	if state != GameDef.State.ARMED or central_aberta:
+		ultima_recusa = "o jogo ignorou: %s" % (
+			"a Central está aberta" if central_aberta
+			else "a máquina não está esperando soco (estado %d)" % state
+		)
 		return
 	# 2) UM GOLPE POR RODADA.
 	if golpe_registrado:
+		ultima_recusa = "o jogo ignorou: esta tentativa já teve o golpe dela"
 		return
 	# 3) TEMPO MORTO: o balanço do saco depois do impacto não é um golpe.
-	if Time.get_ticks_msec() - ultimo_golpe_ms < TEMPO_MORTO_MS:
+	var desde := Time.get_ticks_msec() - ultimo_golpe_ms
+	if desde < TEMPO_MORTO_MS:
+		ultima_recusa = "o jogo ignorou: tempo morto (%d ms de %d)" % [desde, TEMPO_MORTO_MS]
 		return
 	# 4) O EVENTO PRECISA TER FÍSICA DE SOCO. Duração e pico de aceleração
 	#    não entram na nota — eles decidem se aquilo foi um soco.
@@ -2404,6 +2450,21 @@ func _toggle_central() -> void:
 
 func _fechar_central() -> void:
 	central_aberta = false
+	# O F9 FECHA O ASSISTENTE DE CALIBRAÇÃO JUNTO, e a falta disto era o
+	# defeito que fazia a máquina parecer saudável e não pontuar nada.
+	#
+	# `_fechar_calibracao` só era chamado pelos botões do próprio
+	# assistente. Quem abrisse a calibração e saísse pelo F9 — em vez de
+	# percorrer os quatro passos — deixava `calib_ativo` ligado para
+	# sempre. E `_receber_hit` decide, ANTES de qualquer outra coisa, que
+	# golpe recebido durante a calibração vira AMOSTRA e não pontuação.
+	#
+	# Resultado: a placa media, a serial entregava, a Central mostrava os
+	# números subindo, e no jogo NENHUM soco pontuava. Em silêncio, até
+	# alguém reiniciar o jogo. Era indistinguível de "o sensor não
+	# funciona", e foi por isso que se procurou tanto tempo no lugar
+	# errado — na placa, no cabo, no firmware.
+	_fechar_calibracao()
 	if state == GameDef.State.RESULT:
 		sons.music(-28.0)
 		if verdict_time < 0.0:
@@ -2751,14 +2812,23 @@ func _carregar() -> void:
 		# converteria tudo outra vez no religar.
 		_converteu_esquema = true
 	porta_configurada = str(data.get("port", porta_configurada))
-	hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
-	hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
-	score_exponent = float(data.get("score_exponent", score_exponent))
-	score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
-	sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
-	sensor_raio = float(data.get("sensor_raio", sensor_raio))
-	sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
-	sensor_amin = float(data.get("sensor_amin", sensor_amin))
+	# OS AJUSTES DO SENSOR SÓ VALEM NA ESCALA EM QUE FORAM MEDIDOS.
+	# Ver `ESCALA_DO_SENSOR`. Fora dela, ficam os padrões desta versão.
+	var escala_salva := int(data.get("sensor_escala", 0))
+	if escala_salva >= ESCALA_DO_SENSOR:
+		hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
+		hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
+		score_exponent = float(data.get("score_exponent", score_exponent))
+		score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
+		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
+		sensor_raio = float(data.get("sensor_raio", sensor_raio))
+		sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
+		sensor_amin = float(data.get("sensor_amin", sensor_amin))
+	else:
+		# O eixo e o raio são da MONTAGEM, não da escala: sobrevivem.
+		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
+		sensor_raio = float(data.get("sensor_raio", sensor_raio))
+		ajustes_do_sensor_zerados = not data.is_empty()
 	volume_musica = float(data.get("volume_musica", volume_musica))
 	volume_efeitos = float(data.get("volume_efeitos", volume_efeitos))
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
@@ -2784,6 +2854,7 @@ func _salvar() -> void:
 		"plays": plays,
 		"ranking": ranking,
 		"ranking_schema": RankingStore.ESQUEMA,
+		"sensor_escala": ESCALA_DO_SENSOR,
 		# Mantido para uma eventual volta a uma versão anterior do jogo.
 		"best_score": _melhor(),
 		"port": porta_configurada,
