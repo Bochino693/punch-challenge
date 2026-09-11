@@ -129,3 +129,36 @@ problema é **mecânico ou de sensor**, não de comunicação.
 O firmware **precisa ser regravado** ao atualizar para a V9: a escala de
 medida mudou, e uma placa com firmware antigo devolve velocidades numa
 faixa que a pontuação atual não espera.
+
+---
+
+## 7. A placa mede, mas o jogo não marca
+
+A partir da V9 a placa **diz por que descartou**. Abra a **F9** e olhe
+duas linhas novas:
+
+**`detecção:`**
+
+- **PRONTA PARA O SOCO** (verde) → a placa aceita golpes agora.
+- **NÃO ARMADA — a montagem não fica quieta** (vermelho), com a máquina
+  parada → **é esta a resposta inteira.** A placa só aceita um soco
+  depois de ver 200 ms de quietude, e a sua montagem nunca fica quieta:
+  caixa de som dentro do gabinete, ventilador, piso do salão. Aperte
+  **CALIBRAR** com a máquina imóvel — a calibração mede o ruído desta
+  montagem e ajusta o piso sozinha. Se continuar vermelho, veja o que
+  vibra.
+
+**`última recusa:`** — aparece depois de cada soco recusado, com os
+números do evento. O motivo diz qual limiar está errado:
+
+| Motivo | O que aconteceu | O que ajustar |
+|---|---|---|
+| `GIRO` | O alvo quase não girou | Baixe o giro mínimo (6º campo do CONFIG); `0` desliga |
+| `FRACO` | Velocidade abaixo do piso | Baixe a velocidade mínima na Central |
+| `LENTO` | O pico demorou a chegar | Foi empurrão, não impacto — bata mais seco |
+| `CURTO` | Durou menos que um impacto | Vibração, não soco |
+| `SUSTENTADO` | A força não saiu na janela | Empurrão sustentado |
+
+Se **nenhuma** das duas linhas se mexe quando você soca, a placa não está
+vendo nada: volte à etapa 4 (fios do I2C) e confira a telemetria com a
+máquina parada.

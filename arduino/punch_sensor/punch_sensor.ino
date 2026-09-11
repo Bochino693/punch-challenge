@@ -168,6 +168,8 @@ bool mpuResponde(uint8_t endereco);
 bool ligarMpu();
 void insistirNoMpu();
 void enviarPinos();
+void enviarStatus();
+void recusar(const __FlashStringHelper *motivo, unsigned long duracao);
 void escreverReg(uint8_t reg, uint8_t valor);
 void atualizarFitas();
 bool mpuLer(float *accelG, float *gyroDps);
@@ -194,8 +196,27 @@ const unsigned long TELEMETRIA_MS = 250;
     de repouso fica bem abaixo de 0,05 g; 0,12 g da folga para vibracao
     de salao (som alto, gente passando, ventilador do gabinete) sem
     deixar passar movimento de verdade. */
-const float RUIDO_G = 0.12f;
-const float RUIDO_DPS = 15.0f;
+/*  ESTES SAO O PISO E O TETO, e o valor de verdade e MEDIDO.
+
+    Um limiar de ruido fixo pressupoe que todas as montagens vibram
+    igual. Nao vibram: um gabinete com caixa de som dentro, um ventilador,
+    o piso de um salao com gente pulando -- qualquer um deles mantem o
+    sensor permanentemente acima de 0,12 g, e ai a placa NUNCA considera
+    a maquina "quieta". Sem quietude nao ha autorizacao de soco, e sem
+    autorizacao NENHUM golpe e aceito. A maquina fica muda, e nada na
+    tela diz por que.
+
+    Agora a calibracao MEDE a dispersao do proprio repouso desta montagem
+    e o piso sai dela (quatro vezes a dispersao observada), preso entre
+    estes dois limites. Montagem silenciosa ganha um piso baixo e
+    sensivel; montagem barulhenta ganha um piso alto e continua
+    funcionando. */
+const float RUIDO_G_MIN = 0.08f;
+const float RUIDO_G_MAX = 0.60f;
+const float RUIDO_DPS_MIN = 10.0f;
+const float RUIDO_DPS_MAX = 80.0f;
+float ruidoG = 0.12f;
+float ruidoDps = 15.0f;
 
 /*  QUANTO TEMPO DE QUIETUDE ANTES DE ACEITAR UM SOCO.
     50 amostras a 250 Hz = 200 ms. E a regra que sozinha resolve
@@ -238,7 +259,20 @@ const unsigned long TEMPO_MORTO_MS = 1200;
     verdade. Um tranco no gabinete sacode o acelerometro sem girar o
     pendulo. Valor baixo de proposito -- e prova de movimento, nao
     medida de forca, e golpe fraco legitimo precisa passar. */
-const float GIRO_MINIMO_DPS = 25.0f;
+/*  E CONFIGURAVEL, E O PADRAO CAIU DE 25 PARA 6.
+
+    Vinte e cinco graus por segundo pressupoe que o alvo BALANCA. Num
+    saco pendurado, balanca. Num alvo parafusado em estrutura rigida --
+    que e uma montagem perfeitamente comum -- o acelerometro ve a pancada
+    inteira e o giroscopio quase nao se mexe: a exigencia de giro sozinha
+    rejeita TODO soco, e a maquina fica muda sem dizer por que.
+
+    Seis graus por segundo ainda separa um soco de verdade de um tranco
+    no gabinete, e nao exige que o alvo gire. Quem tiver um pendulo pode
+    subir pela Central. E, se ainda assim atrapalhar, `0` desliga a
+    testemunha: com `REJECT` na tela da para saber se e este o problema
+    antes de mexer. */
+float giroMinimoDps = 6.0f;
 
 /*  Velocidade com que a base persegue a leitura crua ENQUANTO QUIETO.
     0,002 por amostra a 250 Hz da constante de tempo de ~2 s: rapido o
@@ -378,6 +412,7 @@ void calibrar() {
   float somaA[3] = {0, 0, 0};
   float somaG[3] = {0, 0, 0};
   float maxA[3], minA[3];
+  float maxG = 0.0f, minG = 0.0f;
   bool primeira = true;
   uint16_t validas = 0;
 
@@ -392,6 +427,12 @@ void calibrar() {
           if (a[i] > maxA[i]) maxA[i] = a[i];
           if (a[i] < minA[i]) minA[i] = a[i];
         }
+      }
+      const float gm = sqrtf(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+      if (primeira) { maxG = gm; minG = gm; }
+      else {
+        if (gm > maxG) maxG = gm;
+        if (gm < minG) minG = gm;
       }
       primeira = false;
       validas++;
@@ -421,7 +462,8 @@ void calibrar() {
     const float d = maxA[i] - minA[i];
     if (d > dispersao) dispersao = d;
   }
-  if (dispersao > RUIDO_G * 3.0f) {
+  const float dispersaoGiro = maxG - minG;
+  if (dispersao > RUIDO_G_MAX) {
     Serial.println(F("ERROR,CALIB_MOVIMENTO"));
     return;                    // mantem a base anterior, de proposito
   }
@@ -432,6 +474,22 @@ void calibrar() {
   }
   baseIniciada = true;
   amostrasQuietas = 0;
+
+  /*  O PISO DE RUIDO DESTA MONTAGEM, medido agora mesmo.
+      Quatro vezes a dispersao do repouso: alto o bastante para a
+      vibracao do gabinete nao contar como movimento, baixo o bastante
+      para o comeco de um soco contar. */
+  ruidoG = dispersao * 4.0f;
+  if (ruidoG < RUIDO_G_MIN) ruidoG = RUIDO_G_MIN;
+  if (ruidoG > RUIDO_G_MAX) ruidoG = RUIDO_G_MAX;
+  ruidoDps = dispersaoGiro * 4.0f;
+  if (ruidoDps < RUIDO_DPS_MIN) ruidoDps = RUIDO_DPS_MIN;
+  if (ruidoDps > RUIDO_DPS_MAX) ruidoDps = RUIDO_DPS_MAX;
+
+  Serial.print(F("NOISE,"));
+  Serial.print(ruidoG, 3);
+  Serial.print(',');
+  Serial.println(ruidoDps, 1);
 
   Serial.print(F("CALIBRATED,"));
   Serial.print(baseAccel[0], 3);
@@ -473,6 +531,38 @@ void abandonarGolpe() {
   amostrasQuietas = 0;
 }
 
+/*  TODA RECUSA PASSA A FALAR, COM OS NUMEROS DO EVENTO.
+
+    Este e o conserto do problema que nenhuma versao deste projeto teve
+    como atacar: quando a maquina nao marca o soco, nao havia como saber
+    SE a placa viu alguma coisa e POR QUE descartou. "Nada acontece" e o
+    mesmo sintoma para seis causas diferentes -- sensor sem sinal, evento
+    que nao passou do gatilho, forma recusada, giro de menos, velocidade
+    abaixo do piso -- e sem distinguir entre elas so resta adivinhar, que
+    e o que se fez ate aqui.
+
+    `REJECT,<motivo>,<pico_g>,<duracao_ms>,<giro_dps>,<velocidade>`
+
+    Motivos: CURTO (durou menos que um impacto), LENTO (o pico demorou
+    demais a chegar -- empurrao), SUSTENTADO (a forca nao saiu dentro da
+    janela), GIRO (o alvo nao se moveu o bastante), FRACO (a velocidade
+    ficou abaixo do piso).
+
+    Socar cinco vezes e ler estas linhas na Central diz, em dez segundos,
+    qual limiar esta errado nesta montagem. */
+void recusar(const __FlashStringHelper *motivo, unsigned long duracao) {
+  Serial.print(F("REJECT,"));
+  Serial.print(motivo);
+  Serial.print(',');
+  Serial.print(picoG, 2);
+  Serial.print(',');
+  Serial.print(duracao);
+  Serial.print(',');
+  Serial.print(picoGyroDps, 1);
+  Serial.print(',');
+  Serial.println(velocidadePico, 2);
+}
+
 void processarAmostra() {
   float a[3], g[3];
   if (!mpuLer(a, g)) {
@@ -499,8 +589,8 @@ void processarAmostra() {
   const float giro = magnitudeGiro(g);
 
   // A amostra e "quieta"? Todos os eixos dentro do ruido, e o giro tambem.
-  bool quieta = (fabsf(din[0]) < RUIDO_G && fabsf(din[1]) < RUIDO_G
-                 && fabsf(din[2]) < RUIDO_G && giro < RUIDO_DPS);
+  bool quieta = (fabsf(din[0]) < ruidoG && fabsf(din[1]) < ruidoG
+                 && fabsf(din[2]) < ruidoG && giro < ruidoDps);
 
   if (!golpeAtivo) {
     if (quieta) {
@@ -601,6 +691,7 @@ void processarAmostra() {
   if (!caiu) {
     if (aAbs >= picoG * 0.5f) {
       abandonarGolpe();      // ainda perto do pico: forca sustentada
+      recusar(F("SUSTENTADO"), duracao);
       return;
     }
     // ja decaiu: foi impacto, e o que sobrou e o alvo balancando
@@ -617,9 +708,33 @@ void processarAmostra() {
   if (saturouGyro) Serial.println(F("SATURATION,GYRO"));
 
   // ------------------------------------------------ validacao da forma
-  if (duracao < DURACAO_MIN_MS) return;                       // artefato
-  if (instanteDoPicoMs - golpeInicioMs > SUBIDA_MAX_MS) return; // subida lenta
-  if (picoGyroDps < GIRO_MINIMO_DPS) return;                  // o alvo nao se moveu
+  if (duracao < DURACAO_MIN_MS) { recusar(F("CURTO"), duracao); return; }
+  if (instanteDoPicoMs - golpeInicioMs > SUBIDA_MAX_MS) { recusar(F("LENTO"), duracao); return; }
+  /*  O GIROSCOPIO E DESEMPATE, E NAO VETO -- e esta foi a correcao que
+      so apareceu quando a bancada ganhou um cenario de MONTAGEM RIGIDA.
+
+      A testemunha do giro existe para separar um soco de um tranco no
+      gabinete quando o acelerometro esta em duvida. Mas ela pressupoe
+      que o alvo GIRA, e isso e verdade num saco pendurado e FALSO num
+      alvo parafusado em estrutura rigida -- onde o acelerometro ve a
+      pancada inteira e o giroscopio mal se move. Medido na bancada: um
+      soco de 9 g numa montagem rigida produzia `REJECT,GIRO`, ou seja, a
+      maquina recusava TODOS os socos daquela montagem, para sempre.
+
+      Um pico muito acima do gatilho, com subida rapida, queda dentro da
+      janela e 200 ms de repouso antes, ja e conclusivo sozinho: nada
+      alem de um impacto tem essa forma. Entao a testemunha so e cobrada
+      quando o pico e MARGINAL -- abaixo do dobro do gatilho --, que e
+      exatamente o caso em que ela ajuda.
+
+      O preco de errar aqui e assimetrico, e a escolha segue isso: deixar
+      passar um tranco no gabinete de vez em quando e um aborrecimento;
+      recusar todo soco de uma montagem inteira mata a maquina. */
+  const bool pico_conclusivo = picoG >= accelMinG * 2.0f;
+  if (giroMinimoDps > 0.0f && !pico_conclusivo && picoGyroDps < giroMinimoDps) {
+    recusar(F("GIRO"), duracao);
+    return;
+  }
 
   // ------------------------------------------------ medida
   /*  O ACELEROMETRO E A MEDIDA; o giroscopio so assume quando ele
@@ -631,7 +746,11 @@ void processarAmostra() {
     if (vGiro > velocidade) velocidade = vGiro;
   }
 
-  if (velocidade < velocidadeMinima) return;   // encostou, nao socou
+  if (velocidade < velocidadeMinima) {
+    ultimaVelocidade = velocidade;   // a Central mostra quanto faltou
+    recusar(F("FRACO"), duracao);
+    return;
+  }
 
   ultimaVelocidade = velocidade;
   ultimoPicoG = picoG;
@@ -658,6 +777,27 @@ void processarAmostra() {
     o pino em repouso le ALTO e o aperto o leva ao terra, entao o valor
     aqui ja vai invertido: 1 e APERTADO. Se este numero nao muda quando o
     botao e apertado, o problema e ANTES do firmware. */
+/*  O ESTADO DA DETECCAO, quatro vezes por segundo.
+
+    `STATUS,<pronto>,<quietas>,<ruidoG>,<gatilho>`
+
+    `pronto` e 1 quando a placa ja tem a autorizacao de aceitar um soco.
+    SE ELE FICAR EM 0 COM A MAQUINA PARADA, esta e a resposta inteira: a
+    montagem nunca fica quieta o bastante, nenhum golpe sera aceito, e o
+    caminho e recalibrar (a calibracao mede o ruido desta montagem) ou
+    olhar o que vibra. Sem este numero, "nada acontece" nao se distingue
+    de "o sensor nao esta ligado". */
+void enviarStatus() {
+  Serial.print(F("STATUS,"));
+  Serial.print(prontoParaGolpe ? 1 : 0);
+  Serial.print(',');
+  Serial.print(amostrasQuietas);
+  Serial.print(',');
+  Serial.print(ruidoG, 3);
+  Serial.print(',');
+  Serial.println(accelMinG, 2);
+}
+
 void enviarPinos() {
   Serial.print(F("PINS,"));
   Serial.print(digitalRead(PINO_BOTAO_START) == LOW ? 1 : 0);
@@ -787,6 +927,12 @@ void configurar(const char *cmd) {
     velocidadeMaxima = constrain(atof(campo), velocidadeMinima + 0.5f, 40.0f);
   }
 
+  // Sexto campo, opcional: o giro minimo. `0` desliga a testemunha.
+  campo = strtok(NULL, ",");
+  if (campo != NULL) {
+    giroMinimoDps = constrain(atof(campo), 0.0f, 400.0f);
+  }
+
   Serial.println(F("OK,CONFIG"));
 }
 
@@ -914,6 +1060,7 @@ void loop() {
     ultimaTelemetriaMs = millis();
     enviarTelemetria();
     enviarPinos();
+    enviarStatus();
   }
   atualizarFitas();
 }
