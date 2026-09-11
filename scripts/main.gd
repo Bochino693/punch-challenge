@@ -1808,7 +1808,18 @@ func _tentar_conectar() -> void:
 	# É também o defeito que aparece SÓ NO COMPUTADOR NOVO, porque no PC
 	# de quem desenvolve a extensão está sempre lá.
 	if link == null or not link.available():
-		serial_status = "SEM CAMINHO ATÉ O ARDUINO — VEJA docs/PROTOCOLO_SERIAL.md"
+		# A FRASE PRECISA DIZER O QUE FAZER, e não só que deu errado.
+		#
+		# "SEM CAMINHO ATÉ O ARDUINO" é o estado em que NENHUM dos dois
+		# caminhos subiu — nem a extensão nativa, nem a ponte por
+		# processo. Num PC de destino a causa quase sempre é uma das duas
+		# do arquivo docs/QUANDO_NAO_ACHA_O_ARDUINO.md, e as duas se
+		# conferem em um minuto. Mandar a pessoa ler o protocolo serial
+		# inteiro era mandá-la para o lugar errado.
+		serial_status = "SEM CAMINHO ATÉ O ARDUINO — %s" % (
+			link.motivo_da_falta() if link != null and not link.motivo_da_falta().is_empty()
+			else "VEJA docs/QUANDO_NAO_ACHA_O_ARDUINO.md"
+		)
 		proxima_tentativa = animation_time + 1.0
 		return
 	portas_visiveis = link.list_ports()
