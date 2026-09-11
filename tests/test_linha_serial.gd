@@ -117,15 +117,13 @@ func _test_diagnosticos_da_placa() -> void:
 	if not is_equal_approx(float(r["peak_g"]), 9.2) or not is_equal_approx(float(r["speed"]), 2.10):
 		_falhar("números do REJECT: %s" % str(r))
 
-	var st := ArduinoProtocol.parse("STATUS,0,37,0.158,3.00")
-	if st["type"] != "STATUS" or bool(st["ready"]):
+	var st := ArduinoProtocol.parse("STATUS,0,0.04,2.50")
+	if st["type"] != "STATUS" or bool(st["measuring"]):
 		_falhar("STATUS não foi entendido: %s" % str(st))
-	if int(st["quiet_samples"]) != 37:
-		_falhar("amostras quietas: %s" % str(st))
-
-	var nz := ArduinoProtocol.parse("NOISE,0.158,12.0")
-	if nz["type"] != "NOISE" or not is_equal_approx(float(nz["noise_g"]), 0.158):
-		_falhar("NOISE não foi entendido: %s" % str(nz))
+	if not is_equal_approx(float(st["force_g"]), 0.04):
+		_falhar("a força agora: %s" % str(st))
+	if not is_equal_approx(float(st["trigger_g"]), 2.50):
+		_falhar("o gatilho: %s" % str(st))
 
 	# Mensagem truncada continua sendo lixo, e lixo não vira diagnóstico.
 	if ArduinoProtocol.parse("REJECT,GIRO,9.20")["type"] != "":

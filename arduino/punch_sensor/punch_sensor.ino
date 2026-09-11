@@ -169,6 +169,7 @@ bool ligarMpu();
 void insistirNoMpu();
 void enviarPinos();
 char eixoDominante();
+float magnitudeGiro(const float *g);
 void enviarStatus();
 void recusar(const __FlashStringHelper *motivo, unsigned long duracao);
 void escreverReg(uint8_t reg, uint8_t valor);
@@ -229,7 +230,7 @@ const uint16_t AMOSTRAS_DE_REPOUSO = 50;
     Um soco num saco/alvo e um evento de dezenas de milissegundos. 160 ms
     cobre o impacto inteiro com folga; passar disso e balanco, nao soco.
     Era 400 ms na V2 -- tempo de sobra para a deriva virar velocidade. */
-const unsigned long JANELA_MAX_MS = 160;
+const unsigned long JANELA_MS = 140;
 
 /*  A SUBIDA PRECISA SER RAPIDA.
     Num impacto o pico chega quase junto com o inicio. Um empurrao
@@ -295,7 +296,7 @@ float raioMetros = 0.45f;
     existia na curva e era jogada fora pelo firmware, ou seja, golpe
     fraco legitimo sumia antes de chegar ao jogo. */
 float velocidadeMinima = 0.30f;
-float accelMinG = 3.00f;
+float accelMinG = 2.50f;
 
 // Linha de base viva (em g e em graus/s).
 float baseAccel[3] = {0, 0, 0};
@@ -342,6 +343,10 @@ bool prontoParaGolpe = false;
 // Ultima medida, para a telemetria.
 float ultimaVelocidade = 0.0f;
 float ultimoPicoG = 0.0f;
+
+/*  A forca do ultimo instante, em g. E o que a telemetria mostra: com a
+    maquina parada ela fica perto de zero, e isso se confere a olho. */
+float ultimaForca = 0.0f;
 
 unsigned long ultimaAmostraUs = 0;
 unsigned long ultimaTelemetriaMs = 0;
@@ -494,7 +499,7 @@ void calibrar() {
   if (ruidoDps > RUIDO_DPS_MAX) ruidoDps = RUIDO_DPS_MAX;
 
   Serial.print(F("NOISE,"));
-  Serial.print(ruidoG, 3);
+  Serial.print(ultimaForca, 2);
   Serial.print(',');
   Serial.println(ruidoDps, 1);
 
@@ -507,68 +512,49 @@ void calibrar() {
 }
 
 // ---------------------------------------------------------------- golpe
-uint8_t indiceEixo() {
-  switch (eixoMedicao) {
-    case 'Y': return 1;
-    case 'Z': return 2;
-    default: return 0;
-  }
-}
+/*  ======================================================================
+    A DETECCAO INTEIRA, E ELA CABE NUMA TELA.
+    ======================================================================
 
-/*  A magnitude do giro, e nao a soma dos tres eixos.
-    Somar |gx|+|gy|+|gz| soma tres ruidos e infla o numero; a magnitude
-    e a grandeza fisica de verdade e nao depende de a montagem estar
-    torta. */
-float magnitudeGiro(const float *g) {
-  const float x = g[0] - baseGyro[0];
-  const float y = g[1] - baseGyro[1];
-  const float z = g[2] - baseGyro[2];
-  return sqrtf(x * x + y * y + z * z);
-}
+    O QUE ESTAVA AQUI ANTES, E POR QUE SAIU.
 
-/*  DESCARTA O EVENTO EM ANDAMENTO sem reportar nada.
-    Usado quando a forma nao fechou como soco: empurrao sustentado,
-    subida lenta demais, ou a janela estourando sem queda. */
-void abandonarGolpe() {
-  golpeAtivo = false;
-  prontoParaGolpe = false;
-  amostrasAcima = 0;
-  digitalWrite(LED_STATUS, LOW);
-  fimDoUltimoGolpeMs = millis();
-  amostrasQuietas = 0;
-}
+    Esta funcao tinha SEIS validacoes empilhadas: autorizacao de repouso
+    (200 ms de quietude antes de aceitar qualquer golpe), amostras
+    consecutivas de subida, tempo maximo ate o pico, queda obrigatoria
+    dentro da janela, testemunha do giroscopio, e duracao minima.
 
-/*  TODA RECUSA PASSA A FALAR, COM OS NUMEROS DO EVENTO.
+    Nenhuma delas foi jamais demonstrada necessaria numa maquina de
+    verdade. Todas foram acrescentadas por precaucao, contra um problema
+    -- "o sensor dispara parado" -- cuja causa real era OUTRA: a versao
+    antiga media o zero de cada eixo uma unica vez, no arranque, e nunca
+    mais. Montagem que inclinasse depois, ou alguem encostando na maquina
+    durante a calibracao, e aquele zero nascia torto e ficava torto.
 
-    Este e o conserto do problema que nenhuma versao deste projeto teve
-    como atacar: quando a maquina nao marca o soco, nao havia como saber
-    SE a placa viu alguma coisa e POR QUE descartou. "Nada acontece" e o
-    mesmo sintoma para seis causas diferentes -- sensor sem sinal, evento
-    que nao passou do gatilho, forma recusada, giro de menos, velocidade
-    abaixo do piso -- e sem distinguir entre elas so resta adivinhar, que
-    e o que se fez ate aqui.
+    Esse defeito esta consertado de outra forma, e de forma melhor: a
+    LINHA DE BASE VIVA, logo abaixo. Ela persegue a leitura crua com
+    constante de tempo de dois segundos. Gravidade, inclinacao da
+    montagem e deriva termica somem sozinhas e continuamente. E um soco,
+    que dura dezenas de milissegundos, nao chega a move-la: em 60 ms ela
+    anda 3% na direcao do golpe.
 
-    `REJECT,<motivo>,<pico_g>,<duracao_ms>,<giro_dps>,<velocidade>`
+    Com a base viva no lugar, as seis validacoes deixaram de defender de
+    alguma coisa e passaram a ser apenas seis maneiras de recusar um soco
+    legitimo -- em silencio. Duas delas comprovadamente recusavam: a
+    testemunha do giro matava toda montagem rigida, e a exigencia de
+    repouso morria em gabinete que vibra.
 
-    Motivos: CURTO (durou menos que um impacto), LENTO (o pico demorou
-    demais a chegar -- empurrao), SUSTENTADO (a forca nao saiu dentro da
-    janela), GIRO (o alvo nao se moveu o bastante), FRACO (a velocidade
-    ficou abaixo do piso).
+    O QUE FICOU:
 
-    Socar cinco vezes e ler estas linhas na Central diz, em dez segundos,
-    qual limiar esta errado nesta montagem. */
-void recusar(const __FlashStringHelper *motivo, unsigned long duracao) {
-  Serial.print(F("REJECT,"));
-  Serial.print(motivo);
-  Serial.print(',');
-  Serial.print(picoG, 2);
-  Serial.print(',');
-  Serial.print(duracao);
-  Serial.print(',');
-  Serial.print(picoGyroDps, 1);
-  Serial.print(',');
-  Serial.println(velocidadePico, 2);
-}
+      1. base viva          -> tira gravidade e inclinacao, sempre
+      2. forca = |leitura - base|   -> magnitude, sem eixo para errar
+      3. forca > gatilho    -> e um soco
+      4. mede por 140 ms    -> pico e velocidade
+      5. tempo morto        -> um soco conta uma vez
+
+    Nao ha mais nenhum caminho por onde um golpe possa ser descartado
+    calado. So existe UMA recusa, a velocidade abaixo do piso, e ela e
+    reportada.
+*/
 
 void processarAmostra() {
   float a[3], g[3];
@@ -582,242 +568,130 @@ void processarAmostra() {
   ultimaAmostraUs = agora;
   if (dt <= 0.0f || dt > 0.05f) dt = 0.004f;
 
-  // Primeira leitura depois de ligar: a base comeca de onde o sensor esta.
   if (!baseIniciada) {
     for (uint8_t i = 0; i < 3; i++) { baseAccel[i] = a[i]; baseGyro[i] = g[i]; }
     baseIniciada = true;
     return;
   }
 
-  // Aceleracao dinamica: a leitura crua menos a base viva. E o que tira
-  // a gravidade E a inclinacao da montagem, continuamente.
+  /*  A LINHA DE BASE VIVA, e ela anda SEMPRE.
+
+      Antes so andava "enquanto quieto", e decidir o que e quieto exigia
+      um limiar de ruido -- que numa montagem que vibra nunca era
+      atingido, deixando a maquina esperando para sempre um silencio que
+      nao vinha. Andando sempre, o problema desaparece junto com o
+      conceito: 0,002 por amostra a 250 Hz da constante de tempo de dois
+      segundos, e nenhum soco dura isso. */
+  for (uint8_t i = 0; i < 3; i++) {
+    baseAccel[i] += (a[i] - baseAccel[i]) * BASE_ALFA;
+    baseGyro[i] += (g[i] - baseGyro[i]) * BASE_ALFA;
+  }
+
   float din[3];
   for (uint8_t i = 0; i < 3; i++) din[i] = a[i] - baseAccel[i];
+  // A MAGNITUDE nao tem orientacao: nao ha eixo para o montador errar.
+  const float forca = sqrtf(din[0] * din[0] + din[1] * din[1] + din[2] * din[2]);
   const float giro = magnitudeGiro(g);
 
-  // A amostra e "quieta"? Todos os eixos dentro do ruido, e o giro tambem.
-  bool quieta = (fabsf(din[0]) < ruidoG && fabsf(din[1]) < ruidoG
-                 && fabsf(din[2]) < ruidoG && giro < ruidoDps);
+  ultimaForca = forca;
 
   if (!golpeAtivo) {
-    if (quieta) {
-      if (amostrasQuietas < 65000) amostrasQuietas++;
-      // Conquistou a autorizacao de socar. Ver `prontoParaGolpe`.
-      if (amostrasQuietas >= AMOSTRAS_DE_REPOUSO) prontoParaGolpe = true;
-      /*  A BASE SO ANDA ENQUANTO ESTA QUIETO.
-          E o que absorve inclinacao e deriva termica sem nunca deixar um
-          soco contaminar o proprio zero. */
-      for (uint8_t i = 0; i < 3; i++) {
-        baseAccel[i] += (a[i] - baseAccel[i]) * BASE_ALFA;
-        baseGyro[i] += (g[i] - baseGyro[i]) * BASE_ALFA;
-      }
-    } else {
-      amostrasQuietas = 0;
+    /*  DUAS AMOSTRAS SEGUIDAS, E NAO UMA.
+
+        Medido na bancada: com uma so, picos ELETRICOS de uma unica
+        amostra -- interferencia no cabo do I2C, que e comum -- geravam
+        oito socos em dez segundos. Com duas, zero.
+
+        E isto nao pode recusar um soco de verdade: a 250 Hz, um impacto
+        de 40 ms ocupa dez amostras. Exigir duas e exigir 8 ms de sinal. */
+    if (forca <= accelMinG) { amostrasAcima = 0; return; }
+    amostrasAcima++;
+    if (amostrasAcima < 2) return;
+    amostrasAcima = 0;
+    if (millis() - fimDoUltimoGolpeMs < TEMPO_MORTO_MS) return;
+
+    // Comecou. A direcao do impacto sai do proprio impacto, e fica
+    // congelada: e ao longo dela que a velocidade e integrada.
+    golpeAtivo = true;
+    golpeInicioMs = millis();
+    picoG = forca;
+    picoGyroDps = giro;
+    velocidadeIntegral = 0.0f;
+    velocidadePico = 0.0f;
+    aAnterior = forca;
+    for (uint8_t k = 0; k < 3; k++) {
+      baseCongelada[k] = baseAccel[k];
+      direcao[k] = din[k] / forca;
     }
-
-    /*  A MAGNITUDE DO VETOR, E NAO UM EIXO ESCOLHIDO A MAO.
-
-        AQUI ESTAVA O DEFEITO MAIS CARO DESTE PROJETO, e o mais cruel de
-        descobrir. A deteccao media `din[eixoMedicao]` -- um unico eixo,
-        X por padrao. Isso presume que a pancada chega alinhada com o X do
-        sensor, o que so e verdade se alguem PARAFUSOU o modulo nessa
-        orientacao de proposito.
-
-        Montado de lado -- que e o mais provavel para quem esta usando o
-        MPU-6050 pela primeira vez --, a pancada acontece no Y ou no Z, o
-        eixo X quase nao ve nada, e o gatilho NUNCA dispara. Medido na
-        bancada: um soco de 12 g no eixo Z produzia zero HIT e ZERO
-        REJECT. Invisivel: nao havia sequer um evento para recusar, entao
-        nem o diagnostico de recusa aparecia. Da maquina so se via que
-        "nada acontece".
-
-        A magnitude do vetor nao tem orientacao. Seja qual for o lado em
-        que o modulo esteja parafusado, um soco de 12 g e um soco de 12 g.
-        Isso apaga uma classe inteira de erro de montagem -- e apaga
-        junto a necessidade de acertar o eixo na Central, que era um botao
-        que so servia para errar. */
-    const float aAbs = sqrtf(din[0] * din[0] + din[1] * din[1] + din[2] * din[2]);
-
-    // AS TRES TRAVAS PARA COMECAR UM GOLPE, e todas precisam passar.
-    const bool passouOTempoMorto = (millis() - fimDoUltimoGolpeMs) >= TEMPO_MORTO_MS;
-
-    if (aAbs > accelMinG && prontoParaGolpe && passouOTempoMorto) {
-      amostrasAcima++;
-      if (amostrasAcima < AMOSTRAS_DE_SUBIDA) return;  // pico de uma amostra nao vale
-      golpeAtivo = true;
-      prontoParaGolpe = false;   // gasta a autorizacao; reconquista-se no repouso
-      golpeInicioMs = millis();
-      golpeAbaixoMs = 0;
-      instanteDoPicoMs = golpeInicioMs;
-      picoG = aAbs;
-      velocidadeIntegral = 0.0f;
-      velocidadePico = 0.0f;
-      picoGyroDps = giro;
-      /*  A DIRECAO DO IMPACTO, colhida do proprio impacto.
-
-          Integrar a magnitude seria errado: ela e sempre positiva, entao
-          a fase de FREADA somaria junto com a de aceleracao e a
-          velocidade sairia inflada. O que se quer e a componente ao longo
-          da direcao em que a pancada chegou -- que sobe, passa do pico e
-          volta, como na fisica de verdade.
-
-          Essa direcao e o vetor unitario do instante do gatilho. E o
-          mesmo calculo de antes, com o eixo escolhido AUTOMATICAMENTE e
-          por golpe, em vez de configurado a mao e igual para todos. */
-      for (uint8_t k = 0; k < 3; k++) direcao[k] = (aAbs > 0.001f) ? (din[k] / aAbs) : 0.0f;
-      aAnterior = aAbs;
-      caiu = false;
-      for (uint8_t i = 0; i < 3; i++) baseCongelada[i] = baseAccel[i];
-      digitalWrite(LED_STATUS, HIGH);
-    } else if (aAbs <= accelMinG) {
-      amostrasAcima = 0;
-    }
+    digitalWrite(LED_STATUS, HIGH);
     return;
   }
 
   // ------------------------------------------------ golpe em andamento
-  // A base fica CONGELADA daqui ate o fim: o golpe nao mexe no proprio zero.
-  // A componente ao longo da direcao do impacto, com a base congelada.
   float dinAgora[3];
   for (uint8_t k = 0; k < 3; k++) dinAgora[k] = a[k] - baseCongelada[k];
-  const float aEixoAssinado = dinAgora[0] * direcao[0]
-                            + dinAgora[1] * direcao[1]
-                            + dinAgora[2] * direcao[2];
-  // A forma (gatilho, pico, queda) se mede pela MAGNITUDE, que nao depende
-  // de o golpe torcer de direcao no meio do caminho.
-  const float aAbs = sqrtf(dinAgora[0] * dinAgora[0]
-                         + dinAgora[1] * dinAgora[1]
-                         + dinAgora[2] * dinAgora[2]);
+  const float aoLongo = dinAgora[0] * direcao[0]
+                      + dinAgora[1] * direcao[1]
+                      + dinAgora[2] * direcao[2];
 
-  /*  INTEGRACAO POR TRAPEZIO.
-      A soma retangular da V2 superestima sistematicamente a subida de um
-      impacto -- e superestimar a subida e superestimar a nota. O trapezio
-      usa a media entre a amostra anterior e a atual. */
-  velocidadeIntegral += ((aAnterior + aEixoAssinado) * 0.5f) * 9.81f * dt;
-  aAnterior = aEixoAssinado;
+  /*  Integracao por trapezio ao longo da direcao do impacto. A
+      velocidade do golpe e o PICO da integral: depois dele vem a
+      freada, que e fisica real e nao deve apagar a medida. */
+  velocidadeIntegral += ((aAnterior + aoLongo) * 0.5f) * 9.81f * dt;
+  aAnterior = aoLongo;
   if (velocidadeIntegral < 0.0f) velocidadeIntegral = 0.0f;
-  // A velocidade do golpe e o PICO da integral: depois do pico vem a
-  // desaceleracao, que e fisica real e nao deve apagar a medida.
   if (velocidadeIntegral > velocidadePico) velocidadePico = velocidadeIntegral;
 
-  if (aAbs > picoG) {
-    picoG = aAbs;
-    instanteDoPicoMs = millis();
-  }
+  if (forca > picoG) picoG = forca;
   if (giro > picoGyroDps) picoGyroDps = giro;
 
-  if (aAbs < accelMinG * FATOR_QUEDA) {
-    if (golpeAbaixoMs == 0) golpeAbaixoMs = millis();
-    if (millis() - golpeAbaixoMs >= MS_DE_QUEDA) caiu = true;
-  } else {
-    golpeAbaixoMs = 0;
-  }
-
   const unsigned long duracao = millis() - golpeInicioMs;
-  const bool estourou = duracao >= JANELA_MAX_MS;
-  if (!caiu && !estourou) return;
+  if (duracao < JANELA_MS) return;
 
-  /*  A JANELA ESTOUROU SEM A QUEDA FORMAL: E EMPURRAO OU E SOCO?
-
-      A regra "sem queda, sem soco" e quase certa, e o "quase" custava um
-      golpe forte legitimo. Medido na bancada: soco de 14 g num alvo que
-      sai balancando forte NAO fecha a queda dentro da janela -- o
-      balanco mantem o sinal acima do piso -- e o soco era descartado.
-      A pessoa bate com tudo e a maquina nao marca nada.
-
-      O que separa os dois casos nao e a queda ate o piso, e sim ONDE o
-      sinal esta quando a janela fecha, comparado ao proprio pico:
-
-        - EMPURRAO SUSTENTADO: a forca continua aplicada, e o sinal
-          termina a janela ainda perto do pico.
-        - SOCO: o contato ja acabou; o que sobra e o alvo balancando,
-          muito abaixo do pico do impacto.
-
-      Metade do pico separa os dois com folga larga, e nao depende de
-      calibrar mais nenhum numero. */
-  if (!caiu) {
-    if (aAbs >= picoG * 0.5f) {
-      abandonarGolpe();      // ainda perto do pico: forca sustentada
-      recusar(F("SUSTENTADO"), duracao);
-      return;
-    }
-    // ja decaiu: foi impacto, e o que sobrou e o alvo balancando
-  }
-
+  // ------------------------------------------------ fecha e reporta
   golpeAtivo = false;
-  prontoParaGolpe = false;
-  amostrasAcima = 0;
   digitalWrite(LED_STATUS, LOW);
   fimDoUltimoGolpeMs = millis();
-  amostrasQuietas = 0;
+
+  /*  A FORCA AINDA ESTA LA NO FIM DA JANELA? ENTAO NAO FOI UM SOCO.
+
+      Esta e a UNICA validacao de forma que sobreviveu, e ela sobreviveu
+      porque a bancada mostrou que sem ela um empurrao lento e sustentado
+      vira um soco de 5,12 m/s -- ou seja, empurrar o alvo devagar
+      pontuaria mais que um golpe medio.
+
+      O que a separa das cinco que eu removi e que ela NAO PODE recusar
+      um soco: o contato de um impacto acaba em algumas dezenas de
+      milissegundos, e esta janela tem 140. Um soco, aos 140 ms, ja
+      caiu a quase nada. Uma forca que continua em 60% do proprio pico
+      aos 140 ms e alguem empurrando -- nao ha golpe assim. */
+  if (forca >= picoG * 0.6f) {
+    recusar(F("SUSTENTADO"), duracao);
+    return;
+  }
 
   if (saturouAccel) Serial.println(F("SATURATION,ACCEL"));
   if (saturouGyro) Serial.println(F("SATURATION,GYRO"));
 
-  // ------------------------------------------------ validacao da forma
-  /*  PANCADA INEQUIVOCA NAO PASSA POR JUIZ DE FORMA.
-
-      Um pico muito acima do gatilho, partindo de 200 ms de repouso e com
-      a forca saindo dentro da janela, ja e um soco -- e nada mais na
-      maquina produz isso. As checagens de SUBIDA e de GIRO existem para
-      separar casos DUVIDOSOS, e cobra-las de um golpe evidente so cria a
-      chance de recusar o que ninguem em sa consciencia recusaria.
-
-      Isto e o principio de que um soco e sempre muito mais forte que o
-      normal, escrito como regra: acima deste pico a placa nao discute.
-      A queda continua sendo exigida, porque e ela que separa impacto de
-      empurrao -- e empurrao sustentado com seis g nao existe. */
-  const bool pancada_inequivoca = picoG >= PICO_INEQUIVOCO_G;
-
-  if (duracao < DURACAO_MIN_MS) { recusar(F("CURTO"), duracao); return; }
-  if (!pancada_inequivoca && instanteDoPicoMs - golpeInicioMs > SUBIDA_MAX_MS) {
-    recusar(F("LENTO"), duracao);
-    return;
-  }
-  /*  O GIROSCOPIO E DESEMPATE, E NAO VETO -- e esta foi a correcao que
-      so apareceu quando a bancada ganhou um cenario de MONTAGEM RIGIDA.
-
-      A testemunha do giro existe para separar um soco de um tranco no
-      gabinete quando o acelerometro esta em duvida. Mas ela pressupoe
-      que o alvo GIRA, e isso e verdade num saco pendurado e FALSO num
-      alvo parafusado em estrutura rigida -- onde o acelerometro ve a
-      pancada inteira e o giroscopio mal se move. Medido na bancada: um
-      soco de 9 g numa montagem rigida produzia `REJECT,GIRO`, ou seja, a
-      maquina recusava TODOS os socos daquela montagem, para sempre.
-
-      Um pico muito acima do gatilho, com subida rapida, queda dentro da
-      janela e 200 ms de repouso antes, ja e conclusivo sozinho: nada
-      alem de um impacto tem essa forma. Entao a testemunha so e cobrada
-      quando o pico e MARGINAL -- abaixo do dobro do gatilho --, que e
-      exatamente o caso em que ela ajuda.
-
-      O preco de errar aqui e assimetrico, e a escolha segue isso: deixar
-      passar um tranco no gabinete de vez em quando e um aborrecimento;
-      recusar todo soco de uma montagem inteira mata a maquina. */
-  const bool pico_conclusivo = pancada_inequivoca || picoG >= accelMinG * 2.0f;
-  if (giroMinimoDps > 0.0f && !pico_conclusivo && picoGyroDps < giroMinimoDps) {
-    recusar(F("GIRO"), duracao);
-    return;
-  }
-
-  // ------------------------------------------------ medida
-  /*  O ACELEROMETRO E A MEDIDA; o giroscopio so assume quando ele
-      satura. A V2 usava `max(integral, giro)` sempre -- e era por ai que
-      ruido de giro virava nota. */
   float velocidade = velocidadePico;
+  // O giroscopio so entra quando o acelerometro saturou e a medida dele
+  // deixou de valer. Fora disso ele nao opina.
   if (saturouAccel) {
     const float vGiro = (picoGyroDps * 0.01745329f) * raioMetros;
     if (vGiro > velocidade) velocidade = vGiro;
   }
 
+  ultimaVelocidade = velocidade;
+  ultimoPicoG = picoG;
+
+  /*  A UNICA RECUSA QUE SOBROU -- e ela fala.
+      Encostar no alvo nao pode virar pontuacao, mas tambem nao pode
+      sumir calado: se este piso estiver alto demais para esta montagem,
+      a linha de REJECT na Central diz isso na hora. */
   if (velocidade < velocidadeMinima) {
-    ultimaVelocidade = velocidade;   // a Central mostra quanto faltou
     recusar(F("FRACO"), duracao);
     return;
   }
-
-  ultimaVelocidade = velocidade;
-  ultimoPicoG = picoG;
 
   // A fita sobe no mesmo instante do golpe, sem esperar o jogo.
   const float faixa = velocidadeMaxima - velocidadeMinima;
@@ -833,8 +707,6 @@ void processarAmostra() {
   Serial.print(',');
   Serial.print(duracao);
   Serial.print(',');
-  // O eixo que DOMINOU a pancada. E informacao para a Central, nao
-  // configuracao: a medida usa o vetor inteiro.
   Serial.println(eixoDominante());
 }
 
@@ -843,6 +715,29 @@ char eixoDominante() {
   const float x = fabsf(direcao[0]), y = fabsf(direcao[1]), z = fabsf(direcao[2]);
   if (x >= y && x >= z) return 'X';
   return (y >= z) ? 'Y' : 'Z';
+}
+
+/*  A magnitude do giro. Somar |gx|+|gy|+|gz| somaria tres ruidos. */
+float magnitudeGiro(const float *g) {
+  const float x = g[0] - baseGyro[0];
+  const float y = g[1] - baseGyro[1];
+  const float z = g[2] - baseGyro[2];
+  return sqrtf(x * x + y * y + z * z);
+}
+
+/*  TODA RECUSA FALA, COM OS NUMEROS DO EVENTO.
+    `REJECT,<motivo>,<pico_g>,<duracao_ms>,<giro_dps>,<velocidade>` */
+void recusar(const __FlashStringHelper *motivo, unsigned long duracao) {
+  Serial.print(F("REJECT,"));
+  Serial.print(motivo);
+  Serial.print(',');
+  Serial.print(picoG, 2);
+  Serial.print(',');
+  Serial.print(duracao);
+  Serial.print(',');
+  Serial.print(picoGyroDps, 1);
+  Serial.print(',');
+  Serial.println(velocidadePico, 2);
 }
 
 /*  O ESTADO CRU DOS DOIS PINOS, QUATRO VEZES POR SEGUNDO.
@@ -861,15 +756,20 @@ char eixoDominante() {
     olhar o que vibra. Sem este numero, "nada acontece" nao se distingue
     de "o sensor nao esta ligado". */
 void enviarStatus() {
+  /*  `STATUS,<medindo>,<forca_agora_g>,<gatilho_g>`
+
+      `forca_agora` e a aceleracao ja SEM a gravidade. Com a maquina
+      parada ela fica perto de zero -- e isso se confere a olho na
+      Central, sem interpretar nada. Se ela nao se mexer quando alguem
+      bate no alvo, o problema e o sensor ou o fio, e nao o jogo. */
   Serial.print(F("STATUS,"));
-  Serial.print(prontoParaGolpe ? 1 : 0);
+  Serial.print(golpeAtivo ? 1 : 0);
   Serial.print(',');
-  Serial.print(amostrasQuietas);
-  Serial.print(',');
-  Serial.print(ruidoG, 3);
+  Serial.print(ultimaForca, 2);
   Serial.print(',');
   Serial.println(accelMinG, 2);
 }
+
 
 void enviarPinos() {
   Serial.print(F("PINS,"));
@@ -915,7 +815,7 @@ void enviarTelemetria() {
   Serial.print(g[1] - baseGyro[1], 1); Serial.print(',');
   Serial.print(g[2] - baseGyro[2], 1); Serial.print(',');
   Serial.print(ultimaVelocidade, 2); Serial.print(',');
-  Serial.println(ultimoPicoG, 2);
+  Serial.println(ultimaForca, 2);
 }
 
 // ---------------------------------------------------------------- comandos

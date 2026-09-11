@@ -100,21 +100,21 @@ static func parse(line: String) -> Dictionary:
 				"speed": nums[3],
 			}
 		"STATUS":
-			# STATUS,<pronto>,<amostras_quietas>,<ruido_g>,<gatilho_g>
+			# STATUS,<medindo>,<forca_agora_g>,<gatilho_g>
 			#
-			# `pronto` em 0 com a máquina PARADA é a resposta inteira: a
-			# montagem nunca fica quieta, nenhum golpe será aceito.
-			if parts.size() != 5:
+			# `forca_agora` é a aceleração já sem a gravidade. Parada, a
+			# máquina mostra perto de zero; um soco passa de 3. É o número
+			# que se confere a olho, sem interpretar nada.
+			if parts.size() != 4:
 				return {"type": ""}
-			var st := _floats(parts, 2, 3)
+			var st := _floats(parts, 2, 2)
 			if st.is_empty():
 				return {"type": ""}
 			return {
 				"type": "STATUS",
-				"ready": parts[1].strip_edges() == "1",
-				"quiet_samples": int(st[0]),
-				"noise_g": st[1],
-				"trigger_g": st[2],
+				"measuring": parts[1].strip_edges() == "1",
+				"force_g": st[0],
+				"trigger_g": st[1],
 			}
 		"NOISE":
 			# NOISE,<ruido_g>,<ruido_dps> — o piso medido nesta montagem.
