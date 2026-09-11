@@ -193,9 +193,13 @@ var sensor_raio := 0.45
 ## "o sensor não faz nada": a montagem nunca fica quieta o bastante, a
 ## autorização de soco nunca acende, e NENHUM golpe será aceito. Sem este
 ## número, isso é indistinguível de sensor desligado.
-var sensor_pronto := false
-var sensor_ruido := 0.0
-var sensor_quietas := 0
+## A FORÇA QUE A PLACA ESTÁ VENDO AGORA, em g e já sem a gravidade.
+## Parada, fica perto de zero. Um soco passa de 3. É o número que se
+## confere a olho, e o que responde "o sensor está vivo?" sem que
+## ninguém precise interpretar nada.
+var sensor_forca := 0.0
+var sensor_forca_maxima := 0.0
+var sensor_gatilho := 0.0
 ## A última recusa da placa, em palavras de gente. Ver `_recusa_da_placa`.
 var ultima_recusa := ""
 ## Os ajustes do sensor foram descartados por serem de outra escala.
@@ -2276,12 +2280,10 @@ func _on_serial_line(line: String) -> void:
 		"REJECT":
 			_recusa_da_placa(msg)
 		"STATUS":
-			sensor_pronto = bool(msg["ready"])
-			sensor_ruido = float(msg["noise_g"])
-			sensor_quietas = int(msg["quiet_samples"])
-		"NOISE":
-			sensor_ruido = float(msg["noise_g"])
-			_show_notice("PISO DE RUÍDO MEDIDO: %.3f g" % sensor_ruido)
+			sensor_forca = float(msg["force_g"])
+			sensor_gatilho = float(msg["trigger_g"])
+			if sensor_forca > sensor_forca_maxima:
+				sensor_forca_maxima = sensor_forca
 		"SATURATION":
 			# SATURAÇÃO NÃO VIRA 9999. O sensor chegou ao fim da escala e
 			# parou de medir: a máquina não sabe quanto aquele golpe valeu,
@@ -4271,12 +4273,17 @@ func _central_dados() -> void:
 	# Se esta linha ficar VERMELHA com a máquina parada, é esta a resposta
 	# inteira: recalibre (a calibração mede o ruído desta montagem) ou veja
 	# o que está vibrando.
+	# O NÚMERO QUE RESPONDE "O SENSOR ESTÁ VIVO?" SEM INTERPRETAR NADA.
+	#
+	# Parado, perto de 0,00. Batendo no alvo, passa de 3. Se o MAIOR
+	# nunca sobe quando alguém soca, o problema está antes do jogo — é
+	# sensor ou fio, e nenhuma regulagem aqui resolve.
 	_texto(
-		"detecção: %s  •  piso de ruído %.3f g  •  %d amostras quietas" % [
-			"PRONTA PARA O SOCO" if sensor_pronto else "NÃO ARMADA — a montagem não fica quieta",
-			sensor_ruido, sensor_quietas,
+		"força agora: %.2f g   •   maior já visto: %.2f g   •   conta acima de %.2f g" % [
+			sensor_forca, sensor_forca_maxima, sensor_gatilho
 		],
-		916.0, 17, Paleta.VERDE if sensor_pronto else Paleta.VERMELHO,
+		916.0, 17,
+		Paleta.VERDE if sensor_forca_maxima >= sensor_gatilho and sensor_gatilho > 0.0 else Paleta.AMBAR,
 		HORIZONTAL_ALIGNMENT_LEFT, 120.0, 860.0
 	)
 	# A ÚLTIMA RECUSA, COM OS NÚMEROS DO EVENTO. É o que diz QUAL limiar
