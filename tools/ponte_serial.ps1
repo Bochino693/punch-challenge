@@ -312,6 +312,13 @@ function Abrir([string]$nome, [int]$velocidade) {
         $p.WriteTimeout = 800
         $p.NewLine = "`n"
         $p.Handshake = "None"
+        # ASCII DECLARADO, e nao herdado.
+        # O padrao do .NET ja e ASCII, mas "ja e o padrao" e o tipo de
+        # coisa que muda de versao para versao e reaparece como
+        # "Unicode parsing error" do outro lado do cano. Declarado, o
+        # byte de ruido vira '?' aqui e nunca chega ao Godot como uma
+        # sequencia invalida.
+        $p.Encoding = [System.Text.Encoding]::ASCII
         $p.Open()
         # DTR E RTS LIGADOS DE PROPOSITO, E DEPOIS DE ABRIR.
         #

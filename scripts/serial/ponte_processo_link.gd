@@ -348,13 +348,11 @@ func _laco_leitor(geracao: int) -> void:
 		var cano := _cano
 		if cano == null:
 			break
-		var linha := cano.get_line()
+		var linha := _somente_ascii(cano.get_line())
 		if not linha.is_empty():
-			linha = linha.strip_edges()
-			if not linha.is_empty():
-				_tranca.lock()
-				_recebidas.append(linha)
-				_tranca.unlock()
+			_tranca.lock()
+			_recebidas.append(linha)
+			_tranca.unlock()
 			continue
 		if cano.eof_reached() or cano.get_error() != OK:
 			break
@@ -366,6 +364,27 @@ func _laco_leitor(geracao: int) -> void:
 	# depois que o novo subiu nao pode derrubar o novo.
 	_recebidas.append("#MORREU,%d" % geracao)
 	_tranca.unlock()
+
+## SO O ASCII IMPRIMIVEL CHEGA AO PROTOCOLO.
+##
+## O protocolo inteiro cabe em 0x20..0x7E -- letras, digitos, virgula e
+## ponto. Qualquer outra coisa e ruido de linha, lixo do reset da placa
+## ou um baud que nao bate, e nada disso pode virar mensagem.
+##
+## POR QUE NAO SE LE BYTE A BYTE AQUI. Seria o conserto completo, e e o
+## que a leitura nativa passou a fazer. Mas este laco vive numa thread
+## que DEPENDE de `get_line()` bloquear ate a linha chegar; trocar por
+## `get_8()` arrisca um laco em vazio queimando um nucleo a noite
+## inteira, e esta ponte nao tem o problema que justificaria o risco --
+## `get_line()` ja corta no \n, entao mensagem partida ao meio nao
+## acontece por aqui. O que faltava era so nao deixar o lixo passar.
+static func _somente_ascii(bruta: String) -> String:
+	var limpa := ""
+	for i in bruta.length():
+		var c := bruta.unicode_at(i)
+		if c >= 32 and c <= 126:
+			limpa += char(c)
+	return limpa.strip_edges()
 
 func _derrubar() -> void:
 	_parar = true
