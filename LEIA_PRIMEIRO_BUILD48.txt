@@ -1,0 +1,74 @@
+PUNCH CHALLENGE - BUILD 48 - PROJETO COMPLETO
+
+Base: main do GitHub, commit 2f4397d2accda7bbae7b7a3b5a3568bfdd0ab204.
+Todos os arquivos de codigo, cenas, recursos, fontes, audios, imagens e
+bibliotecas declaradas foram conferidos contra essa versao. O ZIP antigo
+que estava dentro do repositorio foi omitido para evitar confusao.
+
+COMO USAR
+1. Extraia em uma PASTA NOVA. Abra o project.godot dessa pasta no Godot 4.6.
+2. Confirme BUILD 48 na abertura. Se aparecer 46 ou 47, outro projeto ou
+   outro executavel foi aberto.
+3. Exporte com o preset Windows Desktop. O destino agora e:
+   build/windows/PunchChallenge.exe
+4. Copie a pasta build/windows INTEIRA para o outro PC, incluindo todas as
+   DLLs geradas. O EXE sozinho nao constitui a distribuicao completa.
+5. Feche a IDE/Monitor Serial do Arduino antes de abrir o jogo.
+
+O pacote contem o projeto-fonte completo. Nao contem um novo executavel
+Windows compilado: e necessario exportar pelo Godot.
+Nao e necessario regravar o Arduino por causa desta atualizacao.
+
+CAMINHOS ENTRE COMPUTADORES
+- Nao foi encontrado nome de usuario fixo no codigo de acesso ao PowerShell.
+- Foi removido o destino particular ../../../joga_fn da exportacao.
+- Windows PowerShell e localizado por SystemRoot/WINDIR do PC onde o jogo
+  esta rodando. Nao depende de C:, de um nome de usuario ou de PATH.
+- O script da ponte e lido de res:// e extraido em user://serial/<hash>/.
+  Godot resolve user:// para o usuario ATUAL. Uma copia externa antiga na
+  pasta tools nao substitui o script contido na build.
+- O caminho do script e passado como argumento separado, preservando
+  pastas com espacos. A inicializacao inclui -NoLogo e -NoProfile.
+- A execucao normal nao alterna automaticamente para comandos codificados.
+- Nao ha mudanca de antivirus, exclusao de seguranca ou politica permanente.
+
+OUTROS AJUSTES DE CONEXAO
+- A consulta PnP e a leitura de comandos da ponte trabalham em runspaces
+  separados do laco de leitura serial.
+- Erros do PowerShell sao lidos por stderr e repassados a Central.
+- A abertura tem prazo de 15 segundos. PING aguarda confirmacao da abertura.
+- Confirmacoes atrasadas de outra porta sao ignoradas.
+- A ponte nao e recriada pela supervisao quando nao existe caminho nativo.
+- O intervalo entre tentativas nao volta ao minimo apenas porque um
+  processo nasceu: precisa entregar uma linha valida da placa.
+- Eventos nativos sao entregues ao jogo depois que poll_events termina,
+  evitando reentrar na biblioteca quando READY provoca o envio de CONFIG.
+- Recursos do backend nativo sao liberados ao encerrar.
+
+VALIDACAO REALIZADA
+- Inventario e hashes dos arquivos comparados com a base do GitHub.
+- Verificador de exportacao: EXPORTACAO_OK, incluindo as seis bibliotecas.
+- Verificador de sintaxe do firmware com stubs C++: FIRMWARE_OK, com e sem
+  a biblioteca de LEDs. O stub foi atualizado; o firmware nao foi alterado.
+- Sintaxe dos arquivos Python conferida.
+- Integridade do arquivo ZIP conferida.
+
+LIMITES
+Nao foi possivel executar Godot, PowerShell ou Arduino neste ambiente.
+Logo, a conexao fisica e o executavel Windows ainda NAO foram validados.
+Os testes tests/test_ponte_windows.ps1 e tests/test_native_reentry.gd estao
+incluidos para essa validacao. Nao sao apresentados como testes executados.
+Estas mudancas corrigem os problemas descritos acima, mas nao provam que
+a causa completa da queda no PC de destino tenha sido eliminada.
+O GitHub nao foi modificado.
+
+TESTE DA PONTE NO PC DE DESENVOLVIMENTO
+Para comparar com o PC onde a extensao nativa falta, abra o Prompt de
+Comando na pasta exportada e execute:
+  set PUNCH_SERIAL=ponte
+  PunchChallenge.exe
+Isso vale apenas para esse terminal. Feche-o para voltar a selecao normal.
+
+Se persistir a falha, o log de %APPDATA%\Godot\app_userdata\Punch Challenge\logs
+e o motivo completo mostrado pela Central sao necessarios para identificar
+o erro especifico desse computador.

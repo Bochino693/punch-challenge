@@ -1,0 +1,501 @@
+# ======================================================================
+#  PONTE SERIAL -- Arduino <-> jogo, SEM INSTALAR NADA.
+# ======================================================================
+#
+#  POR QUE ISTO EXISTE.
+#
+#  O Godot nao sabe abrir uma porta COM sozinho. Ate agora quem fazia
+#  isso era uma extensao nativa (gdserial.dll). Quando ela nao carrega --
+#  e no gabinete do operador ela NAO CARREGOU -- o jogo fica escrito
+#  "SIMULACAO -- SEM EXTENSAO SERIAL" e a maquina inteira morre junto:
+#  START morto, CREDITO morto, sensor mudo, fitas apagadas.
+#
+#  Este arquivo e o plano B que nao depende de nada: o Windows ja vem com
+#  o PowerShell, e o PowerShell ja vem com System.IO.Ports.SerialPort.
+#  Nao ha Python para instalar, nao ha .dll para faltar, nao ha antivirus
+#  para apagar um binario desconhecido. Em PC cru, funciona.
+#
+#  COMO CONVERSA COM O JOGO.
+#
+#  O jogo abre este script como processo filho e fala pelos canos padrao
+#  (OS.execute_with_pipe). Uma linha de texto para cada lado.
+#
+#    jogo -> ponte   @LISTAR              reenumera as portas
+#                    @ABRIR,COM5,115200   abre
+#                    @FECHAR              fecha
+#                    @SAIR                encerra
+#                    qualquer outra linha vai CRUA para o Arduino
+#                    (PING, TEST, CONFIG,... , LEDS,...)
+#
+#    ponte -> jogo   #PONTE,V1            apresentacao
+#                    #PORTAS,COM3,COM5    lista, ja em ordem de suspeita
+#                    #ABERTA,COM5
+#                    #FECHADA,COM5
+#                    #FALHA,COM5,motivo
+#                    #ERRO,texto
+#                    qualquer outra linha veio CRUA do Arduino
+#
+#  A REGRA DE OURO: ESTE LACO NUNCA PODE BLOQUEAR.
+#
+#  Se ele parar esperando um byte que nao vem, o cano entope e o jogo
+#  trava junto. Por isso a leitura do Arduino usa ReadExisting() (volta na
+#  hora com o que houver, nem que seja vazio) e a leitura dos comandos do
+#  jogo usa um leitor dedicado em outro runspace. O laco serial nao espera.
+#
+#  Uso manual, para testar fora do jogo:
+#      powershell -NoProfile -ExecutionPolicy Bypass -File ponte_serial.ps1
+#  Depois digite  @LISTAR  e Enter.
+# ======================================================================
+
+param(
+    [string]$Porta = "",
+    [int]$Baud = 115200
+)
+
+$ErrorActionPreference = "Continue"
+
+# A SAIDA PRECISA SER UTF-8 SEM BOM.
+#
+# O console do Windows fala CP-850/CP-1252. Deixando como esta, cada
+# linha do Arduino chega no jogo com bytes trocados, e o BOM (tres bytes
+# invisiveis no comeco) entra dentro da PRIMEIRA linha -- que e
+# justamente o "READY". O jogo compara com "READY", nao bate, e conclui
+# que a placa nao respondeu.
+try {
+    $semBom = New-Object System.Text.UTF8Encoding($false)
+    [Console]::OutputEncoding = $semBom
+    $saida = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $semBom)
+    $saida.AutoFlush = $true
+} catch {
+    $saida = [Console]::Out
+}
+
+function Dizer([string]$texto) {
+    try { $saida.WriteLine($texto) } catch { }
+}
+
+# A APRESENTACAO E A PRIMEIRA COISA QUE SAI, ANTES DE QUALQUER TRABALHO.
+#
+# Ela ficava depois do `Add-Type` e das definicoes -- e o `Add-Type` de
+# `System.IO.Ports` carrega um assembly, o que num PC lento ou com
+# antivirus vigiando o PowerShell leva segundos. O jogo conta o tempo da
+# apresentacao para decidir se a politica do Windows recusou o script, e
+# um `Add-Type` demorado estourava esse prazo: o jogo derrubava um
+# ajudante que estava perfeitamente vivo e recomecava, para trocar de
+# receita e derrubar o proximo. A ponte nunca chegava a dizer nada.
+#
+# Falar primeiro e trabalhar depois nao custa nada e tira o prazo do
+# caminho.
+Dizer "#PONTE,V1,windows"
+
+# Em Windows PowerShell (5.1) a classe SerialPort ja vem carregada; em
+# PowerShell 7 ela mora num pacote a parte. Tentar carregar e nao
+# conseguir nao pode derrubar a ponte -- por isso o try vazio.
+try { Add-Type -AssemblyName System.IO.Ports -ErrorAction SilentlyContinue } catch { }
+
+$script:sp = $null
+$script:portaAberta = ""
+$script:sobras = ""
+$script:listaConhecida = @()
+$script:nomesCrus = @()
+$script:proximaBusca = [DateTime]::MinValue
+
+# ----------------------------------------------------------------------
+#  QUAL DESSAS PORTAS E UM ARDUINO?
+# ----------------------------------------------------------------------
+#
+#  Um gabinete quase nunca tem uma porta COM so: o Bluetooth inventa duas,
+#  o leitor de cartao traz a dele, a impressora fiscal traz outra. Abrir a
+#  primeira da lista e sorteio -- e a porta errada nao responde nunca.
+#
+#  Estes sao os fabricantes de conversor USB-serial que aparecem num
+#  Arduino: 2341 e 2A03 sao os oficiais, 1A86 e o CH340 dos clones de
+#  Nano, 0403 e o FTDI, 10C4 e o CP210x. Uma porta com um desses vai para
+#  a frente da fila; as outras ficam atras, porque uma porta anonima ainda
+#  pode ser a placa.
+$MARCAS = @("VID_2341", "VID_2A03", "VID_1A86", "VID_0403", "VID_10C4", "VID_1B4F",
+            "ARDUINO", "CH340", "CH341", "USB-SERIAL", "USB SERIAL", "FT232", "CP210")
+
+# MAIUSCULA SO PARA QUEM E "COM ALGUMA COISA".
+#
+# No Windows a porta se chama COM5 e escrever "com5" ou "COM5" da na
+# mesma -- deixar tudo maiusculo evita a mesma porta aparecer duas vezes
+# com grafias diferentes. Fora do Windows o nome e um caminho de arquivo
+# (/dev/ttyUSB0), e caminho tem maiuscula e minuscula que importam:
+# passar tudo para maiuscula ali inventa uma porta que nao existe. Esta
+# funcao e a diferenca entre as duas coisas.
+function Normalizar([string]$nome) {
+    $nome = $nome.Trim()
+    if ($nome -match '^(?i)com\d+$') { return $nome.ToUpper() }
+    return $nome
+}
+
+function NumeroDaPorta([string]$nome) {
+    $digitos = ($nome -replace "\D", "")
+    if ($digitos -eq "") { return 9999 }
+    return [int]$digitos
+}
+
+# TRES FONTES, E NAO UMA -- E ESTE E O CONSERTO DO "FUNCIONA NO MEU PC".
+#
+# A lista de portas vinha SO do `[SerialPort]::GetPortNames()`. Ele le uma
+# chave do registro, e quando essa chave nao tem a porta -- driver CH340
+# instalado por cima de outro, porta que o Windows enumerou de um jeito
+# antigo, perfil de usuario sem permissao de leitura ali -- ele devolve
+# VAZIO. Vazio sem erro: nenhuma excecao, nenhuma pista. O jogo recebia
+# "#PORTAS," sem nada, concluia que nao havia porta e ficava
+# "PROCURANDO ARDUINO..." para sempre, com a placa espetada e falando.
+#
+# E POR ISSO O DIAGNOSTICO NAO BATE ENTRE DOIS PCs: nao e a placa que
+# muda, e QUEM SABE DA PORTA que muda. Num PC as tres fontes concordam;
+# noutro, duas estao cegas e a terceira sabe.
+#
+# Agora sao tres, e a lista e a UNIAO delas:
+#   1. GetPortNames()               -- o caminho normal, quando funciona
+#   2. HKLM\HARDWARE\DEVICEMAP\SERIALCOMM -- o registro cru, direto
+#   3. Win32_SerialPort / Win32_PnPEntity   -- o gerenciador de dispositivos
+# Uma fonte cega nao apaga o que as outras acharam. Para uma porta ser
+# ignorada agora, as tres precisam nao a conhecer -- e mesmo aí sobra a
+# varredura cega do lado do jogo.
+# TRES FONTES, E NAO UMA -- E ESTE E O CONSERTO DO "FUNCIONA NO MEU PC".
+#
+# A lista de portas vinha SO do `[SerialPort]::GetPortNames()`. Ele le uma
+# chave do registro, e quando essa chave nao tem a porta -- driver CH340
+# instalado por cima de outro, porta enumerada de um jeito antigo, perfil
+# de usuario sem permissao de leitura ali -- ele devolve VAZIO. Vazio sem
+# erro: nenhuma excecao, nenhuma pista. O jogo recebia "#PORTAS," sem
+# nada, concluia que nao havia porta e ficava "PROCURANDO ARDUINO..."
+# para sempre, com a placa espetada e falando.
+#
+# E POR ISSO O DIAGNOSTICO NAO BATE ENTRE DOIS PCs: nao e a placa que
+# muda, e QUEM SABE DA PORTA. Num PC as tres fontes concordam; noutro,
+# duas estao cegas e a terceira sabe. A lista e a UNIAO das tres, e uma
+# fonte cega nao apaga o que as outras acharam:
+#   1. GetPortNames()                        -- o caminho normal
+#   2. HKLM\HARDWARE\DEVICEMAP\SERIALCOMM   -- o registro cru
+#   3. Win32_PnPEntity                       -- o gerenciador de dispositivos
+# Para uma porta ser ignorada agora, as tres precisam nao a conhecer -- e
+# mesmo ai sobra a varredura cega do lado do jogo.
+
+# AS DUAS FONTES BARATAS: milissegundos, podem rodar sempre.
+function NomesBaratos() {
+    $achados = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($n in @([System.IO.Ports.SerialPort]::GetPortNames())) {
+            if ($n) { $achados.Add((Normalizar $n)) }
+        }
+    } catch { }
+    # O registro cru: a mesma informacao que o GetPortNames le, mas sem a
+    # camada do .NET no meio -- e ha maquina em que uma funciona e a outra
+    # nao.
+    try {
+        $chave = Get-ItemProperty -Path "HKLM:\HARDWARE\DEVICEMAP\SERIALCOMM" -ErrorAction Stop
+        foreach ($prop in $chave.PSObject.Properties) {
+            if ($prop.Name -like "PS*") { continue }
+            $valor = ([string]$prop.Value) -replace '^\\\\\.\\', ''
+            if ($valor -match '^(?i)com\d+$') { $achados.Add($valor.ToUpper()) }
+        }
+    } catch { }
+    return @($achados | Where-Object { $_ } | Sort-Object -Unique)
+}
+
+# A FONTE CARA: o gerenciador de dispositivos. Varre uns mil e quinhentos
+# dispositivos e leva de um a tres segundos num PC bom, mais num PC de
+# gabinete -- e o laco desta ponte e o mesmo que le a placa, entao cada
+# consulta e um tempo em que a placa fala e ninguem ouve. Por isso ela e
+# racionada: roda quando a lista barata MUDA (a resposta pode ter mudado)
+# e, quando a lista barata esta vazia, de seis em seis segundos, porque ai
+# ela e a unica que ainda pode saber da porta.
+#
+# Ela serve duas coisas de uma vez: descobre portas que as baratas nao
+# viram, e diz QUEM e cada porta, que e o que monta a fila de prioridade.
+$script:mapaPnp = @{}
+$script:pnpEm = [DateTime]::MinValue
+
+# PnP runs in a separate runspace: WMI/CIM must never stop serial reads.
+$script:pnpWorker = $null
+$script:pnpTask = $null
+function ConsultarPnp() {
+    if ($script:pnpWorker -ne $null) {
+        if (-not $script:pnpTask.IsCompleted) { return }
+        try {
+            $mapa = @{}
+            foreach ($it in $script:pnpWorker.EndInvoke($script:pnpTask)) {
+                $rotulo = [string]$it.Name
+                if ($rotulo -match "\((COM\d+)\)") {
+                    $mapa[$matches[1].ToUpper()] = ($rotulo + " " + [string]$it.PNPDeviceID).ToUpper()
+                }
+            }
+            $script:mapaPnp = $mapa
+        } catch { }
+        $script:pnpWorker.Dispose()
+        $script:pnpWorker = $null
+        $script:pnpEm = Get-Date
+        return
+    }
+    $script:pnpWorker = [PowerShell]::Create()
+    [void]$script:pnpWorker.AddScript({
+        Get-CimInstance Win32_PnPEntity -Filter "Name LIKE '%(COM%'" -OperationTimeoutSec 5 -ErrorAction Stop |
+            Select-Object Name, PNPDeviceID
+    })
+    $script:pnpTask = $script:pnpWorker.BeginInvoke()
+}
+
+function ChiaAArduino([string]$texto) {
+    if (-not $texto) { return $false }
+    foreach ($m in $MARCAS) {
+        if ($texto.Contains($m)) { return $true }
+    }
+    return $false
+}
+
+function Enumerar() {
+    $baratos = @(NomesBaratos)
+    $mudou = (($baratos -join ",") -ne ($script:nomesCrus -join ","))
+    $script:nomesCrus = $baratos
+    # Racionamento da consulta cara -- ver o comentario de `ConsultarPnp`.
+    $vencido = ((Get-Date) - $script:pnpEm).TotalSeconds -ge 6
+    if ($script:pnpWorker -ne $null -or $mudou -or ($baratos.Count -eq 0 -and $vencido) -or $script:pnpEm -eq [DateTime]::MinValue) {
+        ConsultarPnp
+    }
+
+    $todos = New-Object System.Collections.Generic.List[string]
+    foreach ($n in $baratos) { $todos.Add($n) }
+    foreach ($n in $script:mapaPnp.Keys) { $todos.Add([string]$n) }
+    $nomes = @($todos | Where-Object { $_ } | Sort-Object -Unique)
+    if ($nomes.Count -eq 0) { return @() }
+
+    # A PONTE JA SABE QUAL PORTA TEM CARA DE ARDUINO -- E PASSA A DIZER.
+    #
+    # Esta funcao sempre soube separar as duas: o gerenciador de
+    # dispositivos diz "Arduino Uno (COM3)" ou "USB-SERIAL CH340 (COM5)",
+    # e `ChiaAArduino` reconhece. Mas o que ia para o jogo era so a ORDEM,
+    # e ordem se perde: o jogo gastava a mesma paciencia longa numa porta
+    # de Bluetooth e na porta da placa. Com quatro portas antes da certa,
+    # isso e meio minuto de "PROCURANDO ARDUINO..." com a placa espetada e
+    # falando.
+    #
+    # O asterisco marca "esta tem cara de Arduino". O jogo da a paciencia
+    # inteira as marcadas e uma paciencia curta as outras -- e o caso
+    # normal, que e a placa aparecer com o nome dela, passa a resolver em
+    # segundos. Nome sem asterisco continua sendo tentado: marca e
+    # PREFERENCIA, nunca cadeado, porque ha driver generico que nao se
+    # anuncia.
+    $frente = @($nomes | Where-Object { ChiaAArduino ([string]$script:mapaPnp[$_]) } | Sort-Object { NumeroDaPorta $_ })
+    $fundo  = @($nomes | Where-Object { -not (ChiaAArduino ([string]$script:mapaPnp[$_])) } | Sort-Object { NumeroDaPorta $_ })
+    return @(@($frente | ForEach-Object { "$_*" }) + $fundo)
+}
+
+function AnunciarPortas([bool]$sempre) {
+    $lista = Enumerar
+    $script:proximaBusca = (Get-Date).AddSeconds(3)
+    $mudou = ($lista -join ",") -ne ($script:listaConhecida -join ",")
+    $script:listaConhecida = $lista
+    if ($mudou -or $sempre) {
+        Dizer ("#PORTAS," + ($lista -join ","))
+    }
+}
+
+# A PRIMEIRA LISTA NAO PODE ESPERAR PELA PARTE CARA.
+#
+# `Enumerar` faz a classificacao por fabricante, e essa consulta ao
+# gerenciador de dispositivos varre uns mil e quinhentos dispositivos: de
+# um a tres segundos num PC bom, mais de dez num PC de gabinete. Durante
+# esse tempo o jogo nao tinha lista NENHUMA e mostrava
+# "PROCURANDO ARDUINO..." -- que e exatamente a queixa. Entao a lista
+# barata sai na frente, na hora, e a classificada sai depois por cima. O
+# jogo ja pode estar tentando a porta certa enquanto o Windows ainda
+# responde quem ela e.
+function AnunciarDepressa() {
+    $cru = @()
+    try { $cru = @([System.IO.Ports.SerialPort]::GetPortNames() | Where-Object { $_ } | ForEach-Object { Normalizar $_ } | Sort-Object -Unique) } catch { }
+    if ($cru.Count -gt 0) {
+        Dizer ("#PORTAS," + ($cru -join ","))
+    }
+}
+
+function Fechar([bool]$avisar) {
+    if ($script:sp -ne $null) {
+        try { $script:sp.Close() } catch { }
+        try { $script:sp.Dispose() } catch { }
+    }
+    $qual = $script:portaAberta
+    $script:sp = $null
+    $script:portaAberta = ""
+    $script:sobras = ""
+    if ($avisar -and $qual -ne "") { Dizer ("#FECHADA," + $qual) }
+}
+
+function Abrir([string]$nome, [int]$velocidade) {
+    if ($script:sp -ne $null -and $script:sp.IsOpen -and $script:portaAberta -eq $nome -and $script:sp.BaudRate -eq $velocidade) {
+        Dizer ("#ABERTA," + $nome)
+        return
+    }
+    Fechar $false
+    $p = $null
+    if ($nome -eq "") { Dizer "#FALHA,,porta vazia"; return }
+    try {
+        $p = New-Object System.IO.Ports.SerialPort($nome, $velocidade, "None", 8, "One")
+        $p.ReadTimeout = 40
+        $p.WriteTimeout = 800
+        $p.NewLine = "`n"
+        $p.Handshake = "None"
+        # ASCII DECLARADO, e nao herdado.
+        # O padrao do .NET ja e ASCII, mas "ja e o padrao" e o tipo de
+        # coisa que muda de versao para versao e reaparece como
+        # "Unicode parsing error" do outro lado do cano. Declarado, o
+        # byte de ruido vira '?' aqui e nunca chega ao Godot como uma
+        # sequencia invalida.
+        $p.Encoding = [System.Text.Encoding]::ASCII
+        $p.Open()
+        # DTR E RTS LIGADOS DE PROPOSITO, E DEPOIS DE ABRIR.
+        #
+        # O Nano reinicia quando o DTR sobe -- e e reiniciando que ele
+        # manda o "READY". Com DTR desligado (que e o padrao do .NET) a
+        # placa fica quieta ate alguem apertar algo, o jogo espera um
+        # READY que nunca vem e desiste da porta certa.
+        #
+        # Depois de abrir, e nao antes, porque nem toda porta tem essas
+        # duas linhas. Adaptador sem controle de fluxo, porta virtual,
+        # ponte de rede: em todas elas mexer no DTR devolve erro. Feito
+        # ANTES do Open(), o erro derruba a abertura inteira e a porta
+        # boa e descartada como se nao existisse; feito depois e dentro do
+        # try, a porta abre e segue funcionando sem o reset.
+        # E O RESET PRECISA DE UMA BORDA, nao de um estado.
+        #
+        # Punha DTR e RTS em `$true` e pronto. Funciona quando o driver
+        # abriu a porta com eles em baixo -- que e o padrao do .NET e o
+        # caso do PC de quem escreveu isto. Mas ha driver (CH340 generico,
+        # e as portas que passam por concentrador USB) que ja entrega a
+        # porta com DTR EM ALTA: pôr em alta o que ja esta em alta nao
+        # move linha nenhuma, a placa nao reinicia, o `READY` nunca sai, e
+        # o jogo descarta a porta CERTA como muda. Mesma placa, mesmo
+        # cabo, mesmo firmware -- e um PC funciona e o outro nao.
+        #
+        # Baixar e subir garante o degrau que reinicia o Arduino em
+        # qualquer driver. Os 60 ms sao o tempo de o capacitor de 100 nF
+        # do circuito de reset da placa ver o pulso.
+        try {
+            $p.DtrEnable = $false
+            $p.RtsEnable = $false
+            Start-Sleep -Milliseconds 60
+            $p.DtrEnable = $true
+            $p.RtsEnable = $true
+        } catch { }
+        try { $p.DiscardInBuffer(); $p.DiscardOutBuffer() } catch { }
+        $script:sp = $p
+        $script:portaAberta = $nome
+        Dizer ("#ABERTA," + $nome)
+    } catch {
+        $motivo = ($_.Exception.Message -replace "[\r\n,]", " ")
+        if ($p -ne $null) { try { $p.Dispose() } catch { } }
+        Dizer ("#FALHA," + $nome + "," + $motivo)
+    }
+}
+
+function ParaOArduino([string]$linha) {
+    if ($script:sp -eq $null) { return }
+    try {
+        $script:sp.Write($linha + "`n")
+    } catch {
+        $motivo = ($_.Exception.Message -replace "[\r\n,]", " ")
+        Dizer ("#ERRO,escrita " + $motivo)
+        Fechar $true
+    }
+}
+
+function Executar([string]$linha) {
+    $linha = $linha.Trim()
+    if ($linha -eq "") { return }
+    if (-not $linha.StartsWith("@")) { ParaOArduino $linha; return }
+    $campos = $linha.Substring(1).Split(",")
+    switch ($campos[0].ToUpper()) {
+        "LISTAR" { AnunciarPortas $true }
+        "PORTAS" { AnunciarPortas $true }
+        "ABRIR"  {
+            $nome = ""
+            if ($campos.Count -gt 1) { $nome = Normalizar $campos[1] }
+            $vel = $Baud
+            if ($campos.Count -gt 2) { try { $vel = [int]$campos[2] } catch { } }
+            Abrir $nome $vel
+        }
+        "FECHAR" { Fechar $true }
+        "SAIR"   { Fechar $false; exit 0 }
+        default  { Dizer ("#ERRO,comando desconhecido " + $campos[0]) }
+    }
+}
+
+# ----------------------------------------------------------------------
+#  LACO PRINCIPAL
+# ----------------------------------------------------------------------
+# A dedicated runspace owns the blocking stdin reader. BeginRead on a
+# console stream is not a portable guarantee of nonblocking execution.
+# While the game sends nothing, the main loop must still read the Arduino.
+$comandos = [System.Collections.Queue]::Synchronized((New-Object System.Collections.Queue))
+$estadoEntrada = [hashtable]::Synchronized(@{ Fim = $false; Erro = "" })
+$leitorEntrada = [PowerShell]::Create()
+[void]$leitorEntrada.AddScript({
+    param($fila, $estado, $stream)
+    try {
+        $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+        while ($null -ne ($linha = $reader.ReadLine())) { $fila.Enqueue($linha) }
+    } catch { $estado.Erro = $_.Exception.Message }
+    finally { $estado.Fim = $true }
+}).AddArgument($comandos).AddArgument($estadoEntrada).AddArgument([Console]::OpenStandardInput())
+$tarefaEntrada = $leitorEntrada.BeginInvoke()
+
+if ($Porta -ne "") {
+    Abrir (Normalizar $Porta) $Baud
+} else {
+    AnunciarDepressa
+    AnunciarPortas $true
+}
+
+while ($true) {
+
+    # Bound work per cycle so a command burst cannot starve serial input.
+    for ($i = 0; $i -lt 32 -and $comandos.Count -gt 0; $i++) {
+        Executar ([string]$comandos.Dequeue())
+    }
+    if ($estadoEntrada.Fim -and $comandos.Count -eq 0) {
+        if ($estadoEntrada.Erro) { Dizer ("#ERRO,stdin " + $estadoEntrada.Erro) }
+        break
+    }
+
+    # --- o que o Arduino mandou (ReadExisting: volta na hora) ---
+    if ($script:sp -ne $null) {
+        $pedaco = ""
+        try {
+            if ($script:sp.IsOpen) { $pedaco = $script:sp.ReadExisting() }
+        } catch {
+            # Porta arrancada no meio do jogo. Avisa e volta a procurar --
+            # nao e motivo para a ponte inteira morrer.
+            $motivo = ($_.Exception.Message -replace "[\r\n,]", " ")
+            Dizer ("#ERRO,leitura " + $motivo)
+            Fechar $true
+            $pedaco = ""
+        }
+        if ($pedaco -ne "") {
+            $script:sobras += $pedaco
+            while ($true) {
+                $corte = $script:sobras.IndexOf("`n")
+                if ($corte -lt 0) { break }
+                $uma = $script:sobras.Substring(0, $corte).TrimEnd("`r").Trim()
+                $script:sobras = $script:sobras.Substring($corte + 1)
+                if ($uma -ne "") { Dizer $uma }
+            }
+            # Linha sem fim a vista: lixo de reinicio da placa. Descarta,
+            # senao a memoria cresce sem parar.
+            if ($script:sobras.Length -gt 4096) { $script:sobras = "" }
+        }
+    } elseif ((Get-Date) -ge $script:proximaBusca) {
+        # Sem porta aberta: fica de olho em placa espetada depois que a
+        # maquina ja estava ligada.
+        AnunciarPortas $false
+    }
+
+    Start-Sleep -Milliseconds 6
+}
+
+Fechar $false
+exit 0

@@ -1,0 +1,212 @@
+# Quando a máquina não acha o Arduino
+
+Este arquivo existe para separar **etapas que costumam ser confundidas
+numa só**. "Conectado" não prova que o sensor funciona, e "a placa Zero
+Delay funciona" não prova que a serial do Arduino está certa — são
+circuitos diferentes, e a Zero Delay nem passa por serial.
+
+Percorra na ordem. Pare na primeira etapa que falhar: as seguintes só
+fazem sentido depois dela.
+
+---
+
+## 1. O Windows enumera a COM?
+
+Gerenciador de Dispositivos → **Portas (COM e LPT)**. Tem de aparecer um
+item com um número de COM.
+
+- **Não aparece nada** → é driver ou cabo, e não o jogo. Cabo de carga
+  sem fios de dados é a causa mais comum; depois, o driver CH340 (clones
+  de Nano) ou FTDI.
+- **Aparece com triângulo amarelo** → driver. Instale o do chip USB da
+  sua placa.
+
+Anote o número: `COM3`, `COM5`, o que for. Ele muda de PC para PC — é por
+isso que a porta fixa da Central é **preferência, não cadeado**.
+
+## 2. O Arduino responde sozinho, sem o jogo?
+
+**Com o jogo fechado**, abra o Monitor Serial da IDE do Arduino na porta
+da etapa 1, em **115200**.
+
+Tem de aparecer, em segundos:
+
+```
+READY,PUNCH_MPU6050,V9
+CALIBRATING,0
+...
+CALIBRATED,-0.01,0.02,1.00
+```
+
+- **Nada** → baud errado, firmware não gravado, ou a porta é outra.
+- **Caracteres embaralhados** → baud errado. Confira que está em 115200.
+- **`READY` mas nenhum `CALIBRATED`** → veja a etapa 4.
+
+> O `READY` sai **antes** de a placa procurar o sensor, de propósito.
+> Ele prova que a **placa** está lá. Não prova sensor nenhum.
+
+## 3. O jogo acha um caminho até a placa?
+
+Abra o jogo e a Central Técnica (**F9**). A linha "caminho até a placa"
+diz qual dos dois está em uso:
+
+- `ponte PowerShell` ou `extensão nativa` → há caminho. Vá para a 4.
+- `NENHUM` → **é esta a etapa que falha.** Duas causas, nesta ordem:
+
+  **a) Falta o Visual C++ Redistributable.** A extensão nativa
+  (`addons/gdserial/bin/windows-x86_64/gdserial.dll`) importa
+  `VCRUNTIME140.dll`, que **não faz parte do Windows** — vem do
+  *Visual C++ 2015-2022 Redistributable (x64)*, da Microsoft. O PC de
+  quem desenvolve quase sempre já tem, porque o Godot e outras
+  ferramentas o instalam. Um PC limpo pode não ter, e aí o Windows nem
+  carrega o `.dll`.
+
+  Confira no PowerShell:
+
+  ```powershell
+  Test-Path C:\Windows\System32\VCRUNTIME140.dll
+  ```
+
+  `False` → instale o redistribuível **x64** da Microsoft e reabra o
+  jogo.
+
+  **b) O PowerShell está barrado.** A ponte usa o PowerShell, que existe
+  em todo Windows 10/11. Uma política de rede ou de grupo pode barrá-la.
+  Confira:
+
+  ```powershell
+  powershell -NoProfile -Command "[System.IO.Ports.SerialPort]::GetPortNames()"
+  ```
+
+  Tem de listar as COM da etapa 1.
+
+> Não desative o Defender e não crie exclusões para resolver isto. Se o
+> antivírus estiver barrando, o caminho certo é tratar com quem
+> administra a máquina, não contornar.
+
+## 3a. "Conecta e desconecta sem parar" no PC de destino
+
+Sintoma: a Central mostra "ponte PowerShell", depois "nenhum", e de novo,
+sem nunca firmar. É o caso mais confuso de todos, porque **no PC de quem
+desenvolve ele nunca aparece** — lá a extensão nativa carrega e a ponte
+nunca chega a ser usada. No PC de destino a ponte é o único caminho, e
+era ela que estava quebrada.
+
+**A solução mais direta é fazer o PC de destino usar a extensão nativa,
+como o seu PC de produção faz.** Um comando, uma vez por máquina:
+
+Instale o **Visual C++ 2015-2022 Redistributable (x64)** da Microsoft.
+Confira antes:
+
+```powershell
+Test-Path C:\Windows\System32\VCRUNTIME140.dll
+```
+
+`False` → é isto. A `gdserial.dll` importa esse arquivo, que não faz
+parte do Windows. Sem ele o Windows nem carrega a extensão, o jogo cai
+para a ponte, e passa a depender de PowerShell, política de execução e
+antivírus — tudo que a extensão nativa não precisa.
+
+Com o redistribuível instalado, o PC de destino passa a usar exatamente
+o mesmo caminho que o seu PC de produção. A ponte volta a ser o que
+deveria ser: um plano B que quase nunca entra.
+
+Se ainda assim quiser rodar pela ponte, a Central agora mostra **o que o
+PowerShell respondeu** antes de cair — a frase aparece entre parênteses
+na linha "caminho até a placa". Me mande essa frase.
+
+## 3b. A orientação do sensor NÃO importa mais
+
+Se você já leu em algum lugar que o sensor precisa estar montado com o
+eixo X apontando para o soco: **isso valia até a V9 e não vale mais.**
+
+A placa media um eixo só, e presumia o X. Montado de lado — que é o mais
+provável para quem usa o MPU-6050 pela primeira vez — a pancada acontecia
+no Y ou no Z, o X quase não via nada, e o golpe era **invisível**: nem
+pontuava, nem aparecia como recusa, porque o evento nunca chegava a
+existir. Da máquina só se via que "nada acontece".
+
+Agora a detecção usa a **magnitude do vetor**, que não tem orientação. Um
+soco de 12 g é um soco de 12 g em qualquer lado que o módulo esteja
+parafusado. O botão de eixo da Central virou informação (o `HIT` reporta
+qual eixo dominou a pancada) e não configuração — não há mais nada para
+acertar ali.
+
+## 4. O sensor (MPU-6050) está pronto?
+
+Na Central, a telemetria mostra a aceleração **dinâmica** — já sem a
+gravidade. Com a máquina parada, os três números têm de ficar **perto de
+zero**, oscilando pouco.
+
+- `ERROR,NO_MPU` ou "SEM SENSOR" → fio de I2C. Confira **A4 = SDA** e
+  **A5 = SCL**, mais 3,3 V/5 V e GND. A placa segue funcionando sem o
+  sensor de propósito: botões, START e crédito continuam vivos.
+- Números **longe de zero com a máquina parada** → a base nasceu torta.
+  Aperte **CALIBRAR** na Central com a máquina **imóvel**. Se o firmware
+  responder `ERROR,CALIB_MOVIMENTO`, é porque ele detectou movimento e
+  **se recusou** a gravar um zero ruim — espere tudo parar e repita.
+
+## 5. O sensor parado gera soco?
+
+Deixe a máquina parada por **cinco minutos** com o jogo armado.
+
+Nenhum `HIT` pode aparecer. Se aparecer, volte à etapa 4: é a base, e não
+o limiar.
+
+## 6. O soco chega ao jogo?
+
+Na Central, **TESTAR** manda a placa emitir um golpe sintético
+(`HIT,2.60,8.00,45,X`). Se ele aparece na tela e o soco real não, o
+problema é **mecânico ou de sensor**, não de comunicação.
+
+---
+
+## Exportar e levar para outro PC
+
+1. No Godot: **Projeto → Exportar → Windows Desktop → Exportar Projeto**.
+2. Leve a pasta inteira do `.exe` (o `.pck` vai embutido, mas leve a
+   pasta toda mesmo assim).
+3. **No PC de destino, instale o Visual C++ 2015-2022 Redistributable
+   (x64)** antes do primeiro teste. É a etapa 3a, e é a diferença entre
+   "funciona no meu PC" e "funciona em qualquer PC".
+4. Grave o firmware `arduino/punch_sensor/punch_sensor.ino` na placa pela
+   IDE do Arduino (placa Uno ou Nano, 115200). A biblioteca
+   **Adafruit NeoPixel** é opcional: sem ela o sketch compila e o jogo
+   funciona, só as fitas de LED ficam desligadas.
+
+O firmware **precisa ser regravado** ao atualizar para a V9: a escala de
+medida mudou, e uma placa com firmware antigo devolve velocidades numa
+faixa que a pontuação atual não espera.
+
+---
+
+## 7. A placa mede, mas o jogo não marca
+
+A partir da V9 a placa **diz por que descartou**. Abra a **F9** e olhe
+duas linhas novas:
+
+**`detecção:`**
+
+- **PRONTA PARA O SOCO** (verde) → a placa aceita golpes agora.
+- **NÃO ARMADA — a montagem não fica quieta** (vermelho), com a máquina
+  parada → **é esta a resposta inteira.** A placa só aceita um soco
+  depois de ver 200 ms de quietude, e a sua montagem nunca fica quieta:
+  caixa de som dentro do gabinete, ventilador, piso do salão. Aperte
+  **CALIBRAR** com a máquina imóvel — a calibração mede o ruído desta
+  montagem e ajusta o piso sozinha. Se continuar vermelho, veja o que
+  vibra.
+
+**`última recusa:`** — aparece depois de cada soco recusado, com os
+números do evento. O motivo diz qual limiar está errado:
+
+| Motivo | O que aconteceu | O que ajustar |
+|---|---|---|
+| `GIRO` | O alvo quase não girou | Baixe o giro mínimo (6º campo do CONFIG); `0` desliga |
+| `FRACO` | Velocidade abaixo do piso | Baixe a velocidade mínima na Central |
+| `LENTO` | O pico demorou a chegar | Foi empurrão, não impacto — bata mais seco |
+| `CURTO` | Durou menos que um impacto | Vibração, não soco |
+| `SUSTENTADO` | A força não saiu na janela | Empurrão sustentado |
+
+Se **nenhuma** das duas linhas se mexe quando você soca, a placa não está
+vendo nada: volte à etapa 4 (fios do I2C) e confira a telemetria com a
+máquina parada.
