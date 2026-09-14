@@ -50,18 +50,10 @@ const EXPONENT_MAX := 4.50
 ## maxima sozinho a partir disso. Estes padrões são o que a máquina usa
 ## enquanto isso não é feito (ou depois de "RESTAURAR PADRÕES").
 ##
-## O EXPOENTE BAIXOU DE 2,20 PARA 1,85 (a fronteira de "FÁCIL" em
-## `difficulty_name`), depois de a régua acusar o problema: com 2,20 e a
-## faixa 0,30-5,20 m/s, um soco de 2 m/s -- um golpe bom, longe de fraco
-## -- valia perto de 400 pontos em 9999, e só golpes quase saturando o
-## sensor (4 m/s+) passavam de 6000. É a "curva" que fazia pontuar
-## alto parecer quase impossível, e não o sensor: o expoente sozinho
-## decide o quão generosa a curva é para um golpe MÉDIO, sem mexer no
-## que conta como fraco ou no que exige perfeição para chegar perto de
-## 9999. Com 1,85 o mesmo soco de 2 m/s passa a valer perto de 670, e
-## 3 m/s (um golpe forte, não excepcional) passa de 3200 -- 9999
-## continua exigindo um golpe de verdade excepcional.
-const DEFAULT_EXPONENT := 1.85
+## O padrão 2,80 deixa a progressão útil sem banalizar o teto: em uma
+## faixa de 0,30–5,20 m/s, 3 m/s fica perto de 1800, 4 m/s passa de 6000
+## e 5 m/s se aproxima de 9850. O único 9999 exige alcançar o teto.
+const DEFAULT_EXPONENT := 2.80
 const DEFAULT_DEAD_ZONE := 0.05
 const DEFAULT_MIN_SPEED := 0.30
 const DEFAULT_MAX_SPEED := 5.20
@@ -103,7 +95,16 @@ static func points_from_speed(
 	var cfg := sanitize(min_speed, max_speed, exponent, dead_zone)
 	var x := normalized(speed, cfg["min_speed"], cfg["max_speed"], cfg["dead_zone"])
 	var smooth := x * x * (3.0 - 2.0 * x)
-	return clampi(int(round(pow(smooth, cfg["exponent"]) * GameDef.SCORE_MAX)), 0, GameDef.SCORE_MAX)
+	var pontos := clampi(int(round(pow(smooth, cfg["exponent"]) * GameDef.SCORE_MAX)), 0, GameDef.SCORE_MAX)
+	# Um golpe aprovado e acima da zona morta precisa aparecer. A curva
+	# difícil pode arredondar o começo para zero, que parece falha do saco.
+	if x > 0.000001 and pontos == 0:
+		return 1
+	# Não deixe o arredondamento entregar 9999 antes de o golpe alcançar
+	# de fato o teto calibrado da máquina.
+	if pontos >= GameDef.SCORE_MAX and speed < float(cfg["max_speed"]):
+		return GameDef.SCORE_MAX - 1
+	return pontos
 
 static func speed_from_charge(seconds: float, min_speed: float, max_speed: float) -> float:
 	var t := clampf(seconds / CHARGE_MAX_SECONDS, 0.0, 1.0)

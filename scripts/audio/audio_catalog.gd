@@ -52,7 +52,7 @@ const BARRAMENTOS := {
 	"nivel_lendario": "Impact", "nivel_perfeito": "Impact",
 	"credit": "UI", "start": "UI", "start_negado": "UI", "menu": "UI",
 	"error": "UI", "count": "UI", "go": "UI", "tick": "UI",
-	"shutter": "UI", "armado": "UI",
+	"shutter": "UI", "armado": "UI", "round_bell": "UI",
 }
 const BARRAMENTO_PADRAO := "SFX"
 

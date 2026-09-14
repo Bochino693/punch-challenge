@@ -506,10 +506,9 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 	#
 	# Eram três quadriláteros atravessando a tela na altura do letreiro.
 	# Como o quadrilátero não sabe onde a letra está, a luz aparecia
-	# também no vazio entre as letras e em volta delas: o que se via não
-	# era o nome refletindo, era um retângulo luminoso passando por cima
-	# dele. O reflexo agora acontece DENTRO das letras, no sombreador de
-	# `shaders/brilho_letras.gdshader`, onde a máscara é o próprio glifo.
+	# também no vazio entre as letras e em volta delas. O efeito saiu por
+	# completo: substituir por shader voltava a criar compilação tardia
+	# justamente na emenda mais sensível para uma TV Box.
 	# MAS TIRAR A FAIXA DEIXOU UM BURACO, e ele apareceu como "a abertura
 	# trava no fim".
 	#

@@ -175,6 +175,39 @@ func _ready() -> void:
 			add_child(player)
 			_players[nome] = player
 		player.stream = stream
+	_criar_sino_de_round()
+
+## Sino próprio, preparado no arranque e nunca no quadro em que o soco é
+## liberado. Assim o APK não depende de um arquivo extra e a primeira
+## chamada não sofre criação/decodificação tardia em uma TV Box.
+func _criar_sino_de_round() -> void:
+	if _players.has("round_bell"):
+		return
+	const TAXA := 22050
+	const DURACAO := 1.20
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = TAXA
+	var total := int(TAXA * DURACAO)
+	var pcm := PackedByteArray()
+	pcm.resize(total * 2)
+	for i in range(total):
+		var t := float(i) / float(TAXA)
+		var env := exp(-t * 3.1)
+		var ataque := exp(-t * 70.0) * sin(TAU * 3100.0 * t) * 0.24
+		var metal := (
+			sin(TAU * 620.0 * t) * 0.55
+			+ sin(TAU * 947.0 * t) * 0.34
+			+ sin(TAU * 1315.0 * t) * 0.20
+		) * env
+		pcm.encode_s16(i * 2, int(clampf((metal + ataque) * 0.78, -1.0, 1.0) * 32767.0))
+	stream.data = pcm
+	var player := AudioStreamPlayer.new()
+	player.name = "Som_round_bell"
+	player.bus = Catalog.bus_for("round_bell")
+	player.stream = stream
+	add_child(player)
+	_players["round_bell"] = player
 
 ## SOM PEDIDO COM O JOGO SAINDO NÃO É SOM: É UM ERRO NO CONSOLE.
 ##

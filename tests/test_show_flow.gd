@@ -85,11 +85,13 @@ func _test_entrada() -> void:
 	assert(jogo.intro_active)
 	jogo._processar_abertura(ArcadeStage.INTRO_SECONDS + 0.1)
 	assert(not jogo.intro_active)
+	assert(is_equal_approx(jogo.abertura_chegada, 1.0))
 	assert(jogo.state == GameDef.State.IDLE)
 
 func _test_audio_dos_estados() -> void:
 	for som in ["music", "charge", "score_loop"]:
 		assert(jogo.sons._players[som].stream.loop_mode == AudioStreamWAV.LOOP_FORWARD)
+	assert(jogo.sons._players["round_bell"].stream != null)
 	# Os oito níveis existem como som carregado, e não só como nome.
 	for nivel in ScoreTier.NIVEIS:
 		var player: AudioStreamPlayer = jogo.sons._players.get(str(nivel["som"]))
@@ -136,6 +138,8 @@ func _test_um_golpe_por_rodada() -> void:
 	_armar()
 	jogo._receber_hit(_golpe(10.0))
 	assert(jogo.state == GameDef.State.MEASURING)
+	assert(is_equal_approx(float(jogo.socos[0]["pico_g"]), 9.0))
+	assert(is_equal_approx(float(jogo.socos[0]["duracao_ms"]), 45.0))
 	var primeiro: int = jogo.result_score
 	assert(primeiro > 0)
 	# O saco balança depois do golpe: o segundo evento não pode entrar.

@@ -128,6 +128,7 @@ func _test_zona_morta_e_teto() -> void:
 	# 9999 SÓ no teto. Uma pancada comum, mesmo forte, não chega lá.
 	assert(ScoreCurve.points_from_speed(vmax, vmin, vmax, g, dz) == GameDef.SCORE_MAX)
 	assert(ScoreCurve.points_from_speed(vmax * 2.0, vmin, vmax, g, dz) == GameDef.SCORE_MAX)
+	assert(ScoreCurve.points_from_speed(vmax - 0.01, vmin, vmax, g, dz) == GameDef.SCORE_MAX - 1)
 	assert(ScoreCurve.points_from_speed(vmax * 0.90, vmin, vmax, g, dz) < GameDef.SCORE_MAX)
 	assert(ScoreCurve.points_from_speed(vmax * 0.75, vmin, vmax, g, dz) < 9000)
 

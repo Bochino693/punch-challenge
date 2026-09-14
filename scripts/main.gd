@@ -220,6 +220,9 @@ var ajustes_do_sensor_zerados := false
 ## calibração fina refaz o assistente, o que é minutos; quem não tinha
 ## ganha uma máquina que funciona.
 const ESCALA_DO_SENSOR := 9
+## Evolui a dificuldade sem apagar eixo, raio e gatilho físicos já
+## calibrados no gabinete.
+const ESQUEMA_DA_PONTUACAO := 2
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 var sensor_amin := 3.0
@@ -260,7 +263,7 @@ const SOCOS_POR_RODADA := 2
 ## soco que seria descartado é a pior coisa que esta máquina pode fazer.
 const ESPERA_PARA_O_PROXIMO_SOCO := 2.5
 ## Os socos desta rodada, na ordem em que aconteceram.
-## Cada item: {"pontos": int, "velocidade": float, "simulado": bool}
+## Cada item preserva pontos e também as medidas cruas que os explicam.
 var socos: Array = []
 ## Quando o último soco entrou, em `animation_time`. É o relógio da
 ## animação do cartão — o cartão do soco que acabou de acontecer nasce
@@ -574,33 +577,6 @@ func _ready() -> void:
 	if ResourceLoader.exists("res://assets/fonts/SairaCondensed-ExtraBold.ttf"):
 		fonte_texto = load("res://assets/fonts/SairaCondensed-ExtraBold.ttf")
 	letreiro_do_nome.fonte = fonte
-	# AQUECE O SOMBREADOR DO NOME ANTES DE A ABERTURA PRECISAR DELE.
-	#
-	# `Letreiro` é o ÚNICO nó do jogo com material próprio (o brilho que
-	# corre dentro das letras, em `shaders/brilho_letras.gdshader`) — e
-	# ele só desenha pela primeira vez quando a entrada acaba e a tela de
-	# espera aparece (`_nome_do_jogo`, chamada só fora da entrada). Um
-	# programa de sombreador NUNCA usado antes é compilado pelo driver no
-	# primeiro desenho que o usa — não antes —, e num driver fraco ou
-	# embarcado (a mesma categoria de placa por trás do ajuste de
-	# `driver/threads/thread_model` em project.godot) isso é uma pausa
-	# real, sentida bem naquele quadro. É exatamente onde o travamento
-	# "o jogo vai se posicionar e o nome" acontecia: não é o
-	# posicionamento, é a primeira vez que o brilho do nome é desenhado.
-	#
-	# Mostrando o nome uma vez aqui, com alfa zero, o desenho acontece de
-	# verdade — e o sombreador compila — nos primeiros quadros do jogo,
-	# antes mesmo de a entrada começar a tocar, quando ninguém está
-	# olhando para o lugar certo ainda. `_nome_do_jogo` assume o nó de
-	# volta (mostra e esconde) assim que a entrada termina, sem saber
-	# que ele já foi usado uma vez.
-	letreiro_do_nome.mostrar(
-		[
-			{"texto": "PUNCH", "x": 540.0, "y": 910.0, "tamanho": 144, "cor": Color(Color.WHITE, 0.0)},
-			{"texto": "CHALLENGE", "x": 540.0, "y": 1010.0, "tamanho": 80, "cor": Color(Paleta.AMBAR, 0.0)},
-		],
-		190.0, 700.0
-	)
 	fx.vigia = desempenho
 	if ResourceLoader.exists("res://assets/logo_lazersport.png"):
 		logo = load("res://assets/logo_lazersport.png")
@@ -817,8 +793,12 @@ func _processar_abertura(delta: float) -> void:
 			# onde a abertura os desenha; se ela ainda por cima começasse
 			# com o seu próprio esmaecer, o quadro seguinte à entrada
 			# seria um piscar — a única emenda visível do filme.
-			state_time = 0.7
-			abertura_chegada = 0.0
+			state_time = 0.0
+			# A vinheta já pousou o emblema e o nome nas coordenadas finais.
+			# Uma segunda animação de montagem fazia todos os elementos serem
+			# reposicionados e rasterizados juntos no quadro mais caro da
+			# abertura. A tela principal nasce pronta nessa mesma posição.
+			abertura_chegada = 1.0
 		return
 	abertura_chegada = minf(1.0, abertura_chegada + delta * 2.2)
 	if aviso_de_credito >= 0.0:
@@ -907,7 +887,7 @@ func _processar_contagem(delta: float) -> void:
 		golpe_registrado = false
 		socos.clear()
 		saturacao_recente = ""
-		sons.play("armado", -6.0)
+		sons.play("round_bell", -2.0)
 		sons.play("go")
 		sons.music(-19.0)
 		moldura.set_estado(LedFrame.ARMADA)
@@ -966,7 +946,7 @@ func _armar_proximo_soco() -> void:
 	state_time = 0.0
 	espera_left = GameDef.ESPERA_DO_SOCO
 	golpe_registrado = false
-	sons.play("armado", -6.0)
+	sons.play("round_bell", -2.0)
 	sons.play("go")
 	moldura.set_estado(LedFrame.ARMADA)
 	_show_notice("SOCO %d DE %d" % [socos.size() + 1, SOCOS_POR_RODADA])
@@ -1413,7 +1393,10 @@ func _add_credit() -> void:
 # ======================================================================
 # IMPACTO E VEREDITO
 # ======================================================================
-func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
+func _registrar_impacto(
+	pontos: int, velocidade: float, simulado: bool,
+	pico_g := 0.0, duracao_ms := 0.0
+) -> void:
 	## O soco aterrissou: meio segundo de impacto puro, e só então o
 	## placar começa a subir. Sem esse intervalo o golpe e o número
 	## chegam juntos e nenhum dos dois brilha.
@@ -1425,6 +1408,8 @@ func _registrar_impacto(pontos: int, velocidade: float, simulado: bool) -> void:
 	socos.append({
 		"pontos": clampi(pontos, 0, GameDef.SCORE_MAX),
 		"velocidade": maxf(velocidade, 0.0),
+		"pico_g": maxf(float(pico_g), 0.0),
+		"duracao_ms": maxf(float(duracao_ms), 0.0),
 		"simulado": simulado,
 	})
 	ultimo_soco_em = animation_time
@@ -2465,18 +2450,20 @@ func _receber_hit(msg: Dictionary) -> void:
 	# segundo filtro deste lado.
 	golpe_registrado = true
 	ultimo_golpe_ms = Time.get_ticks_msec()
-	_processar_golpe(speed, false)
+	_processar_golpe(speed, false, pico, duracao)
 
 ## Sensor e teclado passam obrigatoriamente por esta única porta. Assim a
 ## régua mostrada na Central é a mesma que decide o resultado real.
-func _processar_golpe(speed: float, simulado: bool) -> void:
+func _processar_golpe(
+	speed: float, simulado: bool, pico_g := 0.0, duracao_ms := 0.0
+) -> void:
 	var pontos := ScoreCurve.points_from_speed(
 		speed, hit_min_speed, hit_max_speed, score_exponent, score_dead_zone
 	)
 	if pontos <= 0:
 		_show_notice("MOVIMENTO ABAIXO DA ZONA DE PONTUAÇÃO")
 		return
-	_registrar_impacto(pontos, speed, simulado)
+	_registrar_impacto(pontos, speed, simulado, pico_g, duracao_ms)
 
 ## AS FITAS DA MÁQUINA ACOMPANHANDO O PLACAR.
 ##
@@ -2909,8 +2896,15 @@ func _carregar() -> void:
 	if escala_salva >= ESCALA_DO_SENSOR:
 		hit_min_speed = float(data.get("hit_min_speed", hit_min_speed))
 		hit_max_speed = float(data.get("hit_max_speed", hit_max_speed))
-		score_exponent = float(data.get("score_exponent", score_exponent))
-		score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
+		if int(data.get("score_schema", 0)) >= ESQUEMA_DA_PONTUACAO:
+			score_exponent = float(data.get("score_exponent", score_exponent))
+			score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
+		else:
+			# Não herda a curva antiga, excessivamente fácil. Preserva a
+			# calibração física, mas não aceita um teto menor que o padrão.
+			hit_max_speed = maxf(hit_max_speed, ScoreCurve.DEFAULT_MAX_SPEED)
+			score_exponent = ScoreCurve.DEFAULT_EXPONENT
+			score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
 		sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))
@@ -2946,6 +2940,7 @@ func _salvar() -> void:
 		"ranking": ranking,
 		"ranking_schema": RankingStore.ESQUEMA,
 		"sensor_escala": ESCALA_DO_SENSOR,
+		"score_schema": ESQUEMA_DA_PONTUACAO,
 		# Mantido para uma eventual volta a uma versão anterior do jogo.
 		"best_score": _melhor(),
 		"port": porta_configurada,
@@ -2983,11 +2978,12 @@ func _iniciar_transicao() -> void:
 func _draw() -> void:
 	fundo.visible = true
 	moldura.visible = false
-	# O NOME COMEÇA ESCONDIDO A CADA QUADRO. Quem quiser mostrá-lo diz
-	# isso durante este desenho; sem esta linha, o letreiro ficaria na
-	# tela depois que a abertura sai, porque o nó do shader é desenhado
-	# depois deste e não sabe em que estado o jogo está.
-	letreiro_do_nome.esconder()
+	# Fora da tela de atração o letreiro não participa. Na própria abertura
+	# `_nome_do_jogo` decide quando mostrar/esconder; não o limpamos todo
+	# quadro porque isso anulava o cache do CanvasItem e rasterizava as
+	# letras grandes de novo 60 vezes por segundo.
+	if state != GameDef.State.IDLE or intro_active:
+		letreiro_do_nome.esconder()
 	# TREMOR E ZOOM SACODEM A TELA INTEIRA: uma transformação só, antes de
 	# tudo. O zoom cresce a partir do PONTO DO SOCO e não do centro da
 	# tela — crescer pelo centro afastaria a imagem justamente do lugar
@@ -3638,8 +3634,15 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 				"%04d" % int(socos[i]["pontos"]), caixa.position.y + 92.0, 54,
 				Color.WHITE if not eh_melhor else cor, dentro, esq
 			)
+			# O MPU-6050 não mede massa em kg; inventar "peso" seria falso.
+			# Mostramos as duas leituras exatas disponíveis: pico em g e
+			# velocidade integrada, sempre ligadas ao cartão deste soco.
+			var medida := "%.2f m/s" % float(socos[i]["velocidade"])
+			var pico_g := float(socos[i].get("pico_g", 0.0))
+			if pico_g > 0.0:
+				medida = "PICO %.1f g  •  %s" % [pico_g, medida]
 			_texto_cabendo(
-				"%.1f m/s" % float(socos[i]["velocidade"]), caixa.position.y + 126.0,
+				medida, caixa.position.y + 126.0,
 				CORPO_APOIO, Paleta.TINTA_LEVE, dentro, esq
 			)
 			if eh_melhor:
@@ -4696,15 +4699,17 @@ func _prewarm_fotos_do_ranking() -> void:
 func _colher_fotos_decodificadas() -> void:
 	if _fotos_decodificadas.is_empty():
 		return
+	# A decodificação já acontece fora da linha principal; criar todas as
+	# texturas prontas no mesmo quadro apenas transferia a travada para a
+	# GPU. Publica uma por quadro e mantém as demais na fila.
 	_mutex_fotos.lock()
-	var prontas := _fotos_decodificadas.duplicate()
-	_fotos_decodificadas.clear()
+	var path := str(_fotos_decodificadas.keys()[0])
+	var imagem = _fotos_decodificadas[path]
+	_fotos_decodificadas.erase(path)
 	_mutex_fotos.unlock()
-	for path in prontas:
-		_fotos_em_andamento.erase(path)
-		var imagem = prontas[path]
-		if imagem is Image:
-			_photo_cache[path] = ImageTexture.create_from_image(imagem)
+	_fotos_em_andamento.erase(path)
+	if imagem is Image:
+		_photo_cache[path] = ImageTexture.create_from_image(imagem)
 
 func _draw_texture_cover(texture: Texture2D, rect: Rect2, alpha: float, mirror := false) -> void:
 	if texture == null:
