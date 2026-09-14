@@ -30,8 +30,9 @@ const T_TITULO := 2.60   ## PUNCH desce batendo
 const T_SUBTITULO := 2.90
 const T_ASSINATURA := 3.35
 const T_BRILHO := 3.50    ## a luz que varre o letreiro no trecho parado
-const T_MORPH := 4.65    ## a cena vira, sem corte, a tela de abertura
-const INTRO_SECONDS := 5.85
+const T_MORPH := 4.45    ## a cena vira, sem corte, a tela de abertura
+const MORPH_SECONDS := 0.32 ## montagem curta: não pode parecer travamento
+const INTRO_SECONDS := T_MORPH + MORPH_SECONDS
 
 ## O selo fica quadrado e PEQUENO: 300 px de lado no meio de uma tela de
 ## 1080, na altura do olhar. Um selo grande no início rouba o lugar do
@@ -157,7 +158,7 @@ static func intro(canvas: Control, time: float) -> void:
 	_intro_varredura(canvas, time)
 	_intro_voo(canvas, time)
 	_intro_impacto(canvas, time)
-	var morph := _janela(time, T_MORPH, INTRO_SECONDS - T_MORPH)
+	var morph := _janela(time, T_MORPH, MORPH_SECONDS)
 	_intro_emblema(canvas, time, morph)
 	_intro_letreiro(canvas, time, morph)
 	_intro_assinatura(canvas, time, morph)

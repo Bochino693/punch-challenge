@@ -83,6 +83,8 @@ func run() -> void:
 # ------------------------------------------------------------ entrada
 func _test_entrada() -> void:
 	assert(jogo.intro_active)
+	# A montagem final precisa caber em poucos quadros até nas TV Boxes.
+	assert(ArcadeStage.MORPH_SECONDS <= 0.35)
 	jogo._processar_abertura(ArcadeStage.INTRO_SECONDS + 0.1)
 	assert(not jogo.intro_active)
 	assert(is_equal_approx(jogo.abertura_chegada, 1.0))

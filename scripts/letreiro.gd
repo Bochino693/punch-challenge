@@ -1,43 +1,49 @@
 class_name Letreiro
 extends Control
 
-## O NOME DO JOGO, NUM NÓ SÓ PARA ELE.
+## O NOME DO JOGO, NUM NÓ SÓ PARA ELE — e o motivo é o shader.
 ##
-## Ele fica separado do desenho geral para poder manter o próprio cache
-## de CanvasItem. Fundo e efeitos mudam todo quadro; o nome não precisa
-## ser rasterizado novamente enquanto texto, posição e alfa não mudarem.
-##
-## O material com shader que existia aqui era compilado somente no
-## primeiro quadro em que o nome da abertura aparecia. Em TV Box esse
-## trabalho acontece na linha de renderização e congela exatamente a
-## emenda entre a vinheta e a tela principal. O letreiro usa agora apenas
-## as passadas tipográficas abaixo: o visual continua iluminado e não há
-## compilação tardia de shader.
+## No Godot, material é propriedade do NÓ: não existe trocar de shader
+## entre duas chamadas dentro do mesmo `_draw`. Como o resto da tela é
+## desenhado à mão num único Control, pôr o brilho no nó principal
+## aplicaria o efeito a tudo — fundo, cartões, placar. Então o nome sai
+## do desenho geral e passa a morar aqui, sozinho, com o shader dele.
+
+const SHADER := preload("res://shaders/brilho_letras.gdshader")
+const PASSAGEM := 1.15
+const DESCANSO := 3.10
+const CICLO := PASSAGEM + DESCANSO
+const DE := -0.22
+const ATE := 1.22
 
 var fonte: Font
 var _linhas: Array = []
-var _inicio_x := 0.0
-var _extensao_x := 0.0
+var _tempo := 0.0
+var _material := ShaderMaterial.new()
 
 func _ready() -> void:
+	_material.shader = SHADER
+	material = _material
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_process(false)
+	set_process(true)
+
+func _process(delta: float) -> void:
+	_tempo += delta
+	var fase := fmod(_tempo, CICLO)
+	var posicao := DE - 0.5
+	if fase < PASSAGEM:
+		posicao = lerpf(DE, ATE, fase / PASSAGEM)
+	_material.set_shader_parameter("posicao", posicao)
+	queue_redraw()
 
 ## Recebe o que desenhar neste quadro. Cada entrada é
 ## {texto, y, tamanho, cor}. Chamado pelo desenho da tela: assim o nome
 ## continua obedecendo à mesma animação de entrada de antes, e este nó
 ## não precisa saber nada sobre estados do jogo.
 func mostrar(linhas: Array, inicio_x: float, extensao_x: float) -> void:
-	# A raiz redesenha por causa dos efeitos, mas o nome quase sempre fica
-	# idêntico por vários segundos. Não invalide este CanvasItem se nada
-	# mudou: numa TV Box isso evita rasterizar quatro passadas de duas
-	# linhas grandes em todo quadro da tela de atração.
-	if _linhas == linhas and is_equal_approx(_inicio_x, inicio_x) \
-			and is_equal_approx(_extensao_x, extensao_x):
-		return
 	_linhas = linhas
-	_inicio_x = inicio_x
-	_extensao_x = extensao_x
+	_material.set_shader_parameter("inicio_x", inicio_x)
+	_material.set_shader_parameter("extensao_x", extensao_x)
 	queue_redraw()
 
 func esconder() -> void:
