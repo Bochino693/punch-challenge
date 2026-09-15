@@ -1,66 +1,25 @@
 class_name ScoreCurve
 extends RefCounted
 
-## A VELOCIDADE DO SOCO VIRA NOTA AQUI, E SÓ AQUI.
+## A nota usa a velocidade integrada enviada pelo firmware em m/s.
+## Pico em g e duração continuam informativos: não são massa ou força.
 ##
-##     x = clamp((v - vmin) / (vmax - vmin), 0, 1)
-##     x = 0, dentro da zona morta
-##     s = x*x*(3 - 2*x)                  (smoothstep)
-##     pontos = round(9999 * pow(s, expoente))
+## x = fração da faixa calibrada, após a zona morta
+## pontos = round(9999 * pow(x, expoente))
 ##
-## O smoothstep tira o degrau na saída da zona morta — sem ele, o
-## primeiro ponto acima do piso já valeria dezenas. O expoente maior que
-## 1 é o que segura a escala: com expoente 1 um golpe de metade da
-## velocidade máxima já valeria metade da nota, e 5000 pontos deixaria de
-## significar alguma coisa.
-##
-## A CURVA É MONOTÔNICA POR CONSTRUÇÃO: x cresce com v, s cresce com x, e
-## pow com expoente positivo preserva a ordem. Um soco mais forte nunca
-## pode valer menos, e isso é testado.
-##
-## Só a VELOCIDADE entra na nota. O pico de aceleração e a duração do
-## evento servem para o firmware e para o jogo decidirem se aquilo foi um
-## soco de verdade — validam, não inflam.
-
+## Uma única potência evita achatar os golpes baixos duas vezes.
+## Com expoente 2,20, superar 8000 exige x > 0,9036.
+## Estes padrões são uma referência; o assistente mede a faixa da montagem.
 const EXPONENT_MIN := 1.50
 const EXPONENT_MAX := 4.50
-## PARÂMETROS DE FÁBRICA -- recalibrados para o firmware V6 do sensor
-## (arduino/punch_sensor/punch_sensor.ino).
-##
-## Os padrões antigos (mínima 1,20 / máxima 16,00) foram medidos contra
-## um firmware que integrava a aceleração por até 400 ms sem checar a
-## FORMA do golpe -- um empurrão prolongado inflava a velocidade "medida"
-## bem além do que qualquer soco de verdade produz, e a escala toda foi
-## calibrada em cima desse número inflado. A partir da V4/V5/V6 o
-## firmware mede honestamente (janela curta, integração por trapézio,
-## fator de impacto, fator de queda, coerência giroscópio×acelerômetro) —
-## e um soco de verdade, medido honestamente, fica tipicamente entre
-## 0,4 m/s (toque fraco) e ~4 m/s (golpe muito forte, quase saturando o
-## acelerômetro a 16 g). Os valores abaixo foram escolhidos a partir de
-## simulação numérica desse novo firmware para que a escala 0-9999 use a
-## faixa inteira: fraco fica perto de zero, forte de verdade passa de
-## 6000, e 9999 continua existindo — só que exige um golpe excepcional
-## (perto da saturação do sensor, ajudado pela leitura do giroscópio),
-## nunca um empurrão ou uma vibração.
-##
-## ESTES SÃO UM PONTO DE PARTIDA, NÃO A PALAVRA FINAL: o ideal continua
-## sendo rodar o ASSISTENTE DE CALIBRAÇÃO da Central Técnica (5 socos
-## fracos, 5 fortes) nesta máquina especificamente — ele mede a faixa
-## real do SEU sensor, raio de braço e jeito de bater, e ajusta minima/
-## maxima sozinho a partir disso. Estes padrões são o que a máquina usa
-## enquanto isso não é feito (ou depois de "RESTAURAR PADRÕES").
-##
-## O padrão 2,80 deixa a progressão útil sem banalizar o teto: em uma
-## faixa de 0,30–5,20 m/s, 3 m/s fica perto de 1800, 4 m/s passa de 6000
-## e 5 m/s se aproxima de 9850. O único 9999 exige alcançar o teto.
-const DEFAULT_EXPONENT := 2.80
-const DEFAULT_DEAD_ZONE := 0.05
+const DEFAULT_EXPONENT := 2.20
+const DEFAULT_DEAD_ZONE := 0.0
 const DEFAULT_MIN_SPEED := 0.30
 const DEFAULT_MAX_SPEED := 5.20
 ## Limites de regulagem oferecidos pela Central Técnica.
 const MIN_SPEED_MIN := 0.20
 const MIN_SPEED_MAX := 10.00
-const MAX_SPEED_MIN := 5.00
+const MAX_SPEED_MIN := 0.75
 const MAX_SPEED_MAX := 30.00
 const DEAD_ZONE_MAX := 0.25
 const CHARGE_MAX_SECONDS := 2.80
@@ -94,8 +53,7 @@ static func points_from_speed(
 ) -> int:
 	var cfg := sanitize(min_speed, max_speed, exponent, dead_zone)
 	var x := normalized(speed, cfg["min_speed"], cfg["max_speed"], cfg["dead_zone"])
-	var smooth := x * x * (3.0 - 2.0 * x)
-	var pontos := clampi(int(round(pow(smooth, cfg["exponent"]) * GameDef.SCORE_MAX)), 0, GameDef.SCORE_MAX)
+	var pontos := clampi(int(round(pow(x, cfg["exponent"]) * GameDef.SCORE_MAX)), 0, GameDef.SCORE_MAX)
 	# Um golpe aprovado e acima da zona morta precisa aparecer. A curva
 	# difícil pode arredondar o começo para zero, que parece falha do saco.
 	if x > 0.000001 and pontos == 0:

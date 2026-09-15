@@ -8,6 +8,7 @@ func _initialize() -> void:
 	_test_escala_e_niveis()
 	_test_curva_monotonica()
 	_test_zona_morta_e_teto()
+	_test_progressao_sensor()
 	_test_migracao_acontece_uma_vez()
 	_test_top20_guarda_vinte_e_a_foto_certa()
 	_test_statistics()
@@ -128,11 +129,29 @@ func _test_zona_morta_e_teto() -> void:
 	# 9999 SÓ no teto. Uma pancada comum, mesmo forte, não chega lá.
 	assert(ScoreCurve.points_from_speed(vmax, vmin, vmax, g, dz) == GameDef.SCORE_MAX)
 	assert(ScoreCurve.points_from_speed(vmax * 2.0, vmin, vmax, g, dz) == GameDef.SCORE_MAX)
-	assert(ScoreCurve.points_from_speed(vmax - 0.01, vmin, vmax, g, dz) == GameDef.SCORE_MAX - 1)
+	assert(ScoreCurve.points_from_speed(vmax - 0.01, vmin, vmax, g, dz) < GameDef.SCORE_MAX)
 	assert(ScoreCurve.points_from_speed(vmax * 0.90, vmin, vmax, g, dz) < GameDef.SCORE_MAX)
 	assert(ScoreCurve.points_from_speed(vmax * 0.75, vmin, vmax, g, dz) < 9000)
 
 # ------------------------------------------------------------ ranking
+func _test_progressao_sensor() -> void:
+	# Leituras baixas distintas antes colapsavam em 1; agora progridem.
+	var anterior := 1
+	for velocidade in [0.6, 0.8, 1.0, 1.5, 2.0]:
+		var pontos := ScoreCurve.points_from_speed(velocidade, 0.3, 5.2)
+		assert(pontos > anterior)
+		anterior = pontos
+	# A dificuldade depende da fração calibrada, não de um teto fixo de 5.
+	for teto in [1.2, 2.4, 5.2, 16.0]:
+		assert(is_equal_approx(ScoreCurve.sanitize(0.3, teto, 2.2, 0.0)["max_speed"], teto))
+		assert(ScoreCurve.points_from_speed(lerpf(0.3, teto, 0.90), 0.3, teto) < 8000)
+		assert(ScoreCurve.points_from_speed(lerpf(0.3, teto, 0.95), 0.3, teto) > 8000)
+		assert(ScoreCurve.points_from_speed(teto, 0.3, teto) == 9999)
+	var cfg := Calibracao.sugerir([0.3, 0.35, 0.4, 0.45, 0.5],
+		[1.0, 1.1, 1.2, 1.25, 1.3], [3.0, 4.0, 8.0, 12.0, 15.0], 0.3)
+	assert(float(cfg["vmax"]) < 1.5)
+	assert(ScoreCurve.points_from_speed(1.3, cfg["vmin"], cfg["vmax"]) > 8000)
+
 func _test_migracao_acontece_uma_vez() -> void:
 	# Arquivo antigo, escala 0 a 999, sem versão gravada.
 	var antigo := [{"score": 900}, {"score": 500}, 250]
@@ -212,7 +231,7 @@ func _test_calibracao() -> void:
 
 	# Se os dois grupos saírem parecidos, a escala não pode colapsar.
 	var iguais := Calibracao.sugerir([6.0, 6.1, 6.0, 5.9, 6.0], [6.2, 6.1, 6.3, 6.0, 6.2], picos, 0.4)
-	assert(float(iguais["vmax"]) - float(iguais["vmin"]) >= 3.0)
+	assert(float(iguais["vmax"]) - float(iguais["vmin"]) >= 0.5)
 	# E a sugestão sempre sai dentro dos limites que a Central aceita.
 	for caso in [s, t, iguais]:
 		var cfg := ScoreCurve.sanitize(

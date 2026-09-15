@@ -222,7 +222,7 @@ var ajustes_do_sensor_zerados := false
 const ESCALA_DO_SENSOR := 9
 ## Evolui a dificuldade sem apagar eixo, raio e gatilho físicos já
 ## calibrados no gabinete.
-const ESQUEMA_DA_PONTUACAO := 2
+const ESQUEMA_DA_PONTUACAO := 3
 
 var sensor_vmin := ScoreCurve.DEFAULT_MIN_SPEED
 var sensor_amin := 3.0
@@ -610,7 +610,7 @@ func _ready() -> void:
 	if _converteu_esquema:
 		_converteu_esquema = false
 		_salvar()
-		_show_notice("MARCAS CONVERTIDAS PARA A ESCALA 0000 – 9999")
+		_show_notice("CONFIGURAÇÃO DE PONTUAÇÃO ATUALIZADA")
 	_iniciar_serial()
 	_entrar_em_abertura()
 	# A música entra baixa por baixo da entrada e sobe na virada para a
@@ -2895,11 +2895,10 @@ func _carregar() -> void:
 			score_exponent = float(data.get("score_exponent", score_exponent))
 			score_dead_zone = float(data.get("score_dead_zone", score_dead_zone))
 		else:
-			# Não herda a curva antiga, excessivamente fácil. Preserva a
-			# calibração física, mas não aceita um teto menor que o padrão.
-			hit_max_speed = maxf(hit_max_speed, ScoreCurve.DEFAULT_MAX_SPEED)
+			# Atualiza a curva sem elevar o teto medido nem alterar a montagem.
 			score_exponent = ScoreCurve.DEFAULT_EXPONENT
 			score_dead_zone = ScoreCurve.DEFAULT_DEAD_ZONE
+			_converteu_esquema = true
 		sensor_eixo = str(data.get("sensor_eixo", sensor_eixo))
 		sensor_raio = float(data.get("sensor_raio", sensor_raio))
 		sensor_vmin = float(data.get("sensor_vmin", sensor_vmin))

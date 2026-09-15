@@ -61,8 +61,8 @@ static func sugerir(fracos: Array, fortes: Array, picos: Array, ruido: float) ->
 	# O teto tem de ficar acima do piso com folga de verdade. Se os dois
 	# grupos saíram parecidos — porque quem calibrou bateu igual nas duas
 	# rodadas — a escala inteira colapsaria numa faixa de nada.
-	if teto < piso + 3.0:
-		teto = piso + 3.0
+	if teto < piso + 0.5:
+		teto = piso + 0.5
 
 	# A SENSIBILIDADE FICA ACIMA DO RUÍDO DE REPOUSO, e abaixo do golpe
 	# mais fraco que se quer aceitar. Nessa ordem: primeiro não disparar
