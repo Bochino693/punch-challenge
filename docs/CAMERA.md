@@ -248,3 +248,69 @@ ligada: o ambiente de desenvolvimento não tem webcam, e o que se provou
 foi o caminho do arquivo (modo `--pattern`), a leitura do contador e o
 religamento. A confirmação com a câmera de verdade tem de ser feita no
 computador do gabinete.
+
+## A câmera é condição para jogar (e o que mudou)
+
+Três regras novas, todas com a mesma origem: o jogo media a câmera pelo
+**processo** (a ponte de pé, o feed ativado, o contador subindo) e nunca
+pela **imagem**. Com o processo vivo e a imagem parada, tudo respondia
+"pronta" — e a máquina seguia em frente mostrando uma fotografia.
+
+### 1. Sem imagem ao vivo, a rodada não começa — e a ficha não é gasta
+
+Antes a máquina esperava a webcam por alguns segundos e, passados eles,
+jogava assim mesmo: a pessoa fazia a pose, a contagem zerava e o ranking
+registrava o nome sem cara nenhuma, com o crédito já descontado.
+
+Agora a tela de atração só convida para o START quando há imagem
+chegando; até lá ela diz o que está faltando, com o anel girando. Se a
+imagem sumir **no meio da pose**, o relógio da contagem PARA e volta a
+andar quando ela voltar — a foto é sempre de um quadro de agora. Se não
+voltar dentro do teto, a rodada é desfeita e o crédito volta.
+
+O jogo continua ABRINDO sem câmera: é pela tela de atração que se chega
+à Central, e uma máquina que não deixa nem abrir o diagnóstico sem
+webcam é pior do que uma que não joga.
+
+**Central → CÂMERA → `EXIGE CÂMERA` / `JOGA SEM CÂMERA`** desliga a
+exigência, para bancada e manutenção. Padrão: exige.
+
+### 2. "Viva" quer dizer mudando
+
+`CameraService.ao_vivo()` compara a assinatura do quadro (a mesma grade
+de 48 pontos que julga o contraste) leitura a leitura. Um sensor de
+verdade nunca entrega dois quadros idênticos — há ruído térmico até com
+a tampa na lente. Um buffer que ninguém preencheu entrega, byte por
+byte.
+
+Daí saem, de graça:
+
+- **o vigia de congelamento**: imagem parada por 2,5 s com tudo
+  "funcionando" derruba e reabre a câmera sozinha;
+- **a foto não sai de quadro congelado**: a pose só vira foto se tiver
+  chegado quadro NOVO enquanto o obturador esteve aberto.
+
+### 3. Escuro não é câmera quebrada
+
+O caminho nativo se desligava sozinho aos 2,5 s quando a cena tinha
+menos de 4% de contraste. Uma pessoa de camiseta escura, num salão à
+noite, na frente de uma parede escura, é uma cena real de baixo
+contraste — e a webcam perfeita era derrubada no meio da pose, deixando
+na tela o último quadro que existiu. Era esta a causa mais provável do
+"no segundo 2 a câmera congela".
+
+A prova agora é o sensor (a imagem muda), e não a cena (a imagem é
+clara). Uma cena bem iluminada continua provando na primeira leitura.
+
+## Peso, para quem vai rodar isto num TV box
+
+Medido a 1080×1920 no renderizador de software, comparando telas:
+
+| tela | antes | depois |
+| --- | --- | --- |
+| `_process` na contagem/pose | 1,97 ms | 0,11 ms |
+
+A leitura da câmera passou a ter dois ritmos: 15 por segundo **só com o
+obturador aberto** (é ali que o jogo escolhe entre quarenta quadros qual
+vira a foto) e 2 por segundo no resto do tempo, onde ela responde
+apenas "a câmera ainda está viva?".

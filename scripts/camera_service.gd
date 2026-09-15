@@ -33,7 +33,21 @@ var _next_bridge_poll_ms := 0
 ## por segundo bastam de sobra: nem o obturador, escolhendo o melhor
 ## quadro da pose, nem o olho, vendo a própria prévia, notam a diferença
 ## entre quinze e sessenta.
+## DOIS RITMOS, E NÃO UM.
+##
+## O ritmo rápido só é necessário QUANDO O OBTURADOR ESTÁ ABERTO -- é ali
+## que o jogo está escolhendo entre quarenta quadros qual vira a foto, e
+## ali quinze leituras por segundo valem o preço. No resto do tempo,
+## que é 95% da sessão, a leitura serve só para responder uma pergunta:
+## "a câmera ainda está viva?". Para isso, duas vezes por segundo sobram.
+##
+## Medido: a leitura a cada 66 ms deixava a tela da contagem em 1,97 ms
+## de processamento por quadro contra 0,27 ms das outras telas -- sete
+## vezes mais, e justamente na tela em que a pessoa está parada olhando a
+## própria imagem. Num PC de escritório isso não aparece; num TV box, que
+## é onde este jogo vai rodar, é a diferença entre liso e engasgado.
 const NATIVA_INTERVALO_MS := 66
+const NATIVA_INTERVALO_OCIOSO_MS := 500
 var _proxima_leitura_nativa_ms := 0
 ## O CONTADOR DE QUADROS QUE A PONTE PUBLICA. Parado quer dizer imagem
 ## velha; a data de modificação do arquivo não serve para isso, porque
@@ -81,6 +95,9 @@ var backend_preferido := ""
 ## que entrega quadro.
 var _native_started_ms := 0
 var _native_ok := false
+## A assinatura da leitura anterior do caminho nativo, para saber se o
+## feed está MUDANDO — ver `_vigiar_nativa`.
+var _assinatura_nativa_anterior := 0
 var status := "PROCURANDO CÂMERA"
 ## Publica um padrão sintético em vez da webcam. Serve para separar
 ## "a ponte está quebrada" de "a câmera está quebrada" sem webcam
@@ -121,6 +138,37 @@ var _ultima_textura: ImageTexture = null
 var _melhor_imagem: Image = null
 var _melhor_nota := -1.0
 var _obturador_ate_ms := 0
+
+## ======================================================================
+## A CÂMERA ESTÁ VIVA? — a pergunta que o jogo fazia errado.
+##
+## Até aqui "viva" era medido pelo PROCESSO: a ponte de pé, o feed
+## ativado, um contador de quadros subindo. Nenhuma dessas três coisas
+## responde à pergunta que interessa, que é se a IMAGEM está mudando.
+##
+## E o preço disso era exatamente o congelamento relatado. Quando a
+## origem tropeça -- o caminho nativo desiste no segundo 2,5 e passa a
+## bola para a ponte; a ponte reinicia; a webcam engasga trocando a
+## exposição --, `preview_texture()` continuava devolvendo a ÚLTIMA
+## textura que existiu, e `tem_imagem()` continuava dizendo que sim. Do
+## lado de fora, a tela mostra a pessoa PARADA, como uma fotografia, e
+## continua assim até a foto sair. É a descrição exata de "no segundo 2
+## a câmera congela".
+##
+## Um quadro parado é melhor do que um boneco -- isso continua valendo, e
+## é por isso que a textura ainda é devolvida. O que não pode é ele ser
+## APRESENTADO COMO AO VIVO. Agora o serviço sabe a diferença: a
+## assinatura do quadro (a mesma grade de 48 pontos que julga o
+## contraste) é comparada leitura a leitura, e `ao_vivo()` responde pela
+## IMAGEM, não pelo processo. Quem desenha pergunta antes, e quem
+## fotografa também.
+const VIDA_MAXIMA_MS := 900
+var _assinatura_do_quadro := 0
+var _ultima_mudanca_ms := 0
+## Chegou quadro NOVO enquanto o obturador esteve aberto? É o que separa
+## "a foto é desta pose" de "a foto é do quadro que estava congelado na
+## tela quando a contagem zerou".
+var _obturador_teve_vida := false
 
 func _ready() -> void:
 	# O CameraServer avisa por DOIS sinais (feed entrou / feed saiu), e não
@@ -180,8 +228,13 @@ func terminar_exame() -> void:
 
 ## A câmera está entregando imagem AGORA? É o que a contagem regressiva
 ## espera antes de começar, e o que a foto pergunta antes de sair.
+##
+## "ENTREGANDO" QUER DIZER MUDANDO. O estado ACESA sozinho respondia por
+## um processo de pé com a imagem parada -- e era com essa resposta que a
+## contagem começava, a pose corria e a foto saía, todas em cima de um
+## quadro congelado. Ver `ao_vivo()`.
 func pronta() -> bool:
-	return estado == Estado.ACESA
+	return estado == Estado.ACESA and ao_vivo()
 
 ## Uma frase curta do estado, para a tela da pose e para a Central.
 func estado_curto() -> String:
@@ -191,7 +244,7 @@ func estado_curto() -> String:
 		Estado.SUBINDO:
 			return "LIGANDO A CÂMERA…"
 		Estado.ACESA:
-			return "CÂMERA PRONTA"
+			return "CÂMERA PRONTA" if ao_vivo() else "IMAGEM PAROU — RECONECTANDO…"
 		Estado.EXAME:
 			return "EXAMINANDO A CÂMERA…"
 		Estado.PARADA:
@@ -235,6 +288,7 @@ func _supervisionar(_delta: float) -> void:
 	if _feed != null:
 		_vigiar_nativa()
 		estado = Estado.ACESA if _native_ok else Estado.SUBINDO
+		_vigiar_congelamento()
 		return
 	_vigiar_ponte()
 	if _bridge_desistiu:
@@ -251,6 +305,44 @@ func _supervisionar(_delta: float) -> void:
 		estado = Estado.ACESA
 	else:
 		estado = Estado.SUBINDO
+	_vigiar_congelamento()
+
+## IMAGEM PARADA COM TUDO "FUNCIONANDO" — o vigia que faltava.
+##
+## Os vigias existentes olham o PROCESSO: a ponte de pé, o contador
+## subindo, o feed ativo. Nenhum deles vê o caso em que tudo isso está
+## certo e a imagem, ainda assim, não muda — webcam que travou sem
+## devolver erro, driver que segura o buffer, feed nativo que parou de
+## empurrar quadro. Do lado de fora esse caso é o pior de todos, porque a
+## máquina diz CÂMERA PRONTA enquanto mostra uma fotografia parada da
+## pessoa e fotografa essa fotografia.
+##
+## Dois segundos e meio é o prazo: o bastante para uma webcam USB barata
+## engasgar trocando a exposição sem ser derrubada à toa, pouco o
+## bastante para a pose de três segundos não correr inteira em cima de
+## uma imagem morta.
+const CONGELAMENTO_MS := 2500
+var _religou_por_congelamento_ms := 0
+
+func _vigiar_congelamento() -> void:
+	if estado != Estado.ACESA or _ultima_mudanca_ms <= 0:
+		return
+	var agora := Time.get_ticks_msec()
+	if agora - _ultima_mudanca_ms < CONGELAMENTO_MS:
+		return
+	# UMA RELIGADA DE CADA VEZ. Sem este freio, a religada seguinte
+	# começaria antes de a anterior ter tido chance de entregar o
+	# primeiro quadro, e a câmera nunca sairia do lugar.
+	if agora - _religou_por_congelamento_ms < 6000:
+		return
+	_religou_por_congelamento_ms = agora
+	status = "IMAGEM CONGELADA — RELIGANDO A CÂMERA"
+	estado = Estado.SUBINDO
+	_assinatura_do_quadro = 0
+	_assinatura_nativa_anterior = 0
+	_ultima_mudanca_ms = 0
+	_derrubar()
+	_levantar()
 
 ## O pedido pendente, atendido uma vez só. Separado da supervisão porque
 ## é aqui que mora a regra que interessa — e uma regra que interessa tem
@@ -447,9 +539,7 @@ func _colher_quadro_da_ponte(agora: int) -> void:
 		_imagem_pronta = null
 		_mutex_leitura.unlock()
 		if pronta != null and not pronta.is_empty():
-			_last_frame_ms = agora
-			_last_image = pronta
-			_oferecer_ao_obturador(pronta)
+			_registrar_quadro(pronta, agora)
 			if _bridge_texture == null:
 				_bridge_texture = ImageTexture.create_from_image(pronta)
 			else:
@@ -506,15 +596,18 @@ func _vigiar_nativa() -> void:
 		var agora := Time.get_ticks_msec()
 		if agora < _proxima_leitura_nativa_ms:
 			return
-		_proxima_leitura_nativa_ms = agora + NATIVA_INTERVALO_MS
+		# Rápido só com o obturador aberto; no resto do tempo a leitura
+		# serve para uma pergunta só, e duas por segundo respondem.
+		var escolhendo := agora <= _obturador_ate_ms
+		_proxima_leitura_nativa_ms = agora + (
+			NATIVA_INTERVALO_MS if escolhendo else NATIVA_INTERVALO_OCIOSO_MS
+		)
 		var atual := _texture.get_image() if _texture != null else null
 		if atual != null and not atual.is_empty():
-			_last_image = atual
-			_last_frame_ms = agora
-			_oferecer_ao_obturador(atual)
+			_registrar_quadro(atual, agora)
 		return
 	var imagem := _texture.get_image() if _texture != null else null
-	# NÃO BASTA A IMAGEM EXISTIR: ELA PRECISA TER ALGUMA COISA DENTRO.
+	# NÃO BASTA A IMAGEM EXISTIR: ELA PRECISA ESTAR MUDANDO.
 	#
 	# Este era o defeito que fazia "a cara não pegar" numa máquina com a
 	# webcam perfeita. O Godot no Windows ENUMERA a câmera, aceita ativar
@@ -522,12 +615,33 @@ func _vigiar_nativa() -> void:
 	# teste era só `not is_empty()`, o jogo declarava CÂMERA CONECTADA,
 	# nunca caía para a ponte, e fotografava um quadrado preto em cima do
 	# quadrado preto anterior, a noite inteira, sem uma linha de erro.
-	if imagem != null and _imagem_util(imagem):
-		_native_ok = true
-		_last_image = imagem
-		_last_frame_ms = Time.get_ticks_msec()
-		status = "CÂMERA CONECTADA (NATIVA)"
-		return
+	#
+	# O CONSERTO DAQUELE DEFEITO TROUXE OUTRO, E ERA ELE QUE DESLIGAVA A
+	# CÂMERA NO SEGUNDO 2,5. O teste virou CONTRASTE: um quadro cuja
+	# grade de 48 pontos não tivesse 4% entre o mais claro e o mais
+	# escuro era tratado como buffer morto. Só que uma pessoa de camiseta
+	# escura, num salão à noite, na frente de uma parede escura, é uma
+	# cena REAL de baixo contraste — e a webcam que estava funcionando
+	# perfeitamente era derrubada aos 2,5 s, no meio da pose, deixando na
+	# tela o último quadro que existiu. É a descrição exata de "no
+	# segundo 2 a câmera congela".
+	#
+	# A prova certa não é a cena: é o SENSOR. Um sensor de verdade nunca
+	# entrega dois quadros idênticos — há ruído térmico até com a tampa
+	# na lente. Um buffer que nunca foi preenchido entrega, byte por
+	# byte. Então a câmera se prova MUDANDO, e não iluminando; e uma cena
+	# bem iluminada continua provando na primeira leitura, que é o
+	# caminho rápido de sempre.
+	if imagem != null and not imagem.is_empty():
+		var medida := _medir_quadro(imagem)
+		var assinatura := int(medida["assinatura"])
+		var mudou := _assinatura_nativa_anterior != 0 and assinatura != _assinatura_nativa_anterior
+		_assinatura_nativa_anterior = assinatura
+		if mudou or float(medida["nota"]) >= CONTRASTE_MINIMO:
+			_native_ok = true
+			_registrar_quadro(imagem, Time.get_ticks_msec())
+			status = "CÂMERA CONECTADA (NATIVA)"
+			return
 	if Time.get_ticks_msec() - _native_started_ms > 2500:
 		_stop_feed()
 		status = "CÂMERA NATIVA MUDA — TENTANDO A PONTE"
@@ -553,14 +667,31 @@ func _imagem_util(imagem: Image) -> bool:
 ## de duas maneiras: acima do mínimo, diz que há imagem; comparada entre
 ## quadros, diz qual deles é o melhor.
 func _nota_da_imagem(imagem: Image) -> float:
+	return float(_medir_quadro(imagem)["nota"])
+
+## UMA VARREDURA SÓ, DUAS RESPOSTAS.
+##
+## A grade de 48 pontos era percorrida duas vezes por quadro: uma para a
+## nota (o contraste) e outra viria para a assinatura (a prova de que a
+## imagem mudou). Numa varredura só saem as duas, e `get_pixel` -- que é
+## a parte cara -- é chamado 48 vezes em vez de 96.
+##
+## A assinatura é a luminância dos mesmos 48 pontos, quantizada em 256
+## níveis e misturada num inteiro. Não é criptografia: é só o bastante
+## para distinguir "a webcam entregou outro quadro" de "é literalmente o
+## mesmo buffer de antes". Um sensor de verdade nunca devolve dois
+## quadros idênticos, nem com a tampa na lente -- ruído existe sempre. Um
+## feed morto devolve, byte por byte.
+func _medir_quadro(imagem: Image) -> Dictionary:
 	if imagem == null or imagem.is_empty():
-		return -1.0
+		return {"nota": -1.0, "assinatura": 0}
 	var largura := imagem.get_width()
 	var altura := imagem.get_height()
 	if largura < 8 or altura < 8:
-		return -1.0
+		return {"nota": -1.0, "assinatura": 0}
 	var claro := 0.0
 	var escuro := 1.0
+	var assinatura := 0
 	for gx in range(8):
 		for gy in range(6):
 			var x := int((float(gx) + 0.5) / 8.0 * float(largura))
@@ -568,23 +699,72 @@ func _nota_da_imagem(imagem: Image) -> float:
 			var v := imagem.get_pixel(x, y).get_luminance()
 			claro = maxf(claro, v)
 			escuro = minf(escuro, v)
-	return claro - escuro
+			assinatura = (assinatura * 31 + int(v * 255.0)) & 0x3FFFFFFF
+	return {"nota": claro - escuro, "assinatura": assinatura}
+
+## O PONTO ÚNICO POR ONDE TODO QUADRO PASSA.
+##
+## Nativa e ponte chegavam aqui por caminhos diferentes e cada um
+## atualizava a sua parte do estado; era por isso que "tem imagem",
+## "está pronta" e "a imagem está mudando" podiam discordar. Agora todo
+## quadro entra por esta porta, e é ela que decide as três coisas.
+func _registrar_quadro(imagem: Image, agora: int) -> void:
+	if imagem == null or imagem.is_empty():
+		return
+	var medida := _medir_quadro(imagem)
+	var assinatura := int(medida["assinatura"])
+	if assinatura != _assinatura_do_quadro:
+		_assinatura_do_quadro = assinatura
+		_ultima_mudanca_ms = agora
+		if agora <= _obturador_ate_ms:
+			_obturador_teve_vida = true
+	_last_image = imagem
+	_last_frame_ms = agora
+	_oferecer_ao_obturador(imagem, float(medida["nota"]))
+
+## A IMAGEM ESTÁ MUDANDO AGORA?
+##
+## Diferente de `tem_imagem()` (há o que desenhar) e de `available()` (o
+## processo está de pé). Esta é a pergunta que a tela da pose e a foto
+## precisam fazer, e a única que o congelamento não consegue enganar.
+func ao_vivo() -> bool:
+	if not enabled or _ultima_mudanca_ms <= 0:
+		return false
+	return Time.get_ticks_msec() - _ultima_mudanca_ms <= VIDA_MAXIMA_MS
+
+## Há quanto tempo a imagem é a mesma, em milissegundos. A Central mostra:
+## uma câmera que congela a cada dez segundos é cabo ou driver, e o
+## número é o que separa isso de "impressão".
+func parada_ha() -> int:
+	if _ultima_mudanca_ms <= 0:
+		return 999999
+	return Time.get_ticks_msec() - _ultima_mudanca_ms
 
 ## Abre o obturador por `janela_ms`. Chamado quando a contagem começa.
 func abrir_obturador(janela_ms := 3200) -> void:
 	_melhor_imagem = null
 	_melhor_nota = -1.0
+	_obturador_teve_vida = false
 	_obturador_ate_ms = Time.get_ticks_msec() + janela_ms
 
 ## Oferece um quadro ao obturador. Só guarda se for melhor que o guardado
 ## e se a janela ainda estiver aberta.
-func _oferecer_ao_obturador(imagem: Image) -> void:
+##
+## A NOTA VEM PRONTA quando quem chama já a calculou (`_registrar_quadro`).
+## Sem isso, cada quadro era medido duas vezes: uma para saber se a
+## câmera está viva, outra para saber se ele é o melhor da pose.
+func _oferecer_ao_obturador(imagem: Image, nota_pronta := NAN) -> void:
 	if imagem == null or Time.get_ticks_msec() > _obturador_ate_ms:
 		return
-	var nota := _nota_da_imagem(imagem)
+	var nota := nota_pronta if not is_nan(nota_pronta) else _nota_da_imagem(imagem)
 	if nota <= _melhor_nota:
 		return
 	_melhor_nota = nota
+	# A CÓPIA SÓ ACONTECE QUANDO O QUADRO REALMENTE VENCE.
+	# Já era assim, e continua: duplicar 640x480 em RGB é quase um mega
+	# de memória, e fazer isso quinze vezes por segundo durante a pose
+	# inteira é o tipo de gasto que não aparece no perfil como uma linha
+	# só -- aparece como o coletor de lixo trabalhando no pior momento.
 	_melhor_imagem = imagem.duplicate()
 
 ## Acorda o servidor de câmeras do Godot. Existe como função própria
@@ -639,6 +819,11 @@ func available() -> bool:
 		return false
 	# "Disponível" é ter QUADRO, e não ter feed aberto: era por confiar em
 	# `is_active()` que a máquina anunciava câmera e fotografava preto.
+	# A MESMA REGRA PARA OS DOIS CAMINHOS: a imagem tem de estar mudando.
+	# Antes a nativa respondia só `_native_ok` -- uma vez provada, ela
+	# dizia "disponível" para sempre, mesmo com o feed parado.
+	if not ao_vivo():
+		return false
 	if _feed != null:
 		return _native_ok
 	return _bridge_texture != null and Time.get_ticks_msec() - _last_frame_ms < 2500
@@ -697,6 +882,8 @@ func ficha_da_ponte() -> String:
 func motivo_curto() -> String:
 	if not enabled:
 		return "CÂMERA DESLIGADA NA CENTRAL"
+	if estado == Estado.ACESA and not ao_vivo():
+		return "IMAGEM PAROU HÁ %d s — RECONECTANDO" % int(parada_ha() / 1000)
 	if _feed == null and _bridge_pid <= 0:
 		return "PONTE NÃO SUBIU — VEJA A CENTRAL"
 	if _bridge_desistiu:
@@ -727,7 +914,15 @@ func capture_photo() -> String:
 	# sem foto aí seria jogar fora uma imagem boa por causa de um estado
 	# que mudou depois que ela foi feita.
 	var image: Image = null
-	if _melhor_imagem != null and _melhor_nota >= CONTRASTE_MINIMO:
+	# O CONTRASTE DEIXOU DE SER A CONDIÇÃO, E A VIDA VIROU A CONDIÇÃO.
+	#
+	# Exigir 4% de contraste para aceitar a foto recusava uma pose real:
+	# camiseta escura, parede escura, salão à noite. O que a foto precisa
+	# provar não é que a cena estava iluminada -- é que a câmera estava
+	# VIVA durante a pose, entregando quadros novos. Um buffer morto
+	# nunca muda, então nunca liga `_obturador_teve_vida`; uma pessoa numa
+	# sala escura liga na primeira leitura.
+	if _melhor_imagem != null and _obturador_teve_vida and _melhor_nota > 0.0:
 		image = _melhor_imagem
 		# CONSOME. O melhor quadro pertence À POSE QUE O ESCOLHEU: deixá-lo
 		# guardado fazia o TESTAR FOTO da Central devolver a cara de quem
@@ -735,16 +930,21 @@ func capture_photo() -> String:
 		# estava congelada quando ela estava perfeita.
 		_melhor_imagem = null
 		_melhor_nota = -1.0
+		_obturador_teve_vida = false
 	elif available():
 		image = _texture.get_image() if _texture != null else (_last_image.duplicate() if _last_image != null else null)
 	if image == null or image.is_empty():
 		status = "CÂMERA SEM IMAGEM — %s" % motivo_curto()
 		return ""
-	if not _imagem_util(image):
-		# UMA FOTO PRETA É PIOR DO QUE FOTO NENHUMA: o ranking mostra um
-		# retângulo escuro no lugar da pessoa e ninguém entende. Sem foto,
-		# ao menos a silhueta desenhada diz "não deu".
-		status = "IMAGEM SEM CONTRASTE — TAMPA DA LENTE OU SALA ESCURA"
+	if _nota_da_imagem(image) <= 0.0:
+		# UMA FOTO DE UMA COR SÓ É PIOR DO QUE FOTO NENHUMA: o ranking
+		# mostra um retângulo chapado no lugar da pessoa e ninguém
+		# entende. Sem foto, ao menos a silhueta desenhada diz "não deu".
+		#
+		# O piso aqui é ZERO, e não os 4% de `CONTRASTE_MINIMO`: chapado
+		# é buffer morto, e escuro é um salão à noite. Recusar o segundo
+		# junto com o primeiro custava a foto de quem jogou.
+		status = "IMAGEM CHAPADA — TAMPA NA LENTE"
 		return ""
 	# A FOTO FICA NA MÃO, e não só no disco.
 	#

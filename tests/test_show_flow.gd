@@ -53,6 +53,15 @@ func run() -> void:
 	# o fim. Quem liberar a simulação de bancada de novo, use
 	# `_simulador_liberado()`, que é o que o jogo de fato consulta.
 	jogo.central_aberta = false
+	# A EXIGÊNCIA DE CÂMERA É REAL E FICA DESLIGADA AQUI — de propósito.
+	#
+	# A máquina passou a recusar a rodada enquanto não há imagem ao vivo
+	# (e a não cobrar a ficha por ela). É a regra certa no salão e a
+	# errada numa bancada de teste sem webcam: com ela ligada, todo teste
+	# de crédito, golpe e placar mediria a câmera em vez do que se propõe
+	# a medir. Quem prova a regra nova é `_test_camera_manda_na_rodada`,
+	# e só ele a liga.
+	jogo.camera_obrigatoria = false
 
 	_test_entrada()
 	_test_audio_dos_estados()
@@ -66,9 +75,11 @@ func run() -> void:
 	_test_interpretador_da_ponte()
 	_test_exame_nao_briga_com_a_ponte()
 	_test_camera_acesa_nao_apaga()
+	_test_camera_manda_na_rodada()
 	_test_contagem_espera_a_camera()
 	_test_laco_de_atracao()
 	_test_teto_de_efeitos()
+	_test_vigia_mede_o_pior_quadro()
 	_test_porta_fixa()
 	_test_botoes_do_arduino_ponta_a_ponta()
 	await _test_ponte_por_processo()
@@ -451,6 +462,29 @@ func _test_exame_nao_briga_com_a_ponte() -> void:
 	assert(camera._bridge_reinicios == 0)
 	camera.enabled = true
 
+## UM QUADRO DIFERENTE A CADA CHAMADA.
+##
+## O serviço agora prova a vida da câmera comparando a assinatura de um
+## quadro com a do anterior — dois quadros idênticos são buffer morto, e
+## não câmera. Um teste que oferecesse sempre a mesma imagem estaria
+## fingindo justamente o defeito que o código passou a detectar.
+func _quadro_vivo(semente: int) -> Image:
+	var imagem := Image.create(64, 48, false, Image.FORMAT_RGB8)
+	imagem.fill(Color(0.18, 0.18, 0.18))
+	for x in range(64):
+		for y in range(20):
+			imagem.set_pixel(x, y, Color.WHITE)
+	# O PIXEL QUE MUDA PRECISA ESTAR NA GRADE QUE O SERVIÇO OLHA.
+	#
+	# A assinatura sai de 48 pontos em grade (8 colunas × 6 linhas), e
+	# não da imagem inteira — é o que a torna barata o bastante para
+	# rodar a cada quadro. Um pixel mexido FORA desses pontos não muda
+	# assinatura nenhuma, e o teste estaria oferecendo, para o serviço,
+	# dois quadros idênticos: exatamente o buffer morto que ele recusa.
+	# Aqui o ponto é o (4, 36), que é o da coluna 0, linha 4 da grade.
+	imagem.set_pixel(4, 36, Color(float(semente % 7) / 7.0, 0.5, 0.2))
+	return imagem
+
 # ------------------------------- camera acesa nao apaga sozinha
 func _test_camera_acesa_nao_apaga() -> void:
 	var camera: CameraService = jogo.camera_service
@@ -458,14 +492,30 @@ func _test_camera_acesa_nao_apaga() -> void:
 	camera.forcar_ponte = true
 
 	# Finge uma ponte de pé, entregando quadro agora mesmo.
+	#
+	# "ENTREGANDO" VIROU LITERAL: `pronta()` deixou de acreditar no
+	# estado e passou a exigir que a IMAGEM esteja mudando. Um quadro
+	# registrado de verdade é o que liga isso — e é essa diferença que
+	# impede a contagem de correr sobre uma imagem congelada.
 	camera.estado = camera.Estado.ACESA
 	camera._bridge_pid = 999999
 	camera._bridge_texture = ImageTexture.create_from_image(
 		Image.create(8, 8, false, Image.FORMAT_RGB8)
 	)
-	camera._last_frame_ms = Time.get_ticks_msec()
+	camera._registrar_quadro(_quadro_vivo(1), Time.get_ticks_msec())
+	assert(camera.ao_vivo())
 	assert(camera.pronta())
 	assert(camera.tem_imagem())
+
+	# IMAGEM PARADA NÃO É CÂMERA PRONTA, por mais que o processo esteja
+	# de pé e o estado diga ACESA. Este é o congelamento que a tela da
+	# pose mostrava como se fosse ao vivo.
+	camera._ultima_mudanca_ms = Time.get_ticks_msec() - camera.VIDA_MAXIMA_MS - 200
+	assert(not camera.ao_vivo())
+	assert(not camera.pronta())
+	assert(camera.tem_imagem())
+	camera._registrar_quadro(_quadro_vivo(2), Time.get_ticks_msec())
+	assert(camera.pronta())
 
 	# QUADRO ATRASADO AINDA É IMAGEM. `available()` fica falso -- e deve
 	# ficar, porque a foto quer um quadro de agora --, mas a PRÉVIA
@@ -475,7 +525,7 @@ func _test_camera_acesa_nao_apaga() -> void:
 	camera._last_frame_ms = Time.get_ticks_msec() - 4000
 	assert(not camera.available())
 	assert(camera.tem_imagem())
-	camera._last_frame_ms = Time.get_ticks_msec()
+	camera._registrar_quadro(_quadro_vivo(3), Time.get_ticks_msec())
 	camera._ultima_textura = camera._bridge_texture
 
 	# A RELIGADA DA PONTE NÃO APAGA A IMAGEM DA TELA. Era o último
@@ -524,6 +574,75 @@ func _test_camera_acesa_nao_apaga() -> void:
 	camera.estado = camera.Estado.SUBINDO
 	camera._bridge_texture = null
 
+# ------------------- sem camera a rodada nao comeca e a ficha fica
+func _test_camera_manda_na_rodada() -> void:
+	"""A REGRA NOVA: a câmera é condição para jogar, e não enfeite.
+
+	Antes a máquina esperava a webcam por alguns segundos e, passados
+	eles, jogava assim mesmo -- com a ficha já descontada e o ranking
+	registrando o nome sem cara nenhuma. Num jogo cuja graça é aparecer
+	com a própria foto no quadro de recordes, isso é meia partida cobrada
+	inteira.
+	"""
+	var camera: CameraService = jogo.camera_service
+	jogo.camera_obrigatoria = true
+	jogo.camera_enabled = true
+	camera.enabled = true
+	camera.estado = camera.Estado.SUBINDO
+	camera._ultima_mudanca_ms = 0
+	jogo.state = GameDef.State.IDLE
+	jogo.game_mode = "credit"
+	jogo.credits = 3
+
+	# START sem imagem: a rodada NÃO começa e o crédito NÃO é gasto.
+	assert(not jogo.camera_liberou_a_rodada())
+	jogo._iniciar_rodada()
+	assert(jogo.state == GameDef.State.IDLE)
+	assert(jogo.credits == 3)
+
+	# E a tela de atração não convida para o que a máquina não pode fazer.
+	assert(not jogo.motivo_da_recusa().is_empty())
+
+	# Com imagem ao vivo, a mesma ficha vale uma rodada.
+	camera.estado = camera.Estado.ACESA
+	camera._registrar_quadro(_quadro_vivo(11), Time.get_ticks_msec())
+	assert(jogo.camera_liberou_a_rodada())
+	jogo._iniciar_rodada()
+	assert(jogo.state == GameDef.State.COUNTDOWN)
+	assert(jogo.credits == 2)
+
+	# A IMAGEM CONGELA NO MEIO DA POSE: o relógio PARA em vez de correr
+	# sobre um quadro velho. É o "no segundo 2 a câmera congela".
+	jogo.aguardando_camera = false
+	camera._ultima_mudanca_ms = Time.get_ticks_msec() - camera.VIDA_MAXIMA_MS - 400
+	var antes: float = jogo.countdown_left
+	jogo._processar_contagem(0.016)
+	assert(jogo.aguardando_camera)
+	assert(is_equal_approx(jogo.countdown_left, antes))
+
+	# Voltou a imagem, volta o relógio.
+	camera._registrar_quadro(_quadro_vivo(12), Time.get_ticks_msec())
+	jogo._processar_contagem(0.016)
+	assert(not jogo.aguardando_camera)
+	assert(jogo.countdown_left < antes)
+
+	# E se ela não voltar dentro do teto, a rodada é DESFEITA e a ficha
+	# volta: cobrar por uma partida que vai entrar no ranking sem cara
+	# nenhuma é o oposto do que esta máquina vende.
+	camera.estado = camera.Estado.SUBINDO
+	camera._ultima_mudanca_ms = 0
+	jogo.aguardando_camera = true
+	jogo.espera_da_camera = 0.0
+	jogo.credito_gasto = true
+	var creditos_antes: int = jogo.credits
+	for i in range(20):
+		jogo._processar_contagem(0.5)
+	assert(jogo.state == GameDef.State.IDLE)
+	assert(jogo.credits == creditos_antes + 1)
+
+	jogo.camera_obrigatoria = false
+	jogo.state = GameDef.State.IDLE
+
 # ------------------------- a contagem so comeca com a camera acesa
 func _test_contagem_espera_a_camera() -> void:
 	var camera: CameraService = jogo.camera_service
@@ -547,16 +666,23 @@ func _test_contagem_espera_a_camera() -> void:
 	assert(jogo.aguardando_camera)
 	assert(is_equal_approx(jogo.countdown_left, comeco))
 
-	# Acendeu: a contagem destrava e o obturador abre junto.
+	# Acendeu: a contagem destrava e o obturador abre junto. "Acendeu"
+	# agora quer dizer imagem CHEGANDO, e não só o estado dizendo ACESA.
 	camera.estado = camera.Estado.ACESA
+	camera._registrar_quadro(_quadro_vivo(21), Time.get_ticks_msec())
 	jogo._processar_contagem(0.016)
 	assert(not jogo.aguardando_camera)
 	assert(jogo.countdown_left < comeco)
 
-	# E A ESPERA TEM HORA MARCADA. Sem webcam, quem pôs a ficha ainda
-	# tem direito à partida: passados os segundos do teto, a rodada
-	# começa assim mesmo.
+	# E A ESPERA TEM HORA MARCADA — com a exigência de câmera DESLIGADA,
+	# que é a configuração deste teste (ver `run`). Assim, quem pôs a
+	# ficha numa máquina de bancada ainda tem direito à partida: passados
+	# os segundos do teto, a rodada começa sem foto. Com a exigência
+	# ligada a regra é outra, e quem a prova é
+	# `_test_camera_manda_na_rodada`: ali a rodada é desfeita e a ficha
+	# volta.
 	camera.estado = camera.Estado.SUBINDO
+	camera._ultima_mudanca_ms = 0
 	jogo._iniciar_rodada()
 	assert(jogo.aguardando_camera)
 	for i in range(20):
@@ -810,3 +936,30 @@ func _ponte_ate(ponte: PonteProcessoLink, condicao: Callable) -> bool:
 		OS.delay_msec(10)
 		await process_frame
 	return false
+
+# ------------------- o vigia mede o PIOR quadro, e nao a media
+func _test_vigia_mede_o_pior_quadro() -> void:
+	"""Uma tela que engasga uma vez a cada vinte quadros tem media otima.
+
+	E era a media que mandava. Nove quadros de 16 ms e um de 40 ms dao
+	uma media de 18,4 ms -- "esta bom" -- enquanto o unico quadro que a
+	pessoa na frente da maquina enxerga e o de 40. Pior: o engasgo deste
+	jogo e PERIODICO e sempre no mesmo lugar (o instante do soco), entao
+	a qualidade subia de volta ao maximo na tela de atracao, calma, e
+	desabava de novo no impacto seguinte -- uma vez por rodada.
+	"""
+	var d := Desempenho.new()
+	d.teto = "AUTO"
+	d.qualidade = 1.0
+
+	# Dezenove quadros bons e um pessimo: a media aprova, o pior reprova.
+	for i in range(d.JANELA * 3):
+		d.medir(0.040 if i % 20 == 0 else 1.0 / 120.0)
+	assert(d.fps() > Desempenho.ALVO_ALTO)
+	assert(d.qualidade < 1.0)
+
+	# E so volta a subir quando a janela inteira passa sem tranco algum.
+	var caiu: float = d.qualidade
+	for i in range(d.JANELA * 3):
+		d.medir(1.0 / 120.0)
+	assert(d.qualidade > caiu)

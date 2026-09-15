@@ -42,11 +42,62 @@ var _cor_flash := Paleta.AMBAR
 ## Espaçamento entre os pontos da moldura, em pixels.
 const PASSO := 52.0
 const MARGEM := 24.0
+## Quantas lâmpadas a luz corrente deixa acesas atrás dela.
+const CAUDA := 10
+
+## BORDA LISA SÓ ENQUANTO A MÁQUINA TEM FOLGA.
+##
+## Um bulbo tem sete pixels. O antisserrilhado dele custa a mesma
+## geometria extra que o de uma faixa que cruza a tela, e não se vê nem
+## de perto — muito menos numa TV a três metros. Na máquina que está
+## dando conta ele fica, porque não custa nada que falte; na que não
+## está, ele é a primeira coisa a sair.
+func _liso() -> bool:
+	return qualidade > 0.7
+
+## ======================================================================
+## A FIEIRA APAGADA É DESENHADA UMA VEZ, E NÃO SESSENTA POR SEGUNDO.
+##
+## AQUI ESTAVA O MAIOR PESO CONSTANTE DO JOGO. Medido, a 1080×1920:
+## tirar esta moldura da tela derrubava o quadro do impacto de 56,5 ms
+## para 44,8 ms — quase dez milissegundos, em TODA tela, do início ao
+## fim, por pura decoração. São cento e onze lâmpadas, cada uma com
+## corpo, aro e reflexo antisserrilhados: cerca de trezentos e trinta
+## desenhos com borda lisa por quadro.
+##
+## E quase nada disso muda. As lâmpadas não saem do lugar, e a cor só
+## muda nas dez que a luz corrente está acendendo naquele instante. O
+## resto é exatamente igual ao quadro anterior.
+##
+## Então a fieira apagada virou um nó próprio. Um `CanvasItem` guarda a
+## lista de desenho dele até alguém pedir `queue_redraw()`, e este aqui
+## só pede quando a tela muda de tamanho ou de estado — ou seja, quase
+## nunca. O nó de cima passa a desenhar só as lâmpadas ACESAS, que são
+## uma dúzia. O olho vê a mesma moldura; a máquina desenha 3% dela.
+class Fieira extends Control:
+	var dono: LedFrame = null
+
+	func _ready() -> void:
+		set_anchors_preset(Control.PRESET_FULL_RECT)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		z_index = -1
+
+	func _draw() -> void:
+		if dono != null:
+			dono.desenhar_apagadas(self)
+
+var _fieira: Fieira = null
+## O que a fieira apagada já desenhou. Enquanto não mudar, ela não é
+## redesenhada — é isso que faz a moldura custar quase nada.
+var _fieira_marca := ""
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	z_index = 4
+	_fieira = Fieira.new()
+	_fieira.dono = self
+	add_child(_fieira)
 
 func set_estado(nome: String, cor: Color = Paleta.AMBAR) -> void:
 	estado = nome
@@ -62,6 +113,13 @@ func _process(delta: float) -> void:
 	tempo += delta
 	_flash = maxf(0.0, _flash - delta * 3.2)
 	queue_redraw()
+	# A fieira apagada só é refeita quando algo que ela desenha muda: o
+	# tamanho da tela, o estado (que troca a cor apagada de fundo) ou o
+	# teto de qualidade.
+	var marca := "%d|%d|%s|%.2f" % [int(size.x), int(size.y), estado, qualidade]
+	if _fieira != null and marca != _fieira_marca:
+		_fieira_marca = marca
+		_fieira.queue_redraw()
 
 func _cor_base() -> Color:
 	match estado:
@@ -96,33 +154,32 @@ func _draw() -> void:
 	if total < 8:
 		return
 	var cabeca := fmod(tempo * _velocidade(), float(total))
-	# SÓ A LÂMPADA ACESA GANHA O DETALHE INTEIRO quando a máquina aperta.
-	#
-	# É ela que o olho de fato acompanha correndo pela borda; as apagadas
-	# são só o traço da fieira. Cortar o contorno e o reflexo de vidro
-	# das apagadas tira dois terços dos desenhos desta moldura sem que a
-	# corrida de luz perca nada — e é exatamente o detalhe que ninguém
-	# nota faltando numa lâmpada parada.
-	var detalhe_total := qualidade > 0.7
 
-	for i in range(total):
-		var p := _ponto_do_percurso(i, total, w, h)
-		# A cauda atrás da cabeça apaga devagar; o resto fica de reserva.
+	# SÓ AS ACESAS PASSAM POR AQUI. As apagadas moram no nó de baixo, que
+	# não é redesenhado (ver a classe `Fieira`, no alto do arquivo). A
+	# cauda tem dez lâmpadas; o laço que percorria as cento e onze, em
+	# todo quadro, era o maior peso constante do jogo.
+	#
+	# `CAUDA + 2` de folga: a cabeça anda em fração de lâmpada, e a
+	# lâmpada logo à frente já recebe um fio de luz.
+	for passo in range(CAUDA + 2):
+		var i := int(cabeca) - passo
+		i = (i % total + total) % total
 		var dist := fmod(cabeca - float(i) + total, float(total))
-		var acesa := maxf(0.0, 1.0 - dist / 10.0)
+		var acesa := maxf(0.0, 1.0 - dist / float(CAUDA))
+		if acesa <= 0.02:
+			continue
 		if estado == ARMADA:
 			acesa *= 0.75 + 0.25 * sin(tempo * 9.0)
+		var p := _ponto_do_percurso(i, total, w, h)
 		var cor := apagada.lerp(base, acesa)
 		var raio := 5.0 + 2.4 * acesa
-		# Halo quente só na lâmpada acesa: é o que sobra de "luz" quando o
-		# fundo já é claro.
-		if acesa > 0.05:
-			draw_circle(p, raio + 7.0, Color(base, acesa * 0.22), true, -1.0, true)
-		draw_circle(p, raio, cor, true, -1.0, true)
-		if detalhe_total or acesa > 0.05:
-			draw_arc(p, raio, 0.0, TAU, 16, Color(Paleta.MARINHO, 0.30 + 0.35 * acesa), 1.6, true)
-			# Reflexo no vidro do bulbo, sempre no mesmo canto.
-			draw_circle(p + Vector2(-raio * 0.30, -raio * 0.30), raio * 0.26, Color(1, 1, 1, 0.55), true, -1.0, true)
+		# Halo quente: é o que sobra de "luz" quando o fundo já é claro.
+		draw_circle(p, raio + 7.0, Color(base, acesa * 0.22), true, -1.0, _liso())
+		draw_circle(p, raio, cor, true, -1.0, _liso())
+		draw_arc(p, raio, 0.0, TAU, 12, Color(Paleta.MARINHO, 0.30 + 0.35 * acesa), 1.6, _liso())
+		# Reflexo no vidro do bulbo, sempre no mesmo canto.
+		draw_circle(p + Vector2(-raio * 0.30, -raio * 0.30), raio * 0.26, Color(1, 1, 1, 0.55), true, -1.0, false)
 
 	if _flash > 0.01:
 		# O clarão acende a fieira inteira de uma vez só.
@@ -152,3 +209,26 @@ func _ponto_do_percurso(i: int, total: int, w: float, h: float) -> Vector2:
 		return Vector2(w - MARGEM - d, h - MARGEM)
 	d -= largura
 	return Vector2(MARGEM, h - MARGEM - d)
+
+
+## AS LÂMPADAS APAGADAS, desenhadas pelo nó de baixo e guardadas por ele.
+##
+## É o mesmo desenho de antes — corpo, aro e reflexo —, só que emitido
+## uma vez em vez de sessenta vezes por segundo. Ver a classe `Fieira`.
+func desenhar_apagadas(alvo: CanvasItem) -> void:
+	var w := size.x
+	var h := size.y
+	if w <= 0.0 or h <= 0.0:
+		return
+	var perimetro := 2.0 * (w + h - 4.0 * MARGEM)
+	var total := int(perimetro / PASSO)
+	if total < 8:
+		return
+	var apagada := Paleta.CARTAO_BORDA
+	var detalhe := qualidade > 0.7
+	for i in range(total):
+		var p := _ponto_do_percurso(i, total, w, h)
+		alvo.draw_circle(p, 5.0, apagada, true, -1.0, false)
+		if detalhe:
+			alvo.draw_arc(p, 5.0, 0.0, TAU, 12, Color(Paleta.MARINHO, 0.30), 1.6, false)
+			alvo.draw_circle(p + Vector2(-1.5, -1.5), 1.3, Color(1, 1, 1, 0.55), true, -1.0, false)

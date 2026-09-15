@@ -68,7 +68,7 @@ func desenhar(tela: CanvasItem) -> void:
 		var raio: float = lerpf(o.raio_inicial, o.raio_final, ease(t, 0.35))
 		var cor: Color = o.cor
 		cor.a *= 1.0 - t
-		tela.draw_arc(o.centro, raio, 0.0, TAU, 96, cor, o.espessura * (1.0 - t * 0.7), true)
+		Traco.arco(tela, o.centro, raio, cor, o.espessura * (1.0 - t * 0.7))
 
 	for p in _particulas:
 		var cor: Color = p.cor

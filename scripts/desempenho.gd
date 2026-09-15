@@ -64,10 +64,24 @@ func medir(delta: float) -> void:
 		_tempos.remove_at(0)
 	if _tempos.size() < JANELA:
 		return
-	var fps := float(_tempos.size()) / _soma
-	if fps < ALVO_BAIXO:
+	# O QUE O OLHO VÊ É O PIOR QUADRO, E NÃO A MÉDIA.
+	#
+	# A média escondia exatamente o defeito que este vigia existe para
+	# combater. Uma tela que roda 57 quadros por segundo e engasga num
+	# deles tem média de 57 — "está ótimo" —, e o engasgo é o único
+	# quadro que a pessoa na frente da máquina percebe. Pior: o engasgo
+	# do jogo é PERIÓDICO e sempre no mesmo lugar, o instante do soco.
+	# Com a média, a qualidade subia de volta ao máximo durante a tela de
+	# atração, calma, e desabava de novo no impacto seguinte — uma vez
+	# por rodada, a noite inteira.
+	#
+	# Medindo pelo PIOR quadro da janela, a qualidade só volta a subir
+	# quando um terço de segundo inteiro passa sem nenhum tranco. É
+	# histerese de graça, e é o que faz o ajuste parar de oscilar.
+	var pior := pior_ms()
+	if pior > 1000.0 / ALVO_BAIXO:
 		qualidade = maxf(PISO, qualidade - QUEDA * delta)
-	elif fps > ALVO_ALTO:
+	elif pior < 1000.0 / ALVO_ALTO:
 		qualidade = minf(1.0, qualidade + SUBIDA * delta)
 	aplicar_teto()
 
