@@ -31,7 +31,7 @@ const T_SUBTITULO := 2.90
 const T_ASSINATURA := 3.35
 const T_BRILHO := 3.50    ## a luz que varre o letreiro no trecho parado
 const T_MORPH := 4.45    ## a cena vira, sem corte, a tela de abertura
-const MORPH_SECONDS := 0.32 ## montagem curta: não pode parecer travamento
+const MORPH_SECONDS := 0.80 ## movimento completo, sem rasterizar novos corpos
 const INTRO_SECONDS := T_MORPH + MORPH_SECONDS
 
 ## O selo fica quadrado e PEQUENO: 300 px de lado no meio de uma tela de
@@ -420,8 +420,8 @@ static func _intro_emblema(canvas: Control, time: float, morph: float) -> void:
 		return
 	var abre := _janela(time, T_EMBLEMA, 0.50)
 	var escala := _passar_do_ponto(abre) if abre < 1.0 else 1.0
-	var tamanho := lerpf(620.0 * escala, POUSO_EMBLEMA_TAM, ease(morph, 0.4))
-	var centro := SOCO.lerp(POUSO_EMBLEMA, ease(morph, 0.4))
+	var tamanho := lerpf(620.0 * escala, POUSO_EMBLEMA_TAM, smoothstep(0.0, 1.0, morph))
+	var centro := SOCO.lerp(POUSO_EMBLEMA, smoothstep(0.0, 1.0, morph))
 	# Anel de luz que gira em volta enquanto o emblema assenta; some no
 	# morph para não sobrar na abertura, que não tem esse anel.
 	var anel := (1.0 - morph) * clampf(abre * 1.4, 0.0, 1.0)
@@ -449,21 +449,21 @@ static func _intro_letreiro(canvas: Control, time: float, morph: float) -> void:
 		return
 	var desce := _janela(time, T_TITULO, 0.42)
 	var punch_y := lerpf(980.0, 1260.0, _passar_do_ponto(desce, 1.4)) if desce < 1.0 else 1260.0
-	punch_y = lerpf(punch_y, POUSO_PUNCH, ease(morph, 0.4))
-	var punch_tam := int(lerpf(134.0, float(POUSO_PUNCH_TAM), ease(morph, 0.4)))
+	punch_y = lerpf(punch_y, POUSO_PUNCH, smoothstep(0.0, 1.0, morph))
+	var punch_tam := lerpf(134.0, float(POUSO_PUNCH_TAM), smoothstep(0.0, 1.0, morph))
 	var separa := (1.0 - desce) * 26.0
 	if separa > 0.5:
-		canvas._texto_arcade("PUNCH", punch_y, punch_tam, Color(RED, 0.55), 960.0, 60.0 - separa)
-		canvas._texto_arcade("PUNCH", punch_y, punch_tam, Color("2ad4ff", 0.55), 960.0, 60.0 + separa)
-	canvas._texto_arcade("PUNCH", punch_y, punch_tam, Color(WHITE, clampf(desce * 2.0, 0.0, 1.0)), 960.0)
+		canvas._texto_intro("PUNCH", punch_y, punch_tam, POUSO_PUNCH_TAM, Color(RED, 0.55), 60.0 - separa)
+		canvas._texto_intro("PUNCH", punch_y, punch_tam, POUSO_PUNCH_TAM, Color("2ad4ff", 0.55), 60.0 + separa)
+	canvas._texto_intro("PUNCH", punch_y, punch_tam, POUSO_PUNCH_TAM, Color(WHITE, clampf(desce * 2.0, 0.0, 1.0)))
 
 	if time < T_SUBTITULO:
 		return
 	var desliza := _janela(time, T_SUBTITULO, 0.45)
-	var sub_y := lerpf(1385.0, POUSO_CHALLENGE, ease(morph, 0.4))
-	var sub_tam := int(lerpf(93.0, float(POUSO_CHALLENGE_TAM), ease(morph, 0.4)))
+	var sub_y := lerpf(1385.0, POUSO_CHALLENGE, smoothstep(0.0, 1.0, morph))
+	var sub_tam := lerpf(93.0, float(POUSO_CHALLENGE_TAM), smoothstep(0.0, 1.0, morph))
 	var entra := lerpf(420.0, 0.0, ease(desliza, 0.28))
-	canvas._texto_arcade("CHALLENGE", sub_y, sub_tam, Color(GOLD, desliza), 960.0, 60.0 + entra)
+	canvas._texto_intro("CHALLENGE", sub_y, sub_tam, POUSO_CHALLENGE_TAM, Color(GOLD, desliza), 60.0 + entra)
 	# O risco de ouro que corre por baixo do subtítulo enquanto ele entra.
 	if desliza < 1.0 and morph <= 0.0:
 		# Abre do centro para os dois lados, acompanhando o subtítulo que
@@ -507,9 +507,8 @@ static func _intro_brilho(canvas: Control, time: float, morph: float) -> void:
 	#
 	# Eram três quadriláteros atravessando a tela na altura do letreiro.
 	# Como o quadrilátero não sabe onde a letra está, a luz aparecia
-	# também no vazio entre as letras e em volta delas. O efeito saiu por
-	# completo: substituir por shader voltava a criar compilação tardia
-	# justamente na emenda mais sensível para uma TV Box.
+	# também no vazio entre as letras e em volta delas. O reflexo da
+	# abertura agora é recortado pelo shader próprio do Letreiro.
 	# MAS TIRAR A FAIXA DEIXOU UM BURACO, e ele apareceu como "a abertura
 	# trava no fim".
 	#

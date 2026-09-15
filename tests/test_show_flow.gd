@@ -83,11 +83,16 @@ func run() -> void:
 # ------------------------------------------------------------ entrada
 func _test_entrada() -> void:
 	assert(jogo.intro_active)
-	# A montagem final precisa caber em poucos quadros até nas TV Boxes.
-	assert(ArcadeStage.MORPH_SECONDS <= 0.35)
+	assert(ArcadeStage.MORPH_SECONDS >= 0.5)
 	jogo._processar_abertura(ArcadeStage.INTRO_SECONDS + 0.1)
 	assert(not jogo.intro_active)
 	assert(is_equal_approx(jogo.abertura_chegada, 1.0))
+	assert(jogo.state_time >= 0.5) # Não apaga o título depois do pouso.
+	assert(jogo._titulo_da_abertura_visivel())
+	for pagina in [1, 2]:
+		jogo.state_time = jogo.ABERTURA_DURACAO * pagina
+		assert(not jogo._titulo_da_abertura_visivel())
+	jogo.state_time = 0.5
 	assert(jogo.state == GameDef.State.IDLE)
 
 func _test_audio_dos_estados() -> void:

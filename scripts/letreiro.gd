@@ -20,6 +20,8 @@ var fonte: Font
 var _linhas: Array = []
 var _tempo := 0.0
 var _material := ShaderMaterial.new()
+var _inicio_x := -1.0
+var _extensao_x := -1.0
 
 func _ready() -> void:
 	_material.shader = SHADER
@@ -34,14 +36,18 @@ func _process(delta: float) -> void:
 	if fase < PASSAGEM:
 		posicao = lerpf(DE, ATE, fase / PASSAGEM)
 	_material.set_shader_parameter("posicao", posicao)
-	queue_redraw()
+	# Uniformes atualizam o material sem reconstruir os comandos de texto.
 
 ## Recebe o que desenhar neste quadro. Cada entrada é
 ## {texto, y, tamanho, cor}. Chamado pelo desenho da tela: assim o nome
 ## continua obedecendo à mesma animação de entrada de antes, e este nó
 ## não precisa saber nada sobre estados do jogo.
 func mostrar(linhas: Array, inicio_x: float, extensao_x: float) -> void:
+	if _linhas == linhas and _inicio_x == inicio_x and _extensao_x == extensao_x:
+		return
 	_linhas = linhas
+	_inicio_x = inicio_x
+	_extensao_x = extensao_x
 	_material.set_shader_parameter("inicio_x", inicio_x)
 	_material.set_shader_parameter("extensao_x", extensao_x)
 	queue_redraw()

@@ -669,14 +669,9 @@ func _alvo() -> Vector2:
 # CICLO
 # ======================================================================
 func _process(delta: float) -> void:
-	# O HIT-STOP CONGELA O JOGO, E SÓ ELE ANDA. Nem `animation_time` nem
-	# a máquina de estados avançam: se avançassem, o congelamento seria
-	# só um quadro repetido enquanto o resto seguia, e a pessoa sentiria
-	# um engasgo em vez de um golpe pesado.
-	if hitstop_left > 0.0:
-		hitstop_left = maxf(0.0, hitstop_left - delta)
-		queue_redraw()
-		return
+	# O impacto não suspende mais a UI, partículas e relógios da rodada.
+	# O clarão/tremor já comunicam a pancada sem congelar a tela inteira.
+	hitstop_left = maxf(0.0, hitstop_left - delta)
 	_colher_fotos_decodificadas()
 	desempenho.medir(delta)
 	# UM QUADRO ENGASGADO NÃO PODE VIRAR UM PULO NO JOGO — MAS O FREIO NÃO
@@ -793,7 +788,7 @@ func _processar_abertura(delta: float) -> void:
 			# onde a abertura os desenha; se ela ainda por cima começasse
 			# com o seu próprio esmaecer, o quadro seguinte à entrada
 			# seria um piscar — a única emenda visível do filme.
-			state_time = 0.0
+			state_time = 0.5
 			# A vinheta já pousou o emblema e o nome nas coordenadas finais.
 			# Uma segunda animação de montagem fazia todos os elementos serem
 			# reposicionados e rasterizados juntos no quadro mais caro da
@@ -2982,7 +2977,7 @@ func _draw() -> void:
 	# `_nome_do_jogo` decide quando mostrar/esconder; não o limpamos todo
 	# quadro porque isso anulava o cache do CanvasItem e rasterizava as
 	# letras grandes de novo 60 vezes por segundo.
-	if state != GameDef.State.IDLE or intro_active:
+	if not _titulo_da_abertura_visivel():
 		letreiro_do_nome.esconder()
 	# TREMOR E ZOOM SACODEM A TELA INTEIRA: uma transformação só, antes de
 	# tudo. O zoom cresce a partir do PONTO DO SOCO e não do centro da
@@ -3356,6 +3351,11 @@ func _laco_de_atracao(delta: float) -> void:
 	fx.limpar()
 	sons.music(-18.0)
 
+func _titulo_da_abertura_visivel() -> bool:
+	return state == GameDef.State.IDLE and not intro_active \
+		and int(state_time / ABERTURA_DURACAO) % ABERTURA_CAPITULOS == 0 \
+		and not central_aberta and not calib_ativo and transicao < 0.0
+
 func _draw_show_idle() -> void:
 	var chegada := ease(abertura_chegada, 0.4)
 	_marca_da_casa(146.0, 132.0, chegada)
@@ -3393,7 +3393,8 @@ func _draw_show_idle() -> void:
 	_texto(Versao.curta(), 1876.0, 15, Color(1, 1, 1, 0.55 * chegada))
 
 func _capitulo_da_marca(alpha: float) -> void:
-	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8), 440.0, alpha)
+	var flutuar := smoothstep(0.5, 1.3, state_time)
+	ArcadeStage.emblem(self, Vector2(540, 560 + sin(animation_time * 1.4) * 8 * flutuar), 440.0, alpha)
 	# O NOME É DESENHADO PELO NÓ DO SHADER, e não aqui. Ele continua no
 	# mesmo lugar, no mesmo corpo e com a mesma entrada esmaecida — o que
 	# muda é quem passa a tinta, porque só um nó pode carregar material.
@@ -3661,11 +3662,11 @@ func _draw_cartoes_dos_socos(y: float, marcar_melhor: bool) -> void:
 func _placar(texto: String, centro: Vector2, cor: Color) -> void:
 	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO)
 	var pos := Vector2(centro.x - medida.x * 0.5, centro.y + PLACAR_CORPO * 0.36)
-	for i in range(3):
-		draw_string_outline(
-			fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO,
-			int(PLACAR_CORPO * (0.16 + float(i) * 0.09)), Color(cor, 0.10)
-		)
+	# Um halo, em vez de três atlas de contorno sobrepostos a cada número.
+	draw_string_outline(
+		fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO,
+		int(PLACAR_CORPO * 0.25), Color(cor, 0.22)
+	)
 	draw_string_outline(
 		fonte, pos, texto, HORIZONTAL_ALIGNMENT_LEFT, -1, PLACAR_CORPO,
 		int(PLACAR_CORPO * 0.085), Color(Paleta.CONTORNO, 0.95)
@@ -4670,6 +4671,13 @@ func _decodificar_foto(path: String) -> void:
 	if FileAccess.file_exists(path):
 		var candidata := Image.new()
 		if candidata.load(ProjectSettings.globalize_path(path)) == OK and not candidata.is_empty():
+			# As fotos são miniaturas na tabela. Limita o upload e a memória
+			# sem alterar o arquivo original; o resize ocorre no worker.
+			var maior := maxi(candidata.get_width(), candidata.get_height())
+			if maior > 384:
+				var fator := 384.0 / float(maior)
+				candidata.resize(maxi(1, int(candidata.get_width() * fator)),
+					maxi(1, int(candidata.get_height() * fator)), Image.INTERPOLATE_BILINEAR)
 			imagem = candidata
 	_mutex_fotos.lock()
 	_fotos_decodificadas[path] = imagem
@@ -4697,12 +4705,13 @@ func _prewarm_fotos_do_ranking() -> void:
 ## tentativa depois -- `_photo_texture` reagenda sozinho quando alguém
 ## pedir essa foto de novo.
 func _colher_fotos_decodificadas() -> void:
+	_mutex_fotos.lock()
 	if _fotos_decodificadas.is_empty():
+		_mutex_fotos.unlock()
 		return
 	# A decodificação já acontece fora da linha principal; criar todas as
 	# texturas prontas no mesmo quadro apenas transferia a travada para a
 	# GPU. Publica uma por quadro e mantém as demais na fila.
-	_mutex_fotos.lock()
 	var path := str(_fotos_decodificadas.keys()[0])
 	var imagem = _fotos_decodificadas[path]
 	_fotos_decodificadas.erase(path)
@@ -4953,7 +4962,7 @@ func _tamanho_que_cabe(texto: String, tamanho_max: int, largura: float, letra: F
 			tamanho -= 2
 
 	if _cache_tamanho.size() >= CACHE_TAMANHO_TETO:
-		_cache_tamanho.clear()
+		_cache_tamanho.erase(_cache_tamanho.keys()[0])
 	_cache_tamanho[chave] = tamanho
 	return tamanho
 
@@ -5075,6 +5084,17 @@ func _letreiro_centrado(texto: String, y: float, tamanho: int, cor: Color, letra
 	_letreiro(texto, Vector2(540.0 - medida.x * 0.5, y), tamanho, cor, Color(0, 0, 0, 0), usada)
 
 ## Letreiro centrado numa largura, encolhendo até caber.
+func _texto_intro(texto: String, y: float, tamanho_visual: float, corpo_fixo: int, cor: Color, x := 60.0) -> void:
+	# Rasteriza sempre o mesmo corpo. Só os vértices mudam durante o pouso.
+	var fator := tamanho_visual / float(corpo_fixo)
+	var base := Transform2D(0.0, Vector2.ONE * zoom_impacto, 0.0,
+		_deslocamento + ALVO_DO_SOCO - ALVO_DO_SOCO * zoom_impacto)
+	var local := Transform2D(0.0, Vector2.ONE * fator, 0.0, Vector2(x + 480.0, y))
+	draw_set_transform_matrix(base * local)
+	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, corpo_fixo)
+	_letreiro(texto, Vector2(-medida.x * 0.5, 0.0), corpo_fixo, cor, Color(cor, cor.a * 0.28))
+	draw_set_transform_matrix(base)
+
 func _texto_arcade(texto: String, y: float, tamanho_max: int, cor: Color, largura: float, x := MARGEM) -> void:
 	var tamanho := _tamanho_que_cabe(texto, tamanho_max, largura * 0.94)
 	var medida := fonte.get_string_size(texto, HORIZONTAL_ALIGNMENT_LEFT, -1, tamanho)
