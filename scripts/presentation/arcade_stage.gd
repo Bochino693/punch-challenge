@@ -402,7 +402,7 @@ static func _intro_impacto(canvas: Control, time: float) -> void:
 			continue
 		var raio := lerpf(40.0, 780.0 + float(i) * 130.0, ease(onda, 0.35))
 		var cor: Color = [WHITE, GOLD, RED][i]
-		canvas.draw_arc(SOCO, raio, 0.0, TAU, 96, Color(cor, (1.0 - onda) * 0.75), 10.0 - float(i) * 2.0, true)
+		Traco.arco(canvas, SOCO, raio, Color(cor, (1.0 - onda) * 0.75), 10.0 - float(i) * 2.0)
 	var leque := _janela(time, T_SOCO, 0.7)
 	if leque < 1.0:
 		for i in range(26):

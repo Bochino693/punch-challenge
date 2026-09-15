@@ -131,7 +131,7 @@ static func _tunel_de_luz(canvas: CanvasItem, centro: Vector2, t: float, cor: Co
 		var fase := fmod(t * 1.6 + float(i) / 7.0, 1.0)
 		var raio := lerpf(1300.0, 90.0, fase)
 		var tinta: Color = cor if i % 2 == 0 else Paleta.AMBAR
-		canvas.draw_arc(centro, raio, 0.0, TAU, 96, Color(tinta, fase * (1.0 - t) * 0.55), 14.0, true)
+		Traco.arco(canvas, centro, raio, Color(tinta, fase * (1.0 - t) * 0.55), 14.0)
 
 static func _riscos_convergindo(canvas: CanvasItem, centro: Vector2, t: float, some: float) -> void:
 	for i in range(20):

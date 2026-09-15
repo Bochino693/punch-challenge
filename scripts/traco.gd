@@ -63,3 +63,67 @@ static func contorno(ci: CanvasItem, pontos: PackedVector2Array, cor: Color, esp
 	var fecho := pontos.duplicate()
 	fecho.append(pontos[0])
 	ci.draw_polyline(fecho, cor, espessura, true)
+
+
+## ======================================================================
+## ARCOS — a conta que ninguém fazia, paga em todo quadro.
+##
+## Um `draw_arc` com 96 segmentos e `antialiased = true` não é uma
+## chamada: é um polígono de 96 lados COM a geometria extra do
+## antisserrilhado, montada de novo a cada quadro. No instante do soco o
+## jogo desenhava sete desses só no túnel de luz, mais um por onda de
+## choque, mais três no farol — e o número de segmentos era 96 tanto
+## para um anel de 1300 pixels quanto para um de 90, em que 96 lados
+## descrevem um círculo com precisão de menos de um terço de pixel.
+##
+## Medido no impacto: 249 chamadas de desenho e 1554 itens por quadro,
+## contra 62 e 857 na tela de espera. É essa diferença que aparece como
+## "trava quando gera a pontuação".
+##
+## Duas contas, as duas baratas:
+##
+##   1. SEGMENTOS PELO RAIO. Um segmento a cada ~20 pixels de
+##      circunferência é o ponto em que o olho deixa de ver o polígono.
+##      Um anel grande continua com os 96 de sempre; um pequeno passa a
+##      custar um terço disso, com o mesmo desenho na tela.
+##
+##   2. ANTISSERRILHADO PELA FOLGA. Numa máquina que está dando conta,
+##      liso. Numa que não está — e o TV box é essa —, a borda em degrau
+##      de um anel que vive quatro décimos de segundo é invisível ao lado
+##      da animação engasgada que ela custa.
+##
+## `qualidade` é o mesmo número do vigia de `Desempenho`, entregue uma
+## vez por quadro em `main.gd`, como já acontece com o cenário, a moldura
+## e as partículas.
+static var qualidade := 1.0
+
+## Abaixo desta folga o antisserrilhado dos arcos sai de cena.
+const SUAVIZA_ACIMA_DE := 0.75
+
+## Comprimento de corda buscado, em pixels.
+const CORDA := 20.0
+
+static func segmentos(raio: float) -> int:
+	var ideal := int(TAU * maxf(raio, 1.0) / CORDA)
+	return clampi(ideal, 12, 96)
+
+## Um anel inteiro, com o custo proporcional ao tamanho dele.
+static func arco(
+	ci: CanvasItem, centro: Vector2, raio: float, cor: Color, espessura: float
+) -> void:
+	ci.draw_arc(
+		centro, raio, 0.0, TAU, segmentos(raio), cor, espessura,
+		qualidade >= SUAVIZA_ACIMA_DE
+	)
+
+## Um pedaço de anel. O número de segmentos acompanha o ÂNGULO, e não só
+## o raio: meia volta com os segmentos de uma volta inteira é o dobro do
+## necessário, e foi assim que a roda de "carregando" e o medidor do
+## placar estavam desenhados.
+static func setor(
+	ci: CanvasItem, centro: Vector2, raio: float, de: float, ate: float,
+	cor: Color, espessura: float
+) -> void:
+	var fatia := absf(ate - de) / TAU
+	var passos := maxi(6, int(segmentos(raio) * fatia))
+	ci.draw_arc(centro, raio, de, ate, passos, cor, espessura, qualidade >= SUAVIZA_ACIMA_DE)

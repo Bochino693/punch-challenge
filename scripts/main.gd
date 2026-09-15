@@ -114,8 +114,11 @@ const BOTOES_SIMPLES := {
 	"camera": Rect2(110, 410, 260, 60),
 	"trocar_camera": Rect2(390, 410, 260, 60),
 	"foto_teste": Rect2(670, 410, 300, 60),
-	"forcar_ponte": Rect2(110, 484, 400, 56),
-	"sondar_camera": Rect2(570, 484, 400, 56),
+	# Três na mesma linha: a exigência da câmera nasceu aqui e não cabia
+	# numa faixa nova sem empurrar a prévia para cima do diagnóstico.
+	"forcar_ponte": Rect2(110, 484, 280, 56),
+	"sondar_camera": Rect2(400, 484, 280, 56),
+	"camera_obrigatoria": Rect2(690, 484, 280, 56),
 	"diagnosticar": Rect2(110, 920, 400, 56),
 	"instalar_camera": Rect2(570, 920, 400, 56),
 	"testar_som": Rect2(300, 1498, 480, 60),
@@ -142,6 +145,7 @@ const PAGINA_DO_CONTROLE := {
 	"calibrar": 1,
 	"camera": 2, "trocar_camera": 2, "foto_teste": 2,
 	"forcar_ponte": 2, "sondar_camera": 2, "instalar_camera": 2, "diagnosticar": 2,
+	"camera_obrigatoria": 2,
 	"vol_musica": 2, "vol_efeitos": 2, "testar_som": 2,
 	"zerar": 3, "zerar_stats": 3, "zerar_ranking": 3, "reconectar": 3,
 	"teto_efeitos": 3,
@@ -441,6 +445,15 @@ var placa_respondeu := false
 ## Câmera e dados locais do proprietário. Nenhum deles depende da rede.
 var camera_service: CameraService
 var camera_enabled := true
+## A CÂMERA É CONDIÇÃO PARA JOGAR, e não um enfeite da partida.
+##
+## Ligada (o padrão), a rodada não começa e a ficha não é gasta enquanto
+## não houver imagem ao vivo. Desligada, a máquina volta ao
+## comportamento antigo — espera a webcam por alguns segundos e joga
+## assim mesmo. A chave existe para a bancada e para a manutenção: uma
+## máquina que não deixa nem abrir a tela de teste sem webcam é pior do
+## que uma que joga sem foto.
+var camera_obrigatoria := true
 ## O ÍNDICE E O BACK-END QUE JÁ FUNCIONARAM NESTA MÁQUINA.
 ##
 ## Descobrir a câmera é a parte cara: no Windows, varrer dez índices em
@@ -495,6 +508,9 @@ var pose_finished := false
 const ESPERA_MAXIMA_DA_CAMERA := 6.0
 var aguardando_camera := false
 var espera_da_camera := 0.0
+## Esta rodada já desistiu da câmera e segue sem foto. Só é possível com
+## a exigência desligada na Central — ver `camera_obrigatoria`.
+var pose_sem_camera := false
 ## A FOTO É DA POSE FINAL, NÃO DE QUALQUER MOMENTO DA CONTAGEM.
 ##
 ## Ver o comentário grande em `_processar_contagem`. O obturador só abre
@@ -627,6 +643,9 @@ func _exit_tree() -> void:
 		# fecha e deixa um PowerShell segurando a COM -- e a proxima
 		# partida nao consegue abrir a porta da propria maquina.
 		link.encerrar()
+	# A ÚLTIMA GRAVAÇÃO NÃO PODE FICAR NO AR. Mexer num ajuste e fechar a
+	# máquina em seguida perderia a mudança se ninguém esperasse o disco.
+	SettingsStore.encerrar()
 	_photo_cache.clear()
 
 ## Um lugar só onde os parâmetros da curva são saneados.
@@ -672,6 +691,9 @@ func _process(delta: float) -> void:
 	# O impacto não suspende mais a UI, partículas e relógios da rodada.
 	# O clarão/tremor já comunicam a pancada sem congelar a tela inteira.
 	hitstop_left = maxf(0.0, hitstop_left - delta)
+	# A gravação pendente sai assim que a anterior termina, e nunca no
+	# quadro em que ela foi pedida. Ver `SettingsStore.save_data_async`.
+	SettingsStore.bombear()
 	_colher_fotos_decodificadas()
 	desempenho.medir(delta)
 	# UM QUADRO ENGASGADO NÃO PODE VIRAR UM PULO NO JOGO — MAS O FREIO NÃO
@@ -711,6 +733,10 @@ func _process(delta: float) -> void:
 	# desenhos cada, em toda tela do jogo, do início ao fim — o único
 	# enfeite que ficava de fora do vigia de desempenho.
 	moldura.qualidade = desempenho.qualidade
+	# E OS ARCOS TAMBÉM. Eram a última camada cara que nunca encolhia:
+	# 96 segmentos com borda lisa, do anel de 1300 pixels ao de 90, em
+	# todo quadro do impacto. Ver `Traco.arco`.
+	Traco.qualidade = desempenho.qualidade
 	_socorro_da_camera(passo)
 	_laco_de_atracao(passo)
 	zoom_impacto = lerpf(zoom_impacto, zoom_alvo, clampf(passo * 7.0, 0.0, 1.0))
@@ -807,6 +833,22 @@ func _processar_abertura(delta: float) -> void:
 		)
 
 func _processar_contagem(delta: float) -> void:
+	# A POSE INTEIRA ACONTECE SOBRE IMAGEM AO VIVO — OU NÃO ACONTECE.
+	#
+	# A câmera estar viva no instante do START não garante que ela
+	# continue viva três segundos depois: a webcam engasga trocando a
+	# exposição, o cabo dá um tranco, a ponte religa. Quando isso
+	# acontecia no meio da contagem, o relógio seguia correndo em cima da
+	# última imagem que existiu — a pessoa via a própria cara PARADA na
+	# tela até a foto sair, e a foto era daquele quadro velho.
+	#
+	# Agora o relógio da pose PARA junto com a imagem e volta a andar
+	# quando ela volta. A contagem não pula números, a pose não é gasta
+	# esperando, e a foto é sempre de um quadro de agora.
+	if not pose_finished and not aguardando_camera and not pose_sem_camera \
+			and camera_enabled and camera_service != null and not camera_service.pronta():
+		aguardando_camera = true
+		espera_da_camera = 0.0
 	if aguardando_camera:
 		espera_da_camera += delta
 		var pronta := camera_service != null and camera_service.pronta()
@@ -828,8 +870,31 @@ func _processar_contagem(delta: float) -> void:
 			# A contagem NÃO anda: o relógio da pose só começa quando há
 			# imagem para fotografar.
 			return
+		# ESGOTOU A ESPERA SEM IMAGEM. Com a câmera exigida, a rodada não
+		# segue pela metade: ela é DESFEITA e a ficha volta. Cobrar por
+		# uma partida que vai entrar no ranking sem cara nenhuma é o
+		# oposto do que esta máquina vende.
+		if not pronta and camera_obrigatoria:
+			_devolver_credito()
+			_show_notice(motivo_da_recusa())
+			sons.play("start_negado", -3.0)
+			aguardando_camera = false
+			state = GameDef.State.IDLE
+			state_time = 0.0
+			_iniciar_transicao()
+			moldura.set_estado(LedFrame.PARADA)
+			return
 		aguardando_camera = false
 		if not pronta:
+			# ESTA RODADA VAI ATÉ O FIM SEM CÂMERA, E A DECISÃO É TOMADA
+			# UMA VEZ SÓ.
+			#
+			# Sem esta marca, o relógio da pose entrava num laço: a espera
+			# esgotava, a contagem andava um quadro, o vigia lá de cima via
+			# a câmera ainda muda e armava a espera de novo, zerando o
+			# cronômetro — para sempre. Numa máquina de bancada sem webcam
+			# a contagem simplesmente não passava de 3.
+			pose_sem_camera = true
 			_show_notice(
 				camera_service.estado_curto() if camera_service != null else "SEM CÂMERA"
 			)
@@ -1271,7 +1336,46 @@ func _pressionou_start() -> void:
 			if verdict_time >= 0.0:
 				_iniciar_rodada()
 
+## SEM CÂMERA NÃO COMEÇA. E A FICHA NÃO É GASTA.
+##
+## Esta é a regra nova, e ela substitui a espera com hora marcada. Antes
+## a máquina esperava seis segundos pela webcam e, passados eles, jogava
+## assim mesmo: a pessoa fazia a pose, a contagem zerava e o ranking
+## registrava o nome sem cara nenhuma. Num jogo cuja graça é aparecer com
+## a própria foto no quadro de recordes, uma partida sem foto é uma
+## partida entregue pela metade -- e a ficha já tinha sido cobrada.
+##
+## Agora a ordem se inverte: enquanto não há imagem AO VIVO, a rodada não
+## começa, a ficha não é consumida e a tela diz o que está faltando. Quem
+## precisa mexer na máquina sem webcam nenhuma (bancada, manutenção,
+## feira sem o cabo) desliga a exigência na Central, e aí volta o
+## comportamento antigo -- inclusive a espera com teto.
+##
+## A pergunta é `pronta()`, e ela é sobre a IMAGEM ESTAR MUDANDO, não
+## sobre o processo estar de pé: era essa confusão que deixava a contagem
+## correr em cima de um quadro congelado. Ver `CameraService.ao_vivo()`.
+func camera_liberou_a_rodada() -> bool:
+	if not camera_obrigatoria:
+		return true
+	if not camera_enabled or camera_service == null:
+		return false
+	return camera_service.pronta()
+
+## O que dizer a quem apertou START e a máquina não começou.
+func motivo_da_recusa() -> String:
+	if not camera_enabled:
+		return "CÂMERA DESLIGADA NA CENTRAL"
+	if camera_service == null:
+		return "CÂMERA INDISPONÍVEL"
+	return camera_service.estado_curto()
+
 func _iniciar_rodada() -> void:
+	# A CÂMERA VEM ANTES DA FICHA, e a ordem importa: recusar depois de
+	# descontar o crédito seria cobrar por uma partida que não aconteceu.
+	if not camera_liberou_a_rodada():
+		_show_notice(motivo_da_recusa())
+		sons.play("start_negado", -3.0)
+		return
 	if game_mode == "credit":
 		if credits <= 0:
 			# NEGADO TEM SOM PRÓPRIO, e não o de erro genérico: faltar
@@ -1304,6 +1408,7 @@ func _iniciar_rodada() -> void:
 	# de entregar o primeiro quadro, e a foto sai do nada ou não sai. A
 	# espera é o conserto óbvio, e é o que o operador pediu.
 	espera_da_camera = 0.0
+	pose_sem_camera = false
 	aguardando_camera = camera_enabled and camera_service != null and not camera_service.pronta()
 	_obturador_tardio_aberto = false
 	photo_retained = false
@@ -2680,6 +2785,12 @@ func _click_central(p: Vector2) -> void:
 		camera_enabled = not camera_enabled
 		camera_service.set_enabled(camera_enabled)
 		_show_notice(camera_service.status)
+	elif _tocou("camera_obrigatoria", p):
+		camera_obrigatoria = not camera_obrigatoria
+		_show_notice(
+			"SEM CÂMERA A MÁQUINA NÃO JOGA" if camera_obrigatoria
+			else "A MÁQUINA JOGA MESMO SEM CÂMERA"
+		)
 	elif _tocou("forcar_ponte", p):
 		camera_forcar_ponte = not camera_forcar_ponte
 		camera_ponte_escolhida = true
@@ -2913,6 +3024,7 @@ func _carregar() -> void:
 	botao_start = _mapa_de_botao(data.get("botao_start", {}), 6)
 	botao_credito = _mapa_de_botao(data.get("botao_credito", {}), 4)
 	camera_enabled = bool(data.get("camera_enabled", camera_enabled))
+	camera_obrigatoria = bool(data.get("camera_obrigatoria", camera_obrigatoria))
 	camera_index = int(data.get("camera_index", camera_index))
 	camera_backend = str(data.get("camera_backend", camera_backend))
 	camera_python = str(data.get("camera_python", camera_python))
@@ -2926,8 +3038,13 @@ func _carregar() -> void:
 	camera_mirrored = bool(data.get("camera_mirrored", camera_mirrored))
 	statistics = StatisticsStore.sanitize(data.get("statistics", {}))
 
+## O DISCO SAIU DA LINHA DO JOGO — ver `SettingsStore.save_data_async`.
+##
+## Este método é chamado ao fechar a rodada, no mesmo quadro em que o
+## número começa a subir. Escrever o arquivo ali era um engasgo garantido
+## em qualquer aparelho com memória lenta, e o TV box é exatamente isso.
 func _salvar() -> void:
-	SettingsStore.save_data({
+	SettingsStore.save_data_async({
 		"mode": game_mode,
 		"credits": credits,
 		"plays": plays,
@@ -2951,6 +3068,7 @@ func _salvar() -> void:
 		"botao_start": botao_start,
 		"botao_credito": botao_credito,
 		"camera_enabled": camera_enabled,
+		"camera_obrigatoria": camera_obrigatoria,
 		"camera_index": camera_index,
 		"camera_backend": camera_backend,
 		"camera_python": camera_python,
@@ -3296,7 +3414,7 @@ func _draw_farol(cor: Color) -> void:
 	for i in range(3):
 		var fase := fmod(animation_time / compasso + float(i) / 3.0, 1.0)
 		var raio := lerpf(330.0, 620.0, ease(fase, 0.45))
-		draw_arc(centro, raio, 0.0, TAU, 96, Color(cor, (1.0 - fase) * 0.55), 10.0, true)
+		Traco.arco(self, centro, raio, Color(cor, (1.0 - fase) * 0.55), 10.0)
 	var respiro := 0.5 + 0.5 * sin(animation_time * 2.2)
 	Icones.alvo(self, centro, lerpf(268.0, 288.0, respiro), cor)
 	# Cantos de mira em volta do alvo: dizem "é AQUI" sem escrever nada.
@@ -3371,8 +3489,25 @@ func _draw_show_idle() -> void:
 			_capitulo_da_marca(entrada)
 	_pontos_do_capitulo(capitulo, chegada)
 	var pulse := 0.8 + 0.2 * sin(animation_time * 2.6)
-	_cartao(Rect2(140, 1560, 800, 112), Color("d9122d"), Color(Paleta.AMBAR, pulse), chegada, 3.0)
-	_texto("PRESSIONE START", 1635.0, 46, Color(Color.WHITE, chegada))
+	# A MÁQUINA NÃO CONVIDA PARA O QUE ELA NÃO PODE FAZER.
+	#
+	# Enquanto a câmera não está entregando imagem, "PRESSIONE START" é
+	# uma promessa que a máquina vai negar no toque seguinte — e quem
+	# está na frente dela conclui que o botão quebrou. O convite só
+	# aparece quando a rodada pode mesmo começar; até lá, o mesmo cartão
+	# diz o que está faltando, com o anel girando para provar que a
+	# máquina está trabalhando nisso e não travada.
+	var liberado := camera_liberou_a_rodada()
+	_cartao(
+		Rect2(140, 1560, 800, 112), Color("d9122d") if liberado else Color("3a1b06"),
+		Color(Paleta.AMBAR if liberado else Paleta.CIANO, pulse), chegada, 3.0
+	)
+	if liberado:
+		_texto("PRESSIONE START", 1635.0, 46, Color(Color.WHITE, chegada))
+	else:
+		_texto("PREPARANDO A CÂMERA", 1608.0, 34, Color(Paleta.CIANO, chegada))
+		_texto(motivo_da_recusa(), 1652.0, 18, Color(Color.WHITE, 0.85 * chegada))
+		_carregando(Vector2(880.0, 1616.0), 22.0, Paleta.CIANO)
 	# O LUGAR DO CRÉDITO PISCA quando alguém aperta START sem saldo.
 	var cor_credito := Color(Paleta.CIANO, chegada)
 	if aviso_de_credito >= 0.0:
@@ -3520,12 +3655,12 @@ func _draw_score_hero() -> void:
 ## O anel não é enfeite: ele GIRA, e é o giro que prova que o programa
 ## está vivo. Uma barra parada em 40% diria menos do que este anel.
 func _carregando(centro: Vector2, raio: float, cor: Color, texto := "") -> void:
-	draw_arc(centro, raio, 0.0, TAU, 48, Color(cor, 0.16), 5.0, true)
+	Traco.arco(self, centro, raio, Color(cor, 0.16), 5.0)
 	var comeco := animation_time * 3.4
-	draw_arc(centro, raio, comeco, comeco + 1.5, 24, cor, 5.0, true)
+	Traco.setor(self, centro, raio, comeco, comeco + 1.5, cor, 5.0)
 	# Um segundo arco, mais lento e no sentido contrário: com um só, em
 	# giro constante, o olho perde a referência e o anel parece parado.
-	draw_arc(centro, raio * 0.62, -comeco * 0.7, -comeco * 0.7 + 0.9, 18, Color(cor, 0.55), 4.0, true)
+	Traco.setor(self, centro, raio * 0.62, -comeco * 0.7, -comeco * 0.7 + 0.9, Color(cor, 0.55), 4.0)
 	if not texto.is_empty():
 		_texto(texto, centro.y + raio + 40.0, 18, cor, HORIZONTAL_ALIGNMENT_CENTER, centro.x - 300.0, 600.0)
 
@@ -3901,8 +4036,8 @@ func _ranking_anuncio(t: float) -> void:
 			Color(Paleta.AMBAR, 0.30 * abre), 7.0, true
 		)
 	draw_circle(centro, raio, Color(Paleta.VERMELHO, 0.9), true, -1.0, true)
-	draw_arc(centro, raio, 0.0, TAU, 72, Paleta.AMBAR, 9.0, true)
-	draw_arc(centro, raio * 0.86, 0.0, TAU, 64, Color(Paleta.CREME, 0.45), 3.0, true)
+	Traco.arco(self, centro, raio, Paleta.AMBAR, 9.0)
+	Traco.arco(self, centro, raio * 0.86, Color(Paleta.CREME, 0.45), 3.0)
 
 	Icones.estrela(self, centro + Vector2(0.0, -raio * 0.44), raio * 0.20, Paleta.AMBAR)
 	_texto_arcade("VOCÊ ENTROU", centro.y - raio * 0.02, 74, Paleta.CREME, 620.0, 230.0)
@@ -4129,10 +4264,17 @@ func _central_camera() -> void:
 	_botao(BOTOES_SIMPLES["foto_teste"], "TESTAR FOTO", false, Paleta.ROSA, 16)
 	_botao(
 		BOTOES_SIMPLES["forcar_ponte"],
-		"PONTE FORÇADA" if camera_forcar_ponte else "USAR PONTE PYTHON",
-		camera_forcar_ponte, Paleta.VERDE, 16
+		"PONTE FORÇADA" if camera_forcar_ponte else "USAR PONTE",
+		camera_forcar_ponte, Paleta.VERDE, 15
 	)
-	_botao(BOTOES_SIMPLES["sondar_camera"], "PROCURAR CÂMERA DE NOVO", false, Paleta.CIANO, 16)
+	_botao(BOTOES_SIMPLES["sondar_camera"], "PROCURAR DE NOVO", false, Paleta.CIANO, 15)
+	# A REGRA QUE DECIDE SE A MÁQUINA JOGA SEM WEBCAM — ver
+	# `camera_liberou_a_rodada` em `_iniciar_rodada`.
+	_botao(
+		BOTOES_SIMPLES["camera_obrigatoria"],
+		"EXIGE CÂMERA" if camera_obrigatoria else "JOGA SEM CÂMERA",
+		camera_obrigatoria, Paleta.AMBAR, 15
+	)
 	var previa := Rect2(340, 556, 400, 220)
 	_cartao(previa, Color("1c060c"), Paleta.CARTAO_BORDA, 1.0, 2.0)
 	if camera_service != null and camera_service.estado == CameraService.Estado.EXAME:
